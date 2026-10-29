@@ -110,19 +110,25 @@ function analyze(){
   return {rows,weakTopics};
 }
 // Monta a URL do filtro do QConcursos (formulário GET de /questoes-de-concursos/questoes).
-// Parte do link salvo da matéria (disciplina, banca etc.) e ajusta só o que o foco precisa:
-// `q` = palavra-chave do assunto e `my_questions` = not_resolved (novas) ou wrong (que errei).
+// Ponto de partida: o link da matéria (completo) ou, na falta dele, o filtro base do concurso,
+// do qual só se aproveitam os campos comuns a todas as matérias (banca, cargo, anos...).
+// O foco ajusta o resto: `q` = assunto, `my_questions` = not_resolved/wrong e `difficulty[]`.
 const QC_QUESTIONS='https://www.qconcursos.com/questoes-de-concursos/questoes';
-function qcUrl(subject,assunto,mode){
-  const saved=state.qcLinks[subject]?.url;
-  const url=new URL(saved||QC_QUESTIONS);
-  const p=url.searchParams;
-  const keyword=assunto||(saved?'':subject);
+const QC_BASE_KEYS=['examining_board_ids[]','job_ids[]','institute_ids[]','publication_year[]','scholarity_ids[]','administrative_level_ids[]','modality_ids[]','sort','per_page'];
+// Acerto baixo → questões médias; acerto alto → questões mais difíceis.
+const difficultyFor=acc=>acc<.6?['2','3']:acc<.8?['3','4']:['4','5'];
+function qcUrl(subject,assunto,mode,acc){
+  const own=state.qcLinks[subject]?.url,base=state.qcLinks._base?.url;
+  const url=new URL(QC_QUESTIONS),p=url.searchParams;
+  if(own)url.search=new URL(own).search;
+  else if(base)for(const [k,v] of new URL(base).searchParams)if(QC_BASE_KEYS.includes(k))p.append(k,v);
+  for(const k of ['q','my_questions','page','difficulty[]'])p.delete(k);
+  const keyword=assunto||(own?'':subject);
   if(keyword)p.set('q',keyword);
   p.set('my_questions',mode);
+  if(mode==='not_resolved'&&acc!=null)difficultyFor(acc).forEach(d=>p.append('difficulty[]',d));
   p.set('exclude_nullified','true');
   p.set('exclude_outdated','true');
-  p.delete('page');
   return url.href;
 }
 function linkButton({href,label},secondary){const a=document.createElement('a');a.className='button'+(secondary?' secondary':'');a.href=href;a.target='_blank';a.rel='noopener noreferrer';a.textContent=label;return a}
@@ -163,12 +169,18 @@ function renderPerformance(){
     const div=document.createElement('div'),title=document.createElement('strong'),meta=document.createElement('div'),actions=document.createElement('div');
     div.className='focus-item';meta.className='muted';actions.className='actions';
     title.textContent=`${i+1}. ${row.subject}`;
+    // Dificuldade só é ajustada com amostra mínima (10 questões no assunto ou 20 na matéria).
+    const acc=topic&&topic.t>=10?topic.c/topic.t:row.t>=20?row.c/row.t:null;
     meta.textContent=(row.t?`${pct(row.c,row.t)}% de acerto em ${row.t} questões`:'Sem registros ainda')+(topic?` · assunto mais fraco: ${topic.assunto} (${pct(topic.c,topic.t)}%)`:'');
     actions.append(
-      linkButton({label:'Questões novas',href:qcUrl(row.subject,topic?.assunto,'not_resolved')}),
+      linkButton({label:'Questões novas',href:qcUrl(row.subject,topic?.assunto,'not_resolved',acc)}),
       linkButton({label:'Refazer as que errei',href:qcUrl(row.subject,topic?.assunto,'wrong')},true));
     div.append(title,meta,actions);
-    if(!state.qcLinks[row.subject]?.url){const tip=document.createElement('div');tip.className='note';tip.textContent='Sem filtro salvo para esta matéria: a busca usa só palavra-chave, sem limitar à VUNESP.';div.append(tip)}
+    const tip=document.createElement('div');tip.className='note';
+    const levels={2:'fácil',3:'média',4:'difícil',5:'muito difícil'};
+    tip.textContent=(acc!=null?`Dificuldade sugerida: ${difficultyFor(acc).map(d=>levels[d]).join(' e ')}. `:'')+
+      (state.qcLinks[row.subject]?.url?'Usando o filtro salvo da matéria.':state.qcLinks._base?.url?'Usando o filtro base + palavra-chave (salve o link da matéria para filtrar pela disciplina).':'Sem filtro salvo: busca só por palavra-chave, em todas as bancas.');
+    div.append(tip);
     return div;
   }));
   const top=focus[0];
@@ -195,10 +207,10 @@ function renderPerformance(){
   $('assuntos').replaceChildren(...used.map(a=>new Option(a)));
 }
 function renderLinks(){
-  $('linkCfg').replaceChildren(...subjects.map(s=>{
+  $('linkCfg').replaceChildren(...[['_base','Filtro base do concurso (banca, cargo, anos) — vale para todas as matérias'],...subjects.map(s=>[s,s])].map(([key,text])=>{
     const label=document.createElement('label'),input=document.createElement('input');
-    input.type='url';input.dataset.subject=s;input.placeholder='https://www.qconcursos.com/questoes-de-concursos/questoes?...';input.value=state.qcLinks[s]?.url||'';
-    label.append(s,input);return label;
+    input.type='url';input.dataset.subject=key;input.placeholder='https://www.qconcursos.com/questoes-de-concursos/questoes?...';input.value=state.qcLinks[key]?.url||'';
+    label.append(text,input);return label;
   }));
 }
 function renderDisc(){
