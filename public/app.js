@@ -41,7 +41,8 @@ function isQcUrl(u){try{const x=new URL(u);return x.protocol==='https:'&&(x.host
 
 function normalize(raw){
   raw=plain(raw);
-  const s={v:2,tasks:{},taskTimes:{},records:[],notes:String(raw.notes||''),notesTime:num(raw.notesTime),discursivas:[],deleted:{},qcLinks:{},updatedAt:num(raw.updatedAt)};
+  const s={v:2,tasks:{},taskTimes:{},goals:{},records:[],notes:String(raw.notes||''),notesTime:num(raw.notesTime),discursivas:[],deleted:{},qcLinks:{},updatedAt:num(raw.updatedAt)};
+  for(const [k,v] of Object.entries(plain(raw.goals))){const g=plain(v),n=Number(g.n);if(/^\d+-\d+$/.test(k)&&Number.isInteger(n)&&n>0&&n<=500)s.goals[k]={n,ts:num(g.ts)}}
   for(const [k,v] of Object.entries(plain(raw.tasks)))if(/^\d+-\d+$/.test(k))s.tasks[k]=!!v;
   for(const [k,v] of Object.entries(plain(raw.taskTimes)))if(k in s.tasks)s.taskTimes[k]=num(v);
   for(const [k,v] of Object.entries(plain(raw.deleted)))s.deleted[k]=num(v);
@@ -54,7 +55,9 @@ function normalize(raw){
     let id=typeof r.id==='string'&&r.id?r.id:'';
     // Registros antigos não tinham id: gera um determinístico para que dispositivos diferentes cheguem ao mesmo valor.
     if(!id){const base=[date,subject,correct,total].join('|');seen[base]=(seen[base]||0)+1;id='r-'+hash(base+'|'+seen[base])}
-    records.set(id,{id,subject,assunto,correct,total,date,ts:num(r.ts)||parseBR(date)});
+    // taskId liga o registro à tarefa do cronograma; theme agrupa as sessões de um mesmo tema para a revisão espaçada.
+    const taskId=/^\d+-\d+$/.test(r.taskId)?r.taskId:'',theme=String(r.theme||'').slice(0,200);
+    records.set(id,{id,subject,assunto,correct,total,date,ts:num(r.ts)||parseBR(date),taskId,theme});
   }
   const discs=new Map();
   for(const d of Array.isArray(raw.discursivas)?raw.discursivas:[]){
@@ -84,6 +87,7 @@ function merge(a,b){
   const nb=b.notesTime>a.notesTime||(b.notesTime===a.notesTime&&b.notes.length>a.notes.length)?b:a;
   m.notes=nb.notes;m.notesTime=nb.notesTime;
   for(const s of [a,b])for(const [k,v] of Object.entries(s.qcLinks))if(!m.qcLinks[k]||v.ts>m.qcLinks[k].ts)m.qcLinks[k]=v;
+  for(const s of [a,b])for(const [k,v] of Object.entries(s.goals))if(!m.goals[k]||v.ts>m.goals[k].ts)m.goals[k]=v;
   m.updatedAt=Math.max(a.updatedAt,b.updatedAt);
   return m;
 }
@@ -133,6 +137,109 @@ function qcUrl(subject,assunto,mode,acc){
 }
 function linkButton({href,label},secondary){const a=document.createElement('a');a.className='button'+(secondary?' secondary':'');a.href=href;a.target='_blank';a.rel='noopener noreferrer';a.textContent=label;return a}
 
+// ---------- Cronograma → questões ----------
+// Cada tarefa vira um tema de questões: matéria (pelo prefixo), palavra-chave (texto após ":") e meta.
+const SUBJECT_RULES=[
+  [/^CPP\b/,'Processo Penal'],[/^CPC\b|^Lei 6\.830|^Lei 9\.099/,'Processo Civil'],[/^CP\b|Penal\/CPP/,'Direito Penal'],
+  [/^CC\b|^LINDB/,'Direito Civil'],[/^Normas CGJ|^Lei 11\.608/,'Normas da Corregedoria'],
+  [/^(CF\b|Lei 10\.261|Lei 8\.429|Resolução CNJ|Constitucional|Legislação especial)/,'Constitucional e Administrativo'],
+  [/^Português/,'Português'],[/^(Matemática|Raciocínio)/,'Matemática e RL'],[/^Informática/,'Informática'],[/^Atualidades/,'Atualidades'],
+];
+const WEAK_MARK='*fracos*';
+function taskKeyword(text){
+  const i=text.indexOf(':');if(i<0)return '';
+  let k=text.slice(i+1).split(';')[0].trim()
+    .replace(/^\d+\s+questões\s*(de\s+)?/i,'').replace(/^revisão\s+(leve\s*)?(de\s+)?/i,'');
+  // Tarefas de reforço ("3 assuntos com maior erro", "pontos fracos"...) usam o assunto mais fraco do momento.
+  if(/erro|fracos|marcados|essenciais/i.test(k))return WEAK_MARK;
+  k=k.split(',')[0].trim();
+  return k.length>2&&!/^\d|mapa|cap[ií]tulo|diligências|logística|fórmulas/i.test(k)?k:'';
+}
+function taskInfo(id){
+  const [w,d]=id.split('-').map(Number),text=topics[w]?.[1][d]||'';
+  const subject=(SUBJECT_RULES.find(([re])=>re.test(text))||[])[1]||'';
+  const parsed=Number((/(\d+)\s+questões/.exec(text)||[])[1]);
+  const goal=state.goals[id]?.n||(parsed||(d===5?30:20));
+  return {id,text,subject,keyword:subject?taskKeyword(text):'',goal,theme:'task:'+id,week:w,day:d};
+}
+const DAY_MS=864e5;
+const startOfDay=ts=>new Date(ts).setHours(0,0,0,0);
+function todayInfo(){
+  const d=Math.round((startOfDay(Date.now())-START.getTime())/DAY_MS),idx=Math.max(0,Math.min(TOTAL_TASKS-1,d));
+  return {...taskInfo(Math.floor(idx/7)+'-'+idx%7),before:d<0,after:d>=TOTAL_TASKS};
+}
+const themeKey=r=>r.theme||(r.assunto?r.subject+'|'+r.assunto.toLowerCase():'');
+function themeStats(key){
+  const list=state.records.filter(r=>themeKey(r)===key);
+  const c=list.reduce((s,r)=>s+r.correct,0),t=list.reduce((s,r)=>s+r.total,0);
+  return {list,c,t,acc:t?c/t:null};
+}
+// Avaliação de uma sessão: abaixo de 75% o tema entra na fila de reforço.
+const WEAK=.75,GOOD=.85;
+function evaluate(acc){
+  if(acc==null)return {text:'Sem questões registradas',cls:''};
+  return acc>=GOOD?{text:'Ótimo: tema dominado',cls:'ok'}:acc>=WEAK?{text:'Bom: siga em frente',cls:'ok'}:acc>=.6?{text:'Atenção: entrou no reforço',cls:'warning'}:{text:'Reforçar: entrou no reforço',cls:'bad'};
+}
+// Revisão espaçada: tema fraco volta em 1, 3 e 7 dias; cada dia de revisão com ≥75% avança uma etapa,
+// abaixo disso recomeça. Depois da 3ª revisão boa o tema sai da fila. Tudo é derivado dos registros,
+// então a sincronização entre dispositivos não precisa de estado extra.
+const REVIEW_DAYS=[1,3,7];
+function reviewQueue(){
+  const groups=new Map();
+  for(const r of state.records){const k=themeKey(r);if(k){if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r)}}
+  const out=[];
+  for(const [key,list] of groups){
+    const days=new Map();
+    for(const r of list){const d=startOfDay(r.ts);const e=days.get(d)||{d,c:0,t:0};e.c+=r.correct;e.t+=r.total;days.set(d,e)}
+    const sessions=[...days.values()].sort((x,y)=>x.d-y.d);
+    let stage=0,weak=false;
+    for(const s of sessions){if(s.c/s.t<WEAK){weak=true;stage=0}else if(weak)stage++}
+    if(!weak||stage>=REVIEW_DAYS.length)continue;
+    const last=sessions[sessions.length-1],sample=list[list.length-1];
+    const info=key.startsWith('task:')?taskInfo(key.slice(5)):{text:sample.assunto,subject:sample.subject,keyword:sample.assunto};
+    out.push({key,stage,last,due:last.d+REVIEW_DAYS[stage]*DAY_MS,label:info.text,subject:info.subject||sample.subject,keyword:info.keyword===WEAK_MARK?'':info.keyword});
+  }
+  return out.sort((x,y)=>x.due-y.due);
+}
+function weakestKeyword(subject){return analyze().weakTopics.find(t=>t.subject===subject)?.assunto||''}
+
+// Bloco de prática: meta, avaliação, botões para o QConcursos e registro de acertos/erros.
+function practiceBlock({subject,keyword,theme,goal,taskId,label}){
+  const box=document.createElement('div');box.className='practice';
+  const kw=keyword===WEAK_MARK?weakestKeyword(subject):keyword;
+  const {c,t,acc}=themeStats(theme);
+  const status=document.createElement('div');status.className='practice-status';
+  const ev=evaluate(acc);
+  const done=document.createElement('span');
+  done.textContent=t?`${t}${goal?' de '+goal:''} questões · ${c} certas, ${t-c} erradas · ${pct(c,t)}%`:(goal?`Meta: ${goal} questões`:'Nenhuma questão registrada');
+  const badge=document.createElement('span');badge.className='badge '+ev.cls;badge.textContent=ev.text;
+  status.append(done);if(t)status.append(badge);
+  if(goal){const bar=document.createElement('progress');bar.max=goal;bar.value=Math.min(t,goal);status.append(bar)}
+  const where=document.createElement('div');where.className='note';
+  where.textContent=`${subject}${kw?' · assunto: '+kw:''}`+(state.qcLinks[subject]?.url?'':state.qcLinks._base?.url?' · filtro base (salve o link da matéria para filtrar pela disciplina)':' · sem filtro salvo: busca só por palavra-chave');
+  const links=document.createElement('div');links.className='actions';
+  const diffAcc=t>=10?acc:null;
+  links.append(linkButton({label:'Resolver questões',href:qcUrl(subject,kw,'not_resolved',diffAcc)}));
+  if(t)links.append(linkButton({label:'Refazer as que errei',href:qcUrl(subject,kw,'wrong')},true));
+  const form=document.createElement('div');form.className='fields';
+  const field=(text,cls)=>{const l=document.createElement('label'),i=document.createElement('input');i.type='number';i.min='0';i.inputMode='numeric';if(cls)l.className=cls;l.append(text+' ',i);return [l,i]};
+  const [lc,ic]=field('Acertei'),[lw,iw]=field('Errei');
+  const btn=document.createElement('button');btn.className='small';btn.textContent='Salvar';
+  form.append(lc,lw,btn);
+  if(taskId){const [lg,ig]=field('Meta','goal');ig.value=goal;ig.onchange=()=>{const n=Number(ig.value);if(Number.isInteger(n)&&n>0&&n<=500){state.goals[taskId]={n,ts:Date.now()};save();render()}};form.append(lg)}
+  btn.onclick=()=>{
+    const a=Number(ic.value||0),e=Number(iw.value||0);
+    if(!Number.isInteger(a)||!Number.isInteger(e)||a<0||e<0||a+e<1)return alert('Informe quantas acertou e quantas errou.');
+    state.records.push({id:crypto.randomUUID(),subject,assunto:kw||'',correct:a,total:a+e,date:new Date().toLocaleDateString('pt-BR'),ts:Date.now(),taskId:taskId||'',theme});
+    // Meta cumprida marca a tarefa como feita no cronograma.
+    if(taskId&&goal&&t+a+e>=goal&&!state.tasks[taskId]){state.tasks[taskId]=true;state.taskTimes[taskId]=Date.now()}
+    save();render();
+  };
+  box.append(status,where,links,form);
+  if(label){const l=document.createElement('strong');l.textContent=label;box.prepend(l)}
+  return box;
+}
+
 // ---------- Renderização ----------
 const week=$('week');
 function currentWeek(){return Math.max(0,Math.min(topics.length-1,Math.floor((new Date()-START)/604800000)))}
@@ -143,13 +250,22 @@ subjects.forEach(s=>$('subject').add(new Option(s)));
 function renderWeek(){
   const n=Number(week.value);
   $('focus').textContent=topics[n][0];
+  const today=todayInfo().id;
   $('daysList').replaceChildren(...topics[n][1].map((task,i)=>{
-    const id=n+'-'+i,label=document.createElement('label'),cb=document.createElement('input'),wrap=document.createElement('div'),head=document.createElement('strong'),text=document.createElement('div');
-    label.className='day';cb.type='checkbox';cb.checked=!!state.tasks[id];
+    const id=n+'-'+i,info=taskInfo(id),card=document.createElement('div'),label=document.createElement('label'),cb=document.createElement('input'),wrap=document.createElement('div'),head=document.createElement('strong'),text=document.createElement('div');
+    card.className='day'+(id===today?' today':'');label.className='day-top';cb.type='checkbox';cb.checked=!!state.tasks[id];
     cb.onchange=()=>{state.tasks[id]=cb.checked;state.taskTimes[id]=Date.now();save();render()};
-    head.textContent=weekdays[i]+' · '+(i===5?'3h':'2h');
+    head.textContent=weekdays[i]+' · '+(i===5?'3h':'2h')+(id===today?' · hoje':'');
     text.textContent=task;text.className=cb.checked?'done':'';
-    wrap.append(head,text);label.append(cb,wrap);return label;
+    wrap.append(head,text);label.append(cb,wrap);card.append(label);
+    if(info.subject){
+      // Hoje: bloco aberto. Demais dias: recolhido, com o resumo no título.
+      const {c,t}=themeStats(info.theme);
+      const det=document.createElement('details'),sum=document.createElement('summary');
+      sum.textContent=`Questões · meta ${info.goal}`+(t?` · ${t} feitas (${pct(c,t)}%)`:'');
+      det.open=id===today;det.append(sum,practiceBlock(info));card.append(det);
+    }
+    return card;
   }));
 }
 function renderHome(){
@@ -162,29 +278,27 @@ function renderHome(){
   $('accuracy').textContent=t?pct(c,t)+'%':'—';
 }
 function renderPerformance(){
-  const {rows,weakTopics}=analyze();
-  // Foco sugerido: três matérias prioritárias, cada uma com o assunto mais fraco quando houver.
-  const focus=rows.slice(0,3).map(row=>({row,topic:weakTopics.find(tp=>tp.subject===row.subject)}));
-  $('focusList').replaceChildren(...focus.map(({row,topic},i)=>{
-    const div=document.createElement('div'),title=document.createElement('strong'),meta=document.createElement('div'),actions=document.createElement('div');
-    div.className='focus-item';meta.className='muted';actions.className='actions';
-    title.textContent=`${i+1}. ${row.subject}`;
-    // Dificuldade só é ajustada com amostra mínima (10 questões no assunto ou 20 na matéria).
-    const acc=topic&&topic.t>=10?topic.c/topic.t:row.t>=20?row.c/row.t:null;
-    meta.textContent=(row.t?`${pct(row.c,row.t)}% de acerto em ${row.t} questões`:'Sem registros ainda')+(topic?` · assunto mais fraco: ${topic.assunto} (${pct(topic.c,topic.t)}%)`:'');
-    actions.append(
-      linkButton({label:'Questões novas',href:qcUrl(row.subject,topic?.assunto,'not_resolved',acc)}),
-      linkButton({label:'Refazer as que errei',href:qcUrl(row.subject,topic?.assunto,'wrong')},true));
-    div.append(title,meta,actions);
-    const tip=document.createElement('div');tip.className='note';
-    const levels={2:'fácil',3:'média',4:'difícil',5:'muito difícil'};
-    tip.textContent=(acc!=null?`Dificuldade sugerida: ${difficultyFor(acc).map(d=>levels[d]).join(' e ')}. `:'')+
-      (state.qcLinks[row.subject]?.url?'Usando o filtro salvo da matéria.':state.qcLinks._base?.url?'Usando o filtro base + palavra-chave (salve o link da matéria para filtrar pela disciplina).':'Sem filtro salvo: busca só por palavra-chave, em todas as bancas.');
-    div.append(tip);
+  const {rows}=analyze();
+  // Hoje: a tarefa do dia do cronograma, pronta para resolver e registrar.
+  const today=todayInfo(),todayBox=$('todayPanel');
+  const head=document.createElement('p');head.className='muted';
+  head.textContent=(today.before?`O plano começa em ${START.toLocaleDateString('pt-BR')}. Primeira tarefa — `:today.after?'Plano concluído. Última tarefa — ':'')+`Semana ${today.week+1}, ${weekdays[today.day]}: ${today.text}`;
+  if(today.subject)todayBox.replaceChildren(head,practiceBlock(today));
+  else{const n=document.createElement('p');n.className='note';n.textContent='Tarefa sem questões por matéria (simulado, correção ou descanso). Registre os resultados por matéria no formulário abaixo.';todayBox.replaceChildren(head,n)}
+  // Reforço: temas fracos em revisão espaçada; primeiro os vencidos.
+  const queue=reviewQueue(),endToday=startOfDay(Date.now())+DAY_MS;
+  const due=queue.filter(q=>q.due<endToday);
+  $('reviewList').replaceChildren(...(queue.length?queue.map(q=>{
+    const div=document.createElement('div');div.className='focus-item'+(q.due<endToday?' due':'');
+    const late=Math.floor((startOfDay(Date.now())-q.due)/DAY_MS);
+    const when=document.createElement('div');when.className='note';
+    when.textContent=(q.due<endToday?(late>0?`Atrasada há ${late} dia(s)`:'Revisar hoje'):`Próxima revisão em ${new Date(q.due).toLocaleDateString('pt-BR')}`)+
+      ` · revisão ${q.stage+1} de ${REVIEW_DAYS.length} (sugestão: 10 questões) · último dia: ${q.last.c}/${q.last.t} (${pct(q.last.c,q.last.t)}%)`;
+    div.append(practiceBlock({subject:q.subject,keyword:q.keyword,theme:q.key,goal:0,label:q.label}),when);
     return div;
-  }));
-  const top=focus[0];
-  $('homeFocus').textContent=state.records.length?`Próximo foco: ${top.row.subject}${top.topic?' — '+top.topic.assunto:''}.`:'Registre suas primeiras questões para receber um foco personalizado.';
+  }):[Object.assign(document.createElement('p'),{className:'muted',textContent:'Nenhum tema em reforço. Temas com menos de 75% de acerto aparecem aqui automaticamente.'})]));
+  const todayStats=today.subject?themeStats(today.theme):{t:0};
+  $('homeFocus').textContent=`Hoje: ${today.text}`+(today.subject?` · ${todayStats.t} de ${today.goal} questões`:'')+(due.length?` · ${due.length} revisão(ões) pendente(s)`:'');
   const maxP=Math.max(...rows.map(r=>r.priority),.01);
   $('subjectTable').replaceChildren(...rows.map(r=>{
     const tr=document.createElement('tr'),bar=document.createElement('div'),fill=document.createElement('span');
@@ -231,10 +345,10 @@ week.onchange=renderWeek;
 $('today').onclick=()=>{week.value=currentWeek();renderWeek()};
 $('subject').onchange=renderPerformance;
 $('add').onclick=()=>{
-  const c=Number($('correct').value),t=Number($('total').value);
-  if(!Number.isInteger(c)||!Number.isInteger(t)||t<1||c<0||c>t)return alert('Informe valores válidos.');
-  state.records.push({id:crypto.randomUUID(),subject:$('subject').value,assunto:$('assunto').value.trim().slice(0,120),correct:c,total:t,date:new Date().toLocaleDateString('pt-BR'),ts:Date.now()});
-  $('assunto').value='';save();render();
+  const c=Number($('correct').value||0),w=Number($('wrong').value||0);
+  if(!Number.isInteger(c)||!Number.isInteger(w)||c<0||w<0||c+w<1)return alert('Informe quantas acertou e quantas errou.');
+  state.records.push({id:crypto.randomUUID(),subject:$('subject').value,assunto:$('assunto').value.trim().slice(0,120),correct:c,total:c+w,date:new Date().toLocaleDateString('pt-BR'),ts:Date.now()});
+  $('assunto').value='';$('correct').value='';$('wrong').value='';save();render();
 };
 $('saveLinks').onclick=()=>{
   const inputs=[...$('linkCfg').querySelectorAll('input')];
@@ -293,4 +407,6 @@ $('goWeek').addEventListener('click',()=>showView('cronograma'));
 $('themeToggle').addEventListener('click',()=>{const dark=document.documentElement.classList.toggle('dark');try{localStorage.setItem('tjsp-theme',dark?'dark':'light')}catch{}});
 
 render();renderDisc();renderLinks();
+// Atalho por URL: index.html#desempenho abre direto a aba (útil como favorito no celular).
+if(labels[location.hash.slice(1)])showView(location.hash.slice(1));
 if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(()=>{});

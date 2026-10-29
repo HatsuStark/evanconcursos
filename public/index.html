@@ -46,7 +46,7 @@
       <button id="goWeek">Ver tarefas da semana →</button>
     </section>
     <section class="panel">
-      <h2>Foco de questões</h2>
+      <h2>Questões de hoje</h2>
       <div id="homeFocus" class="muted"></div>
       <div class="actions"><button class="secondary" data-go="desempenho">+ Registrar questões</button><button class="secondary" data-go="discursivas">+ Nova discursiva</button></div>
     </section>
@@ -62,22 +62,15 @@
   </section>
 
   <section class="view" id="view-desempenho" hidden>
-    <p class="muted sectionintro">Registre cada bateria de questões. O foco sugerido se ajusta aos seus erros.</p>
+    <p class="muted sectionintro">Resolva no QConcursos com o filtro pronto e registre quantas acertou e errou. Temas abaixo de 75% entram no reforço com revisões em 1, 3 e 7 dias.</p>
     <section class="panel">
-      <h2>Registrar questões</h2>
-      <div class="fields">
-        <select id="subject" aria-label="Matéria"></select>
-        <input id="assunto" class="grow" list="assuntos" maxlength="120" placeholder="Assunto (opcional), ex.: busca e apreensão" aria-label="Assunto">
-        <datalist id="assuntos"></datalist>
-        <label>Acertos <input id="correct" type="number" min="0" value="15"></label>
-        <label>Total <input id="total" type="number" min="1" value="20"></label>
-        <button id="add">Registrar</button>
-      </div>
+      <h2>Questões de hoje</h2>
+      <div id="todayPanel"></div>
     </section>
     <section class="panel">
-      <h2>Foco sugerido</h2>
-      <p class="muted">Matérias e assuntos com menor acerto, com mais peso para os resultados recentes. Matérias sem registros entram com estimativa neutra até você praticar.</p>
-      <div id="focusList" class="focus"></div>
+      <h2>Reforço e revisões</h2>
+      <p class="muted">Cada revisão com 75% ou mais avança uma etapa; abaixo disso, o tema recomeça. Após a 3ª revisão boa, o tema sai da lista.</p>
+      <div id="reviewList" class="focus"></div>
       <details>
         <summary>Configurar filtros do QConcursos</summary>
         <p class="note">No QConcursos, monte o filtro, clique em Filtrar e cole aqui a URL da página de resultados. O filtro base (banca, cargo, anos) vale para todas as matérias; o link de uma matéria (com a disciplina) tem prioridade sobre ele. O app acrescenta sozinho o assunto mais fraco, "Não resolvidas" ou "Errei" e a dificuldade conforme seu acerto.</p>
@@ -88,6 +81,18 @@
     <section class="panel">
       <h2>Desempenho por matéria</h2>
       <div class="tablewrap"><table class="table"><thead><tr><th>Matéria</th><th class="num">Questões</th><th class="num">Acerto</th><th>Prioridade</th></tr></thead><tbody id="subjectTable"></tbody></table></div>
+    </section>
+    <section class="panel">
+      <h2>Registrar outra bateria</h2>
+      <p class="muted">Para questões fora do cronograma (simulados, revisões livres).</p>
+      <div class="fields">
+        <select id="subject" aria-label="Matéria"></select>
+        <input id="assunto" class="grow" list="assuntos" maxlength="120" placeholder="Assunto (opcional), ex.: busca e apreensão" aria-label="Assunto">
+        <datalist id="assuntos"></datalist>
+        <label>Acertei <input id="correct" type="number" min="0"></label>
+        <label>Errei <input id="wrong" type="number" min="0"></label>
+        <button id="add">Registrar</button>
+      </div>
     </section>
     <section class="panel"><h2>Histórico recente</h2><div id="records" class="muted"></div></section>
     <section class="panel">
