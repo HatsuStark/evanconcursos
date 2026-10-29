@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#142d4e">
+<title>TJSP Estudos · Oficial de Justiça</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="styles.css">
+<script src="theme.js"></script>
+<script src="config.js"></script>
+</head>
+<body>
+<div class="shell">
+<aside class="sidebar">
+  <div class="brand"><div class="brandmark">§</div><div>TJSP Estudos<small>Oficial de Justiça · 2027</small></div></div>
+  <nav class="nav" aria-label="Menu principal">
+    <button class="navitem active" data-view="inicio"><span class="symbol">⌂</span> Início</button>
+    <button class="navitem" data-view="cronograma"><span class="symbol">▦</span> Cronograma</button>
+    <button class="navitem" data-view="desempenho"><span class="symbol">◫</span> Desempenho</button>
+    <button class="navitem" data-view="discursivas"><span class="symbol">✎</span> Discursivas</button>
+    <button class="navitem" data-view="conta"><span class="symbol">⚙</span> Conta e backup</button>
+  </nav>
+  <div class="sidebarbottom">15 horas por semana<br>Prova: 14 de março de 2027</div>
+</aside>
+<main class="workspace">
+  <div class="topbar">
+    <div><div class="eyebrow">Minha preparação</div><h1 id="pageTitle">Visão geral</h1></div>
+    <div class="topactions"><span class="pill">TJSP · VUNESP</span><button class="themebtn" id="themeToggle" aria-label="Alternar modo escuro">☾</button></div>
+  </div>
+
+  <section class="view" id="view-inicio">
+    <div class="panel welcome"><div class="eyebrow">Seu próximo objetivo</div><h2>Um dia de cada vez.</h2><div class="muted">Continue de onde parou. Seu progresso até a prova fica aqui.</div></div>
+    <div class="stats">
+      <div class="stat"><strong id="days">—</strong><small>Dias restantes</small></div>
+      <div class="stat"><strong id="done">0</strong><small>Tarefas feitas</small></div>
+      <div class="stat"><strong id="accuracy">—</strong><small>Taxa de acertos</small></div>
+    </div>
+    <section class="panel">
+      <h2>Progresso geral</h2>
+      <progress id="progress" max="133" value="0"></progress>
+      <div id="progressLabel" class="tag"></div>
+      <p class="muted">2h nos dias úteis · 3h sábado · 2h domingo</p>
+      <button id="goWeek">Ver tarefas da semana →</button>
+    </section>
+    <section class="panel">
+      <h2>Foco de questões</h2>
+      <div id="homeFocus" class="muted"></div>
+      <div class="actions"><button class="secondary" data-go="desempenho">+ Registrar questões</button><button class="secondary" data-go="discursivas">+ Nova discursiva</button></div>
+    </section>
+  </section>
+
+  <section class="view" id="view-cronograma" hidden>
+    <p class="muted sectionintro">As 19 semanas do seu plano, com artigos, exercícios e revisões.</p>
+    <section class="panel">
+      <div class="fields"><label for="week">Semana</label><select id="week"></select><button class="secondary" id="today">Semana atual</button></div>
+      <h3 id="focus"></h3>
+      <div id="daysList" class="days"></div>
+    </section>
+  </section>
+
+  <section class="view" id="view-desempenho" hidden>
+    <p class="muted sectionintro">Registre cada bateria de questões. O foco sugerido se ajusta aos seus erros.</p>
+    <section class="panel">
+      <h2>Registrar questões</h2>
+      <div class="fields">
+        <select id="subject" aria-label="Matéria"></select>
+        <input id="assunto" class="grow" list="assuntos" maxlength="120" placeholder="Assunto (opcional), ex.: busca e apreensão" aria-label="Assunto">
+        <datalist id="assuntos"></datalist>
+        <label>Acertos <input id="correct" type="number" min="0" value="15"></label>
+        <label>Total <input id="total" type="number" min="1" value="20"></label>
+        <button id="add">Registrar</button>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Foco sugerido</h2>
+      <p class="muted">Matérias e assuntos com menor acerto, com mais peso para os resultados recentes. Matérias sem registros entram com estimativa neutra até você praticar.</p>
+      <div id="focusList" class="focus"></div>
+      <details>
+        <summary>Configurar filtros do QConcursos</summary>
+        <p class="note">No QConcursos, filtre por banca VUNESP e pela disciplina (e, se quiser, assuntos e cargo). Copie a URL da página de resultados e cole na matéria correspondente. Sem link, o botão faz uma busca no Google restrita ao QConcursos.</p>
+        <div id="linkCfg" class="linkcfg"></div>
+        <p><button id="saveLinks">Salvar links</button> <span id="linkStatus" class="note" aria-live="polite"></span></p>
+      </details>
+    </section>
+    <section class="panel">
+      <h2>Desempenho por matéria</h2>
+      <div class="tablewrap"><table class="table"><thead><tr><th>Matéria</th><th class="num">Questões</th><th class="num">Acerto</th><th>Prioridade</th></tr></thead><tbody id="subjectTable"></tbody></table></div>
+    </section>
+    <section class="panel"><h2>Histórico recente</h2><div id="records" class="muted"></div></section>
+    <section class="panel">
+      <h2>Caderno de erros</h2>
+      <p class="muted">Anote artigos e dúvidas. O texto é salvo automaticamente.</p>
+      <textarea id="notes" placeholder="Ex.: CPP art. 245 — revisar busca domiciliar..."></textarea>
+    </section>
+  </section>
+
+  <section class="view" id="view-discursivas" hidden>
+    <p class="muted sectionintro">Treine a fundamentação, aplicação ao caso e conclusão.</p>
+    <section class="panel">
+      <h2>Nova resposta discursiva</h2>
+      <div class="fields">
+        <select id="discSubject"><option>Processo Penal</option><option>Direito Penal</option><option>Processo Civil</option><option>Direito Civil</option><option>Normas da Corregedoria</option></select>
+        <label>Nota (0–10) <input id="discScore" type="number" min="0" max="10" step="0.5" placeholder="—"></label>
+      </div>
+      <p><input class="full" id="discTitle" placeholder="Tema ou enunciado da questão"></p>
+      <textarea id="discAnswer" placeholder="Escreva sua resposta discursiva..."></textarea>
+      <p><button id="discAdd">Salvar resposta</button></p>
+    </section>
+    <section class="panel"><h2>Minhas respostas</h2><div id="discList"></div></section>
+  </section>
+
+  <section class="view" id="view-conta" hidden>
+    <p class="muted sectionintro">Gerencie o acesso e proteja seus dados de estudo.</p>
+    <section class="panel">
+      <h2>Conta e sincronização</h2>
+      <div id="cloudSetup" class="status warning">Configure o Supabase no arquivo config.js para ativar o login. O modo local continua disponível.</div>
+      <div id="authArea"><div class="auth-grid">
+        <input id="email" type="email" placeholder="Seu e-mail" autocomplete="email">
+        <input id="password" type="password" placeholder="Senha (mínimo 6 caracteres)" autocomplete="current-password">
+        <button id="signIn">Entrar</button><button class="secondary" id="signUp">Criar conta</button>
+      </div></div>
+      <div id="loggedArea" class="hidden"><p id="userInfo"></p><button class="secondary" id="signOut">Sair da conta</button></div>
+      <p id="syncStatus" class="status" aria-live="polite">Progresso salvo localmente neste dispositivo.</p>
+      <button id="syncNow" class="secondary hidden">Sincronizar agora</button>
+    </section>
+    <section class="panel">
+      <h2>Backup e transferência</h2>
+      <p class="muted">Exporte seu progresso em JSON. Importar um backup mescla com os dados atuais, sem apagar nada.</p>
+      <div class="actions"><button id="export">Exportar backup</button><button class="secondary" id="importButton">Importar backup</button><input type="file" id="importFile" accept="application/json" hidden></div>
+    </section>
+  </section>
+</main>
+</div>
+<nav class="bottomnav" aria-label="Navegação inferior">
+  <button class="navitem active" data-view="inicio"><span class="symbol">⌂</span>Início</button>
+  <button class="navitem" data-view="cronograma"><span class="symbol">▦</span>Plano</button>
+  <button class="navitem" data-view="desempenho"><span class="symbol">◫</span>Questões</button>
+  <button class="navitem" data-view="discursivas"><span class="symbol">✎</span>Discursivas</button>
+  <button class="navitem" data-view="conta"><span class="symbol">⚙</span>Conta</button>
+</nav>
+<script src="app.js"></script>
+<script type="module" src="cloud.js"></script>
+</body>
+</html>

@@ -1,54 +1,50 @@
 # TJSP Estudos — aplicativo web
 
-Painel minimalista e responsivo para o concurso TJSP Oficial de Justiça 2027, com cronograma de 19 semanas, registro de desempenho, caderno de erros, discursivas, login Supabase e sincronização entre dispositivos.
+Painel minimalista e responsivo para o concurso TJSP Oficial de Justiça 2027, com cronograma de 19 semanas, registro de desempenho por matéria e assunto, foco adaptativo de questões, caderno de erros, discursivas, login Supabase e sincronização entre dispositivos.
 
 ## Estrutura
 
-- `index.html`: interface, estilos e lógica do painel.
-- `cloud.js`: autenticação e sincronização Supabase.
-- `config.js`: URL do Supabase e chave **pública** do projeto.
-- `supabase.sql`: esquema e políticas de segurança (executar no SQL Editor; não é necessário hospedar).
-- `manifest.webmanifest`, `sw.js`, `icon.svg`: suporte básico a PWA.
-- `_headers`: cabeçalhos de segurança para Netlify.
-- `.gitignore`: arquivos locais que não devem ir ao repositório.
+- `public/`: tudo o que é publicado.
+  - `index.html`: interface.
+  - `styles.css`: estilos.
+  - `theme.js`: aplica o tema claro/escuro antes da renderização (segue o sistema se não houver escolha salva).
+  - `app.js`: lógica do painel, validação e mesclagem do estado, foco adaptativo.
+  - `cloud.js`: autenticação e sincronização Supabase.
+  - `config.js`: URL do Supabase e chave **pública** do projeto.
+  - `manifest.webmanifest`, `sw.js`, ícones: suporte a PWA.
+  - `_headers`: cabeçalhos de segurança (inclui CSP) para Netlify.
+- `supabase.sql`: esquema e políticas de segurança (executar no SQL Editor; não é publicado).
+- `netlify.toml`: publica somente a pasta `public/`.
 
 ## Rodar localmente
 
-Execute um servidor estático na pasta, por exemplo:
-
 ```bash
-python -m http.server 8080
+python -m http.server 8080 -d public
 ```
 
 Abra `http://localhost:8080`.
 
+## Foco adaptativo de questões
+
+Cada registro de questões tem matéria e, opcionalmente, assunto. O painel calcula um acerto suavizado por matéria e por assunto (começa em 70% e dá mais peso aos últimos 30 dias) e sugere as três matérias prioritárias, com o assunto mais fraco de cada uma.
+
+O QConcursos não oferece API pública, então o app não monta filtros com IDs internos. Em **Desempenho → Configurar filtros do QConcursos**, cole para cada matéria a URL de um filtro criado no site (banca VUNESP + disciplina). O botão do foco abre esse filtro; sem link configurado, faz uma busca no Google restrita ao QConcursos com a matéria e o assunto.
+
+## Sincronização
+
+O estado guarda carimbos de tempo por tarefa, notas e links, e registra exclusões. A cada sincronização o app busca a nuvem, mescla com os dados locais e envia o resultado. Assim, progresso feito offline ou em outro dispositivo não é sobrescrito. Importar um backup também mescla, em vez de substituir.
+
 ## Supabase
 
-O `config.js` já contém o endereço do projeto e uma **publishable key** pública. Nunca coloque `service_role`, `sb_secret_` ou senhas no código. Execute `supabase.sql` no SQL Editor caso ainda não tenha feito isso. Configure **Authentication → URL Configuration** com o domínio definitivo publicado e habilite o provedor Email.
+O `config.js` contém o endereço do projeto e uma **publishable key** pública. Nunca coloque `service_role`, `sb_secret_` ou senhas no código. Execute `supabase.sql` no SQL Editor caso ainda não tenha feito isso. Configure **Authentication → URL Configuration** com o domínio definitivo publicado e habilite o provedor Email.
 
-## Git
+## Publicação (Netlify)
 
-```bash
-git init
-git add .
-git commit -m "feat: painel TJSP responsivo com Supabase"
-git branch -M main
-```
+Conecte o repositório do GitHub no Netlify. O `netlify.toml` já define `public` como diretório de publicação, sem etapa de build. Depois, cadastre a URL do site no Supabase (Site URL e Redirect URLs).
 
-Para enviar ao GitHub, crie um repositório vazio e depois:
-
-```bash
-git remote add origin https://github.com/SEU-USUARIO/SEU-REPOSITORIO.git
-git push -u origin main
-```
-
-## Publicação
-
-Publique os arquivos estáticos no Netlify, com diretório de publicação `.`. Antes de publicar, exclua `supabase.sql` da pasta de distribuição (não contém segredos, mas não precisa ficar público). Configure no Supabase a URL do site e os redirecionamentos de autenticação.
+Se mudar o projeto Supabase, atualize também o `connect-src` da CSP em `public/_headers`.
 
 ## Observações
 
-- A sincronização usa um único JSON por usuário e a última gravação prevalece; evite edições simultâneas em dispositivos diferentes.
-- Os dados também são salvos no navegador; use a função de backup JSON periodicamente.
+- Os dados também ficam salvos no navegador; use o backup JSON periodicamente.
 - O projeto é uma aplicação estática, sem `npm install` ou etapa de build.
-- O código não foi validado em testes automatizados de navegador nesta entrega.

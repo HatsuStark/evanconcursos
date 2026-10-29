@@ -1,0 +1,3 @@
+# Site estático, sem build. Só a pasta public/ é publicada.
+[build]
+  publish = "public"
