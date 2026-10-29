@@ -109,10 +109,21 @@ function analyze(){
   const weakTopics=Object.values(byTopic).filter(e=>e.t>=5).map(e=>({...e,priority:priority(e)})).sort((x,y)=>y.priority-x.priority);
   return {rows,weakTopics};
 }
-const searchUrl=(subject,assunto)=>'https://www.google.com/search?q='+encodeURIComponent(`site:qconcursos.com/questoes-de-concursos VUNESP ${subject}${assunto?' '+assunto:''}`);
-function questionLink(subject,assunto){
+// Monta a URL do filtro do QConcursos (formulário GET de /questoes-de-concursos/questoes).
+// Parte do link salvo da matéria (disciplina, banca etc.) e ajusta só o que o foco precisa:
+// `q` = palavra-chave do assunto e `my_questions` = not_resolved (novas) ou wrong (que errei).
+const QC_QUESTIONS='https://www.qconcursos.com/questoes-de-concursos/questoes';
+function qcUrl(subject,assunto,mode){
   const saved=state.qcLinks[subject]?.url;
-  return saved?{href:saved,label:'Abrir filtro no QConcursos'}:{href:searchUrl(subject,assunto),label:'Buscar questões VUNESP'};
+  const url=new URL(saved||QC_QUESTIONS);
+  const p=url.searchParams;
+  const keyword=assunto||(saved?'':subject);
+  if(keyword)p.set('q',keyword);
+  p.set('my_questions',mode);
+  p.set('exclude_nullified','true');
+  p.set('exclude_outdated','true');
+  p.delete('page');
+  return url.href;
 }
 function linkButton({href,label},secondary){const a=document.createElement('a');a.className='button'+(secondary?' secondary':'');a.href=href;a.target='_blank';a.rel='noopener noreferrer';a.textContent=label;return a}
 
@@ -153,9 +164,12 @@ function renderPerformance(){
     div.className='focus-item';meta.className='muted';actions.className='actions';
     title.textContent=`${i+1}. ${row.subject}`;
     meta.textContent=(row.t?`${pct(row.c,row.t)}% de acerto em ${row.t} questões`:'Sem registros ainda')+(topic?` · assunto mais fraco: ${topic.assunto} (${pct(topic.c,topic.t)}%)`:'');
-    actions.append(linkButton(questionLink(row.subject,topic?.assunto)));
-    if(topic&&state.qcLinks[row.subject]?.url)actions.append(linkButton({label:'Buscar só este assunto',href:searchUrl(row.subject,topic.assunto)},true));
-    div.append(title,meta,actions);return div;
+    actions.append(
+      linkButton({label:'Questões novas',href:qcUrl(row.subject,topic?.assunto,'not_resolved')}),
+      linkButton({label:'Refazer as que errei',href:qcUrl(row.subject,topic?.assunto,'wrong')},true));
+    div.append(title,meta,actions);
+    if(!state.qcLinks[row.subject]?.url){const tip=document.createElement('div');tip.className='note';tip.textContent='Sem filtro salvo para esta matéria: a busca usa só palavra-chave, sem limitar à VUNESP.';div.append(tip)}
+    return div;
   }));
   const top=focus[0];
   $('homeFocus').textContent=state.records.length?`Próximo foco: ${top.row.subject}${top.topic?' — '+top.topic.assunto:''}.`:'Registre suas primeiras questões para receber um foco personalizado.';
