@@ -27,6 +27,11 @@ textarea{width:100%;min-height:140px;resize:vertical}
 .topbar h1{font-size:29px;letter-spacing:-1px;margin:5px 0 0}
 .topactions{display:flex;align-items:center;gap:10px}
 .pill{border:1px solid var(--line);padding:9px 12px;border-radius:100px;color:var(--muted);font-size:12px}
+.planselect{border-radius:100px;padding:8px 12px;font-size:13px;max-width:260px}
+.planform{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:14px}
+.planform label{display:grid;gap:4px;font-size:13px;color:var(--muted)}
+.planform .wide{grid-column:1/-1}
+.record .actions{flex-wrap:nowrap}
 .themebtn{background:var(--surface);color:var(--text);border:1px solid var(--line);padding:10px 13px}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:17px;padding:23px;margin-bottom:18px;box-shadow:var(--shadow)}
 .panel h2{font-size:19px;letter-spacing:-.4px;margin:0 0 14px}
@@ -93,4 +98,4 @@ details summary{cursor:pointer;font-weight:600;margin-top:16px;font-size:14px}
 .linkcfg{display:grid;gap:10px;margin-top:12px}
 .linkcfg label{display:grid;gap:4px;font-size:13px;color:var(--muted)}
 @media(max-width:900px){.sidebar{width:200px}.workspace{padding:24px 22px}}
-@media(max-width:680px){.sidebar{display:none}.workspace{padding:20px 15px 98px}.topbar{margin-bottom:18px}.topbar h1{font-size:24px}.pill{display:none}.panel{padding:18px;border-radius:15px;margin-bottom:12px}.welcome{padding:22px}.welcome h2{font-size:21px}.stats{gap:8px}.stat{padding:12px}.stat strong{font-size:23px}.stat small{font-size:11px}.fields>*{max-width:100%}.auth-grid input,.auth-grid button{width:100%}.table{font-size:13px}.table th,.table td{padding:9px 5px}.bar{min-width:40px}.bottomnav{display:grid;grid-template-columns:repeat(5,1fr);position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--line);padding:7px 4px max(9px,env(safe-area-inset-bottom));z-index:20}.bottomnav .navitem{display:flex;flex-direction:column;gap:3px;font-size:10px;text-align:center;padding:7px 2px;border-radius:9px;justify-content:center}.bottomnav .symbol{font-size:20px;width:auto}.day{padding:13px}.practice .fields label{flex:1}.practice .fields input[type=number]{width:100%}}
+@media(max-width:680px){.sidebar{display:none}.workspace{padding:20px 15px 98px}.topbar{margin-bottom:18px}.topbar h1{font-size:24px}.pill{display:none}.planselect{max-width:170px}.panel{padding:18px;border-radius:15px;margin-bottom:12px}.welcome{padding:22px}.welcome h2{font-size:21px}.stats{gap:8px}.stat{padding:12px}.stat strong{font-size:23px}.stat small{font-size:11px}.fields>*{max-width:100%}.auth-grid input,.auth-grid button{width:100%}.table{font-size:13px}.table th,.table td{padding:9px 5px}.bar{min-width:40px}.bottomnav{display:grid;grid-template-columns:repeat(5,1fr);position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--line);padding:7px 4px max(9px,env(safe-area-inset-bottom));z-index:20}.bottomnav .navitem{display:flex;flex-direction:column;gap:3px;font-size:10px;text-align:center;padding:7px 2px;border-radius:9px;justify-content:center}.bottomnav .symbol{font-size:20px;width:auto}.day{padding:13px}.practice .fields label{flex:1}.practice .fields input[type=number]{width:100%}}

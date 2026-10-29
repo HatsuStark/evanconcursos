@@ -8,6 +8,7 @@ Painel minimalista (preparação atual: TJSP Oficial de Justiça 2027) e respons
   - `index.html`: interface.
   - `styles.css`: estilos.
   - `theme.js`: aplica o tema claro/escuro antes da renderização (segue o sistema se não houver escolha salva).
+  - `plans.js`: formato de plano de estudos e o plano embutido do TJSP.
   - `app.js`: lógica do painel, validação e mesclagem do estado, foco adaptativo.
   - `cloud.js`: autenticação e sincronização Supabase.
   - `config.js`: URL do Supabase e chave **pública** do projeto.
@@ -23,6 +24,10 @@ python -m http.server 8080 -d public
 ```
 
 Abra `http://localhost:8080`.
+
+## Planos de estudo (um por edital)
+
+Cada edital é um plano com nome, cargo, banca, data da prova, data de início, matérias e cronograma (semanas × 7 dias; cada dia tem texto, horas, matéria, palavra-chave e meta de questões). Tarefas, metas, registros e filtros do QConcursos ficam separados por plano. Em **Conta e planos** é possível editar o plano ativo, criar um novo (ainda sem cronograma), exportar e importar planos em JSON. Dados antigos, de antes dos planos, são migrados automaticamente para o plano do TJSP.
 
 ## Foco adaptativo de questões
 

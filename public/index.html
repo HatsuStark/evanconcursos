@@ -15,20 +15,20 @@
 <body>
 <div class="shell">
 <aside class="sidebar">
-  <div class="brand"><div class="brandmark">§</div><div>Evan Concursos<small>TJSP · Oficial de Justiça 2027</small></div></div>
+  <div class="brand"><div class="brandmark">§</div><div>Evan Concursos<small id="planBrand"></small></div></div>
   <nav class="nav" aria-label="Menu principal">
     <button class="navitem active" data-view="inicio"><span class="symbol">⌂</span> Início</button>
     <button class="navitem" data-view="cronograma"><span class="symbol">▦</span> Cronograma</button>
     <button class="navitem" data-view="desempenho"><span class="symbol">◫</span> Desempenho</button>
     <button class="navitem" data-view="discursivas"><span class="symbol">✎</span> Discursivas</button>
-    <button class="navitem" data-view="conta"><span class="symbol">⚙</span> Conta e backup</button>
+    <button class="navitem" data-view="conta"><span class="symbol">⚙</span> Conta e planos</button>
   </nav>
-  <div class="sidebarbottom">15 horas por semana<br>Prova: 14 de março de 2027</div>
+  <div class="sidebarbottom" id="planMeta"></div>
 </aside>
 <main class="workspace">
   <div class="topbar">
     <div><div class="eyebrow">Minha preparação</div><h1 id="pageTitle">Visão geral</h1></div>
-    <div class="topactions"><span class="pill">TJSP · VUNESP</span><button class="themebtn" id="themeToggle" aria-label="Alternar modo escuro">☾</button></div>
+    <div class="topactions"><select id="planSelect" class="planselect" aria-label="Plano de estudos ativo"></select><button class="themebtn" id="themeToggle" aria-label="Alternar modo escuro">☾</button></div>
   </div>
 
   <section class="view" id="view-inicio">
@@ -42,7 +42,7 @@
       <h2>Progresso geral</h2>
       <progress id="progress" max="133" value="0"></progress>
       <div id="progressLabel" class="tag"></div>
-      <p class="muted">2h nos dias úteis · 3h sábado · 2h domingo</p>
+      <p class="muted" id="hoursLine"></p>
       <button id="goWeek">Ver tarefas da semana →</button>
     </section>
     <section class="panel">
@@ -107,7 +107,7 @@
     <section class="panel">
       <h2>Nova resposta discursiva</h2>
       <div class="fields">
-        <select id="discSubject"><option>Processo Penal</option><option>Direito Penal</option><option>Processo Civil</option><option>Direito Civil</option><option>Normas da Corregedoria</option></select>
+        <select id="discSubject" aria-label="Matéria"></select>
         <label>Nota (0–10) <input id="discScore" type="number" min="0" max="10" step="0.5" placeholder="—"></label>
       </div>
       <p><input class="full" id="discTitle" placeholder="Tema ou enunciado da questão"></p>
@@ -119,6 +119,28 @@
 
   <section class="view" id="view-conta" hidden>
     <p class="muted sectionintro">Gerencie o acesso e proteja seus dados de estudo.</p>
+    <section class="panel">
+      <h2>Planos de estudo</h2>
+      <p class="muted">Cada edital é um plano, com cronograma, desempenho e filtros próprios. O plano ativo aparece no seletor do topo.</p>
+      <div id="planList"></div>
+      <h3>Dados do plano ativo</h3>
+      <div class="planform">
+        <label>Nome <input id="planName" maxlength="80"></label>
+        <label>Cargo <input id="planCargo" maxlength="80"></label>
+        <label>Banca <input id="planBanca" maxlength="40"></label>
+        <label>Data da prova <input id="planExam" type="date"></label>
+        <label>Início dos estudos <input id="planStart" type="date"></label>
+        <label class="wide">Matérias (uma por linha; comece com * as de conhecimentos específicos)<textarea id="planSubjects" rows="8"></textarea></label>
+      </div>
+      <div class="actions">
+        <button id="planSave">Salvar alterações</button>
+        <button class="secondary" id="planNew">Criar novo plano com estes dados</button>
+        <button class="secondary" id="planExport">Exportar plano</button>
+        <button class="secondary" id="planImportButton">Importar plano</button>
+        <input type="file" id="planImportFile" accept="application/json" hidden>
+      </div>
+      <p id="planStatus" class="note" aria-live="polite"></p>
+    </section>
     <section class="panel">
       <h2>Conta e sincronização</h2>
       <div id="cloudSetup" class="status warning">Configure o Supabase no arquivo config.js para ativar o login. O modo local continua disponível.</div>
@@ -146,6 +168,7 @@
   <button class="navitem" data-view="discursivas"><span class="symbol">✎</span>Discursivas</button>
   <button class="navitem" data-view="conta"><span class="symbol">⚙</span>Conta</button>
 </nav>
+<script src="plans.js"></script>
 <script src="app.js"></script>
 <script type="module" src="cloud.js"></script>
 </body>
