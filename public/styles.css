@@ -107,3 +107,7 @@ details summary{cursor:pointer;font-weight:600;margin-top:16px;font-size:14px}
 .gensubjects summary{margin:0;font-weight:600}
 .gensubjects .fields{margin:10px 0}
 .gensubjects textarea{min-height:110px}
+.review{border:1px solid var(--accent);border-radius:12px;padding:14px 16px;display:grid;gap:10px;margin:10px 0 18px}
+.review ul{margin:0;padding-left:18px;font-size:14px;line-height:1.6}
+.review details summary{margin:0;font-weight:400}
+#planNotes ul{margin:6px 0 0;padding-left:18px;font-size:13px;color:var(--muted)}

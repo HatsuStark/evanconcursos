@@ -4,7 +4,8 @@
 // {id, name, cargo, banca, examDate:'AAAA-MM-DD'|'', startDate:'AAAA-MM-DD',
 //  subjects:[{name, core}],                       core = conhecimento específico (pesa mais no foco)
 //  weeks:[{title, days:[{text, hours, subject, keyword, goal} × 7]}],
-//  config:{...}}                                   respostas do gerador (generator.js), guardadas para refazer
+//  config:{...},                                   respostas do gerador (generator.js), guardadas para refazer
+//  notes:[...]}                                    observações do edital (nota mínima, discursiva...)
 // subject vazio = dia sem questões por matéria (simulado, correção, descanso).
 const DEFAULT_PLAN_ID='tjsp-oj-2027';
 const WEAK_MARK='*fracos*';
@@ -38,7 +39,8 @@ function normalizePlan(raw){
     cargo:clip(raw.cargo,80),banca:clip(raw.banca,40),examDate:parseYmd(raw.examDate)?raw.examDate:'',
     startDate:parseYmd(raw.startDate)?raw.startDate:ymd(new Date()),subjects,weeks,ts:Number.isFinite(ts)?ts:0,
     // Validado de verdade em normalizeConfig (generator.js), quando usado.
-    config:raw.config&&typeof raw.config==='object'&&!Array.isArray(raw.config)?JSON.parse(JSON.stringify(raw.config)):null};
+    config:raw.config&&typeof raw.config==='object'&&!Array.isArray(raw.config)?JSON.parse(JSON.stringify(raw.config)):null,
+    notes:(Array.isArray(raw.notes)?raw.notes:[]).map(n=>clip(n,300)).filter(Boolean).slice(0,30)};
 }
 
 // ---------- Plano embutido: TJSP Oficial de Justiça 2027 ----------

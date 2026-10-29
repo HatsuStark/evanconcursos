@@ -10,6 +10,13 @@ else {
   const db=createClient(cfg.supabaseUrl,cfg.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:true}});
   $('cloudSetup').textContent='Entre com sua conta para sincronizar seus estudos.';
   let user=null,timer=null,running=null,again=false;
+  // Edge Functions com a sessão do usuário (usado pela leitura de edital com IA).
+  window.cloudInvoke=async(name,body)=>{
+    if(!user)throw Error('Entre na sua conta (Conta e planos) para usar este recurso.');
+    const {data,error}=await db.functions.invoke(name,{body});
+    if(error){let msg=error.message;try{msg=(await error.context.json()).error||msg}catch{}throw Error(msg)}
+    return data;
+  };
   const setUI=()=>{$('authArea').classList.toggle('hidden',!!user);$('loggedArea').classList.toggle('hidden',!user);$('syncNow').classList.toggle('hidden',!user);$('userInfo').textContent=user?`Conectado como ${user.email}`:''};
   // Busca a nuvem, mescla com o estado local atual e envia o resultado se houver diferença.
   async function sync(){

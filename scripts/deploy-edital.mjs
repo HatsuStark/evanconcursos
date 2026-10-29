@@ -1,0 +1,47 @@
+// Publica a Edge Function "edital" no Supabase e grava os segredos dela, lendo tudo do .env.
+// Uso: node scripts/deploy-edital.mjs
+// Os segredos vão por arquivo temporário (apagado no fim), nunca aparecem no terminal.
+import { readFileSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+const CLI = 'supabase@2.120.0';
+const root = new URL('..', import.meta.url);
+const env = Object.fromEntries(
+  readFileSync(new URL('.env', root), 'utf8')
+    .split(/\r?\n/)
+    .filter((l) => /^\s*[A-Z_]+=/.test(l))
+    .map((l) => [l.slice(0, l.indexOf('=')).trim(), l.slice(l.indexOf('=') + 1).trim()]),
+);
+const missing = ['GEMINI_API_KEY', 'ALLOWED_EMAILS', 'SUPABASE_ACCESS_TOKEN', 'SUPABASE_PROJECT_REF'].filter((k) => !env[k]);
+if (missing.length) {
+  console.error(`Preencha no .env: ${missing.join(', ')}`);
+  process.exit(1);
+}
+
+const run = (args) => {
+  console.log(`> supabase ${args.join(' ')}`);
+  const r = spawnSync('npx', ['--yes', CLI, ...args], {
+    cwd: root,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+    env: { ...process.env, SUPABASE_ACCESS_TOKEN: env.SUPABASE_ACCESS_TOKEN },
+  });
+  if (r.status !== 0) process.exit(r.status ?? 1);
+};
+
+const dir = mkdtempSync(join(tmpdir(), 'evan-secrets-'));
+const secretsFile = join(dir, 'secrets.env');
+try {
+  writeFileSync(
+    secretsFile,
+    ['GEMINI_API_KEY', 'GEMINI_MODEL', 'ALLOWED_EMAILS'].filter((k) => env[k]).map((k) => `${k}=${env[k]}`).join('\n'),
+  );
+  run(['secrets', 'set', '--env-file', secretsFile, '--project-ref', env.SUPABASE_PROJECT_REF]);
+} finally {
+  rmSync(dir, { recursive: true, force: true });
+}
+// A função valida o login do usuário por conta própria (getUser + lista de e-mails).
+run(['functions', 'deploy', 'edital', '--project-ref', env.SUPABASE_PROJECT_REF, '--no-verify-jwt', '--use-api']);
+console.log('\nPronto: função "edital" publicada.');

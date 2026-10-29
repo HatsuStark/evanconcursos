@@ -136,6 +136,16 @@
       <h2>Planos de estudo</h2>
       <p class="muted">Cada edital é um plano, com cronograma, desempenho e filtros próprios. O plano ativo aparece no seletor do topo.</p>
       <div id="planList"></div>
+      <div id="planNotes"></div>
+      <h3>Criar plano a partir do edital (PDF)</h3>
+      <p class="note">A IA lê o edital e preenche órgão, cargo, banca, data da prova, matérias com peso e tópicos de estudo. Você revisa antes de criar. Requer estar logado.</p>
+      <div class="fields">
+        <input type="file" id="editalFile" accept="application/pdf" aria-label="PDF do edital">
+        <input id="editalCargo" class="grow" maxlength="120" placeholder="Cargo desejado (se o edital tiver vários)">
+        <button id="editalRead">Ler edital</button>
+      </div>
+      <p id="editalStatus" class="note" aria-live="polite"></p>
+      <div id="editalReview"></div>
       <h3>Dados do plano ativo</h3>
       <div class="planform">
         <label>Nome <input id="planName" maxlength="80"></label>

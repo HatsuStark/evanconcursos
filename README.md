@@ -15,6 +15,9 @@ Painel minimalista (preparação atual: TJSP Oficial de Justiça 2027) e respons
   - `config.js`: URL do Supabase e chave **pública** do projeto.
   - `manifest.webmanifest`, `sw.js`, ícones: suporte a PWA.
   - `_headers`: cabeçalhos de segurança (inclui CSP) para Netlify.
+- `supabase/functions/edital/`: Edge Function que lê o PDF do edital com o Gemini.
+- `scripts/`: `gemini-models.mjs` (lista modelos da sua chave) e `deploy-edital.mjs` (publica a função e os segredos).
+- `.env` (local, fora do Git; modelo em `.env.example`): chaves do Gemini e do Supabase.
 - `supabase.sql`: esquema e políticas de segurança (executar no SQL Editor; não é publicado).
 - `netlify.toml`: publica somente a pasta `public/`.
 
@@ -33,6 +36,12 @@ Cada edital é um plano com nome, cargo, banca, data da prova, data de início, 
 ## Gerador de cronograma
 
 Em **Cronograma → Gerar cronograma automaticamente**: horas por dia da semana, revisão semanal e, por matéria, peso no edital (1–5), nível (iniciante a avançado) e conteúdo programático colado do edital. O gerador alinha as semanas na segunda-feira, divide o tempo em teoria (≈70%), consolidação com questões dos pontos fracos (≈15%) e reta final com um simulado por semana (≈15%), distribui os dias por peso × nível intercalando as matérias, respeita a ordem dos tópicos e reserva a véspera e o dia da prova. Mesma entrada, mesmo resultado. As respostas ficam salvas no plano para refazer depois.
+
+## Plano a partir do edital (IA)
+
+Em **Conta e planos → Criar plano a partir do edital (PDF)**: o PDF vai para a Edge Function `edital`, que confere o login (só e-mails em `ALLOWED_EMAILS`) e pede ao Gemini um rascunho estruturado: órgão, cargo, banca, data da prova, matérias (específica ou não, nº de questões, peso 1–5, tópicos de estudo de ~2h) e observações. Você revisa, cria o plano e o gerador já vem preenchido; basta informar seu nível e as horas.
+
+Publicação (uma vez, e sempre que mudar a função ou os segredos): preencha o `.env` e rode `node scripts/deploy-edital.mjs`. Para conferir os modelos disponíveis: `node scripts/gemini-models.mjs`.
 
 ## Foco adaptativo de questões
 

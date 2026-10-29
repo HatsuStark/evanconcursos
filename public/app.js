@@ -348,6 +348,9 @@ function renderPlans(){
     if(!BUILTIN_PLANS[p.id]){const b=document.createElement('button');b.className='secondary small';b.textContent='Excluir';b.onclick=()=>deletePlan(p.id);actions.append(b)}
     row.append(info,actions);return row;
   }));
+  const notes=$('planNotes');
+  if(active.notes?.length){const ul=document.createElement('ul');ul.append(...active.notes.map(n=>Object.assign(document.createElement('li'),{textContent:n})));notes.replaceChildren(Object.assign(document.createElement('div'),{className:'note',textContent:'Observações do edital (plano ativo):'}),ul)}
+  else notes.replaceChildren();
   $('planName').value=active.name;$('planCargo').value=active.cargo;$('planBanca').value=active.banca;
   $('planExam').value=active.examDate;$('planStart').value=active.startDate;
   $('planSubjects').value=active.subjects.map(s=>(s.core?'* ':'')+s.name).join('\n');
@@ -449,6 +452,63 @@ $('planNew').onclick=()=>{
   const id=uniquePlanId(f.name);
   savePlan({...f,id,weeks:[]});switchPlan(id);$('planStatus').textContent='Plano criado. O cronograma será gerado na próxima etapa; até lá, importe um plano pronto se tiver.';
 };
+// ---------- Plano a partir do edital (IA) ----------
+// O PDF vai para a Edge Function "edital" (Supabase), que chama o Gemini. A resposta vira um rascunho de
+// plano com o gerador já preenchido (pesos e tópicos); o usuário revisa antes de criar.
+let editalDraft=null;
+const editalStatus=t=>{$('editalStatus').textContent=t};
+function fileToBase64(file){return new Promise((ok,fail)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(',')[1]);r.onerror=()=>fail(Error('Não foi possível ler o arquivo.'));r.readAsDataURL(file)})}
+function draftToPlan(d){
+  const subjects=(Array.isArray(d?.subjects)?d.subjects:[]).filter(s=>s&&clip(s.name,60));
+  if(!subjects.length)throw Error('A IA não encontrou matérias no edital. Confira se é o edital completo (com o conteúdo programático).');
+  const year=parseYmd(d.examDate)?.getFullYear(),name=[[d.orgao,d.cargo].filter(Boolean).join(' · ')||'Novo plano',year].filter(Boolean).join(' ');
+  const plan=normalizePlan({id:uniquePlanId(name),name,cargo:d.cargo,banca:d.banca,examDate:d.examDate,startDate:ymd(new Date()),notes:d.notes,
+    subjects:subjects.map(s=>({name:clip(s.name,60),core:!!s.core})),weeks:[]});
+  plan.config={hours:normalizeConfig(null,plan).hours,weeklyReview:true,subjects:Object.fromEntries(subjects.map(s=>[clip(s.name,60),{
+    weight:Math.min(5,Math.max(1,Math.round(Number(s.weight)||2))),level:1,topics:(Array.isArray(s.topics)?s.topics:[]).map(t=>clip(t,160)).filter(Boolean)}]))};
+  plan.questions=Object.fromEntries(subjects.map(s=>[clip(s.name,60),Number(s.questions)||0]));
+  return plan;
+}
+function renderEditalReview(){
+  const box=$('editalReview');
+  if(!editalDraft){box.replaceChildren();return}
+  const p=editalDraft,exam=parseYmd(p.examDate),wrap=document.createElement('div');wrap.className='review';
+  const head=document.createElement('strong');head.textContent=p.name;
+  const meta=document.createElement('div');meta.className='muted';
+  meta.textContent=`${p.cargo||'cargo não identificado'} · ${p.banca||'banca não identificada'} · prova ${exam?fmtDate(exam):'sem data no edital (defina depois)'}`;
+  const list=document.createElement('div');
+  list.append(...p.subjects.map(s=>{
+    const c=p.config.subjects[s.name],det=document.createElement('details'),sum=document.createElement('summary'),ul=document.createElement('ul');
+    sum.textContent=`${s.name}${s.core?' (específica)':''} · ${p.questions[s.name]?p.questions[s.name]+' questões · ':''}peso ${c.weight} · ${c.topics.length} tópico(s)`;
+    ul.append(...c.topics.map(t=>Object.assign(document.createElement('li'),{textContent:t})));
+    det.append(sum,ul);return det;
+  }));
+  const notes=document.createElement('ul');notes.append(...p.notes.map(n=>Object.assign(document.createElement('li'),{textContent:n})));
+  const actions=document.createElement('div');actions.className='actions';
+  const create=Object.assign(document.createElement('button'),{textContent:'Criar plano'});
+  const discard=Object.assign(document.createElement('button'),{className:'secondary',textContent:'Descartar'});
+  create.onclick=()=>{const {questions,...plan}=editalDraft;savePlan(plan);editalDraft=null;renderEditalReview();switchPlan(plan.id);editalStatus('Plano criado. Ajuste seu nível em cada matéria e as horas, e gere o cronograma.');showView('cronograma')};
+  discard.onclick=()=>{editalDraft=null;renderEditalReview();editalStatus('')};
+  actions.append(create,discard);
+  wrap.append(head,meta,list);
+  if(p.notes.length){const h=document.createElement('div');h.className='note';h.textContent='Observações do edital:';wrap.append(h,notes)}
+  wrap.append(Object.assign(document.createElement('p'),{className:'note',textContent:'Confira se as matérias e a data batem com o edital. Tudo pode ser editado depois em "Dados do plano" e no gerador.'}),actions);
+  box.replaceChildren(wrap);
+}
+$('editalRead').onclick=async()=>{
+  const file=$('editalFile').files[0],btn=$('editalRead');
+  if(!file)return editalStatus('Escolha o PDF do edital.');
+  if(!/\.pdf$/i.test(file.name)&&file.type!=='application/pdf')return editalStatus('O arquivo precisa ser um PDF.');
+  if(file.size>15*1024*1024)return editalStatus('PDF maior que 15 MB.');
+  if(!window.cloudInvoke)return editalStatus('Leitura de edital indisponível: a conexão com o Supabase não carregou.');
+  btn.disabled=true;editalStatus('Lendo o edital com IA… pode levar 1 a 2 minutos.');
+  try{
+    const res=await window.cloudInvoke('edital',{pdf:await fileToBase64(file),cargo:$('editalCargo').value.trim()});
+    editalDraft=draftToPlan(res.plan);renderEditalReview();editalStatus('Edital lido. Revise abaixo.');
+  }catch(e){editalStatus(e.message)}
+  finally{btn.disabled=false}
+};
+
 $('genRun').onclick=()=>{
   const p=activePlan();let result;
   try{result=generateWeeks(p,readGeneratorForm())}catch(err){$('genStatus').textContent=err.message;return}
