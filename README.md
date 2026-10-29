@@ -9,6 +9,7 @@ Painel minimalista (preparação atual: TJSP Oficial de Justiça 2027) e respons
   - `styles.css`: estilos.
   - `theme.js`: aplica o tema claro/escuro antes da renderização (segue o sistema se não houver escolha salva).
   - `plans.js`: formato de plano de estudos e o plano embutido do TJSP.
+  - `generator.js`: gerador determinístico de cronograma.
   - `app.js`: lógica do painel, validação e mesclagem do estado, foco adaptativo.
   - `cloud.js`: autenticação e sincronização Supabase.
   - `config.js`: URL do Supabase e chave **pública** do projeto.
@@ -28,6 +29,10 @@ Abra `http://localhost:8080`.
 ## Planos de estudo (um por edital)
 
 Cada edital é um plano com nome, cargo, banca, data da prova, data de início, matérias e cronograma (semanas × 7 dias; cada dia tem texto, horas, matéria, palavra-chave e meta de questões). Tarefas, metas, registros e filtros do QConcursos ficam separados por plano. Em **Conta e planos** é possível editar o plano ativo, criar um novo (ainda sem cronograma), exportar e importar planos em JSON. Dados antigos, de antes dos planos, são migrados automaticamente para o plano do TJSP.
+
+## Gerador de cronograma
+
+Em **Cronograma → Gerar cronograma automaticamente**: horas por dia da semana, revisão semanal e, por matéria, peso no edital (1–5), nível (iniciante a avançado) e conteúdo programático colado do edital. O gerador alinha as semanas na segunda-feira, divide o tempo em teoria (≈70%), consolidação com questões dos pontos fracos (≈15%) e reta final com um simulado por semana (≈15%), distribui os dias por peso × nível intercalando as matérias, respeita a ordem dos tópicos e reserva a véspera e o dia da prova. Mesma entrada, mesmo resultado. As respostas ficam salvas no plano para refazer depois.
 
 ## Foco adaptativo de questões
 

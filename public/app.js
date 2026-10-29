@@ -26,7 +26,7 @@ function normalize(raw){
   const s={v:3,tasks:{},taskTimes:{},goals:{},records:[],notes:String(raw.notes||''),notesTime:num(raw.notesTime),discursivas:[],deleted:{},qcLinks:{},plans:{},activePlan:{id:'',ts:0},updatedAt:num(raw.updatedAt)};
   for(const [k,v] of Object.entries(plain(raw.tasks))){const id=scopeTask(k);if(TASK_RE.test(id))s.tasks[id]=!!v}
   for(const [k,v] of Object.entries(plain(raw.taskTimes))){const id=scopeTask(k);if(id in s.tasks)s.taskTimes[id]=num(v)}
-  for(const [k,v] of Object.entries(plain(raw.goals))){const id=scopeTask(k),g=plain(v),n=Number(g.n);if(TASK_RE.test(id)&&Number.isInteger(n)&&n>0&&n<=500)s.goals[id]={n,ts:num(g.ts)}}
+  for(const [k,v] of Object.entries(plain(raw.goals))){const id=scopeTask(k),g=plain(v),n=Number(g.n);if(TASK_RE.test(id)&&Number.isInteger(n)&&n>=0&&n<=500)s.goals[id]={n,ts:num(g.ts)}}
   for(const [k,v] of Object.entries(plain(raw.deleted)))s.deleted[k]=num(v);
   for(const [k,v] of Object.entries(plain(raw.plans))){const p=normalizePlan(v);if(p.id===k)s.plans[k]=p}
   const ap=plain(raw.activePlan);if(isPlanId(ap.id))s.activePlan={id:ap.id,ts:num(ap.ts)};
@@ -97,7 +97,8 @@ function allPlans(){return [...new Set([...Object.keys(BUILTIN_PLANS),...Object.
 function activePlan(){return getPlan(state.activePlan.id)||BUILTIN_PLANS[DEFAULT_PLAN_ID]}
 const planStart=p=>parseYmd(p.startDate)||new Date();
 const planTotal=p=>p.weeks.length*7;
-const weeklyHours=p=>p.weeks[0]?p.weeks[0].days.reduce((s,d)=>s+d.hours,0):0;
+// Sem cronograma ainda, usa as horas informadas no gerador.
+const weeklyHours=p=>(p.weeks[0]?p.weeks[0].days.map(d=>d.hours):normalizeConfig(p.config,p).hours).reduce((s,h)=>s+h,0);
 const planRecords=p=>state.records.filter(r=>r.planId===p.id);
 function uniquePlanId(name){let base=slugify(name),id=base,i=2;while(getPlan(id)||state.plans[id])id=(base.slice(0,36)+'-'+i++);return id}
 
@@ -241,12 +242,13 @@ function setupPlanControls(){
   $('planBrand').textContent=[p.cargo,p.banca].filter(Boolean).join(' · ')||'Plano de estudos';
   $('planMeta').textContent=`${weeklyHours(p)} horas por semana · Prova: ${exam?exam.toLocaleDateString('pt-BR',{day:'numeric',month:'long',year:'numeric'}):'data a definir'}`;
   document.title=`Evan Concursos · ${p.name}`;
-  renderLinks();renderPlans();
+  renderLinks();renderPlans();renderGenerator();
 }
 
 function renderWeek(){
   const p=activePlan(),list=$('daysList');
-  if(!p.weeks.length){$('focus').textContent='';list.replaceChildren(Object.assign(document.createElement('p'),{className:'muted',textContent:'Este plano ainda não tem cronograma. Em breve o app vai gerá-lo a partir das matérias, da data da prova e do seu tempo disponível; por enquanto, você pode importar um plano pronto em Conta e backup.'}));return}
+  week.parentElement.hidden=!p.weeks.length;
+  if(!p.weeks.length){$('focus').textContent='';list.replaceChildren(Object.assign(document.createElement('p'),{className:'muted',textContent:'Este plano ainda não tem cronograma. Preencha o gerador acima e clique em "Gerar cronograma", ou importe um plano pronto em Conta e planos.'}));return}
   const n=Number(week.value);
   $('focus').textContent=p.weeks[n].title;
   const today=todayInfo(p)?.id;
@@ -305,7 +307,7 @@ function renderPerformance(){
     return div;
   }):[Object.assign(document.createElement('p'),{className:'muted',textContent:'Nenhum tema em reforço. Temas com menos de 75% de acerto aparecem aqui automaticamente.'})]));
   const todayStats=today?.subject?themeStats(today.theme):{t:0};
-  $('homeFocus').textContent=today?`Hoje: ${today.text}`+(today.subject?` · ${todayStats.t} de ${today.goal} questões`:'')+(due.length?` · ${due.length} revisão(ões) pendente(s)`:''):'Plano sem cronograma ainda.';
+  $('homeFocus').textContent=today?`Hoje: ${today.text}`+(today.subject?` · ${todayStats.t} de ${today.goal} questões`:'')+(due.length?` · ${due.length} revisão(ões) pendente(s)`:''):'Plano sem cronograma ainda: gere em Cronograma.';
   const maxP=Math.max(...rows.map(r=>r.priority),.01);
   $('subjectTable').replaceChildren(...rows.map(r=>{
     const tr=document.createElement('tr'),bar=document.createElement('div'),fill=document.createElement('span');
@@ -363,6 +365,43 @@ function renderDisc(){
 }
 function render(){renderWeek();renderHome();renderPerformance()}
 
+// ---------- Gerador de cronograma (formulário) ----------
+function renderGenerator(){
+  const p=activePlan(),cfg=normalizeConfig(p.config,p);
+  $('genDetails').open=!p.weeks.length;
+  $('genHours').replaceChildren(...weekdays.map((d,i)=>{
+    const l=document.createElement('label'),inp=document.createElement('input');
+    inp.type='number';inp.min='0';inp.max='16';inp.step='0.5';inp.value=cfg.hours[i];inp.dataset.day=i;
+    l.append(d.slice(0,3),inp);return l;
+  }));
+  $('genReview').checked=cfg.weeklyReview;
+  $('genSubjects').replaceChildren(...p.subjects.map(({name})=>{
+    const s=cfg.subjects[name],det=document.createElement('details'),sum=document.createElement('summary');
+    det.dataset.subject=name;
+    const describe=()=>{sum.textContent=`${name} · peso ${weight.value} · ${LEVELS[level.value]} · ${splitTopics(topics.value).length} tópico(s)`};
+    const select=(opts,val)=>{const el=document.createElement('select');opts.forEach(([v,t])=>el.add(new Option(t,v)));el.value=String(val);el.onchange=describe;return el};
+    const weight=select([1,2,3,4,5].map(n=>[n,`Peso ${n}${n===1?' (pouco cobrada)':n===5?' (muito cobrada)':''}`]),s.weight);weight.className='w';
+    const level=select(LEVELS.map((t,i)=>[i,'Meu nível: '+t]),s.level);level.className='l';
+    const topics=document.createElement('textarea');topics.className='t';topics.placeholder='Conteúdo programático desta matéria (cole do edital)';topics.value=s.topics.join('\n');topics.oninput=describe;
+    const row=document.createElement('div');row.className='fields';row.append(weight,level);
+    det.append(sum,row,topics);describe();return det;
+  }));
+}
+function readGeneratorForm(){
+  return {hours:[...$('genHours').querySelectorAll('input')].map(i=>Number(i.value)||0),weeklyReview:$('genReview').checked,
+    subjects:Object.fromEntries([...$('genSubjects').children].map(d=>[d.dataset.subject,{weight:Number(d.querySelector('.w').value),level:Number(d.querySelector('.l').value),topics:splitTopics(d.querySelector('.t').value)}]))};
+}
+// Refazer o cronograma muda o conteúdo de cada dia: zera marcações e metas do plano e desliga os
+// registros antigos das tarefas (eles seguem valendo por matéria e assunto, inclusive no reforço).
+function applyGenerated(p,result){
+  const now=Date.now(),prefix=p.id+':';
+  for(const k of Object.keys(state.tasks))if(k.startsWith(prefix)&&state.tasks[k]){state.tasks[k]=false;state.taskTimes[k]=now}
+  for(const k of Object.keys(state.goals))if(k.startsWith(prefix)&&state.goals[k].n)state.goals[k]={n:0,ts:now};
+  for(const r of state.records)if(r.planId===p.id&&r.taskId){r.taskId='';r.theme=''}
+  savePlan({...p,weeks:result.weeks,startDate:result.startDate,config:result.config});
+  setupPlanControls();render();
+}
+
 // ---------- Ações de plano ----------
 function switchPlan(id){state.activePlan={id,ts:Date.now()};save();setupPlanControls();render()}
 function deletePlan(id){
@@ -409,6 +448,17 @@ $('planNew').onclick=()=>{
   if(f.name===activePlan().name)return alert('Dê um nome diferente ao novo plano.');
   const id=uniquePlanId(f.name);
   savePlan({...f,id,weeks:[]});switchPlan(id);$('planStatus').textContent='Plano criado. O cronograma será gerado na próxima etapa; até lá, importe um plano pronto se tiver.';
+};
+$('genRun').onclick=()=>{
+  const p=activePlan();let result;
+  try{result=generateWeeks(p,readGeneratorForm())}catch(err){$('genStatus').textContent=err.message;return}
+  const s=result.summary,done=Object.entries(state.tasks).filter(([k,v])=>v&&k.startsWith(p.id+':')).length;
+  const msg=`Cronograma de ${s.weeks} semanas, ${s.studyDays} dias de estudo (${s.hours}h):\n`+
+    `• teoria: ${s.theory} dias\n• consolidação com questões: ${s.consol} dias\n• reta final (simulados e revisão): ${s.final} dias\n\n`+
+    s.perSubject.map(x=>`${x.name}: ${x.days} dia(s) de teoria`).join('\n')+
+    (p.weeks.length?`\n\nO cronograma atual será substituído${done?` e as ${done} tarefa(s) marcada(s) como feitas serão desmarcadas`:''}. Seus registros de questões continuam valendo por matéria e assunto.`:'')+'\n\nAplicar?';
+  if(!confirm(msg))return;
+  applyGenerated(p,result);$('genStatus').textContent='Cronograma gerado.';showView('cronograma');
 };
 $('planExport').onclick=()=>{
   const p=activePlan(),{ts,...data}=p;

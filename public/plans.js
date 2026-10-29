@@ -3,7 +3,8 @@
 // Formato usado para salvar, importar/exportar e, nas próximas etapas, para o gerador e a IA preencherem:
 // {id, name, cargo, banca, examDate:'AAAA-MM-DD'|'', startDate:'AAAA-MM-DD',
 //  subjects:[{name, core}],                       core = conhecimento específico (pesa mais no foco)
-//  weeks:[{title, days:[{text, hours, subject, keyword, goal} × 7]}]}
+//  weeks:[{title, days:[{text, hours, subject, keyword, goal} × 7]}],
+//  config:{...}}                                   respostas do gerador (generator.js), guardadas para refazer
 // subject vazio = dia sem questões por matéria (simulado, correção, descanso).
 const DEFAULT_PLAN_ID='tjsp-oj-2027';
 const WEAK_MARK='*fracos*';
@@ -35,7 +36,9 @@ function normalizePlan(raw){
   const ts=Number(raw.ts);
   return {id:isPlanId(raw.id)?raw.id:slugify(raw.name||'plano'),name:clip(raw.name,80)||'Plano sem nome',
     cargo:clip(raw.cargo,80),banca:clip(raw.banca,40),examDate:parseYmd(raw.examDate)?raw.examDate:'',
-    startDate:parseYmd(raw.startDate)?raw.startDate:ymd(new Date()),subjects,weeks,ts:Number.isFinite(ts)?ts:0};
+    startDate:parseYmd(raw.startDate)?raw.startDate:ymd(new Date()),subjects,weeks,ts:Number.isFinite(ts)?ts:0,
+    // Validado de verdade em normalizeConfig (generator.js), quando usado.
+    config:raw.config&&typeof raw.config==='object'&&!Array.isArray(raw.config)?JSON.parse(JSON.stringify(raw.config)):null};
 }
 
 // ---------- Plano embutido: TJSP Oficial de Justiça 2027 ----------
