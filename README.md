@@ -1,6 +1,6 @@
-# TJSP Estudos — aplicativo web
+# Evan Concursos — aplicativo web
 
-Painel minimalista e responsivo para o concurso TJSP Oficial de Justiça 2027, com cronograma de 19 semanas, registro de desempenho por matéria e assunto, foco adaptativo de questões, caderno de erros, discursivas, login Supabase e sincronização entre dispositivos.
+Painel minimalista (preparação atual: TJSP Oficial de Justiça 2027) e responsivo para o concurso TJSP Oficial de Justiça 2027, com cronograma de 19 semanas, registro de desempenho por matéria e assunto, foco adaptativo de questões, caderno de erros, discursivas, login Supabase e sincronização entre dispositivos.
 
 ## Estrutura
 
