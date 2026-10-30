@@ -252,26 +252,50 @@ function guideView(g){
   wrap.append(el('p',`Gerado por IA (${g.model||'Gemini'}) em ${fmtDate(new Date(g.ts))}. Confira os artigos na lei seca.`,'note'));
   return wrap;
 }
+const guideFor=info=>{const g=state.guides[info.id];return g&&g.for===info.text?g:null};
+const weakKw=info=>info.keyword===WEAK_MARK?weakestKeyword(info.subject):'';
+// Pedido de roteiros (até 7 tarefas por chamada). Pendências e erros ficam em memória para a tela mostrar.
+const guidesPending=new Set(),guideErrors=new Map();
+async function requestGuides(infos){
+  const p=activePlan();
+  infos.forEach(i=>{guidesPending.add(i.id);guideErrors.delete(i.id)});render();
+  try{
+    if(!window.cloudInvoke)throw Error('Roteiro com IA indisponível: a conexão com o Supabase não carregou.');
+    const tasks=infos.map(i=>{const kw=weakKw(i);return {id:i.id,subject:i.subject,text:i.text+(kw?` (assunto mais fraco: ${kw})`:'')}});
+    const res=await window.cloudInvoke('roteiro',{tasks,cargo:p.cargo,banca:p.banca});
+    let saved=0;
+    for(const i of infos){
+      const g=cleanGuide({...(res.guides||[]).find(x=>x&&x.id===i.id),for:i.text,model:res.model,ts:Date.now()});
+      if(g){state.guides[i.id]=g;saved++}else guideErrors.set(i.id,'A IA não devolveu este roteiro. Tente de novo.');
+    }
+    if(saved)save();
+  }catch(e){infos.forEach(i=>guideErrors.set(i.id,e.message))}
+  finally{infos.forEach(i=>guidesPending.delete(i.id));render()}
+}
+// Roteiros automáticos: com login, gera em segundo plano os roteiros dos próximos 7 dias numa só chamada.
+// Roda ao entrar/sincronizar, ao trocar de plano e ao gerar o cronograma; assim fica sempre uma semana adiantado.
+// Tarefas que falharam só são tentadas de novo no próximo carregamento (ou pelo botão).
+const AUTO_GUIDE_DAYS=7;
+let autoRunning=false;
+async function autoGuides(){
+  const p=activePlan(),today=todayInfo(p);
+  if(autoRunning||!window.cloudReady?.()||!today||today.after)return;
+  const start=today.week*7+today.day,end=Math.min(planTotal(p),start+AUTO_GUIDE_DAYS),infos=[];
+  for(let i=start;i<end;i++){const info=taskInfo(`${p.id}:${Math.floor(i/7)}-${i%7}`);if(info.subject&&!guideFor(info)&&!guideErrors.has(info.id))infos.push(info)}
+  if(!infos.length)return;
+  autoRunning=true;
+  try{await requestGuides(infos)}finally{autoRunning=false}
+}
 function studyBlock(info){
-  const p=activePlan(),box=document.createElement('div');box.className='practice';
-  const g=state.guides[info.id],guide=g&&g.for===info.text?g:null;
-  const kw=info.keyword===WEAK_MARK?weakestKeyword(info.subject):'';
+  const box=document.createElement('div');box.className='practice';
+  const guide=guideFor(info),kw=weakKw(info),pending=guidesPending.has(info.id);
   const links=document.createElement('div');links.className='actions';
   studyLinks(kw?{...info,keyword:kw}:info,guide||{}).forEach((l,i)=>links.append(linkButton(l,i>0)));
   const status=document.createElement('span');status.className='note';
-  const btn=document.createElement('button');btn.className='small'+(guide?' secondary':'');
+  status.textContent=pending?'Gerando roteiro com IA... (até 1 minuto)':guideErrors.get(info.id)||(guide?'':'O roteiro é gerado automaticamente para os próximos 7 dias quando você está conectado.');
+  const btn=document.createElement('button');btn.className='small'+(guide?' secondary':'');btn.disabled=pending;
   btn.textContent=guide?'Refazer roteiro com IA':'Gerar roteiro com IA';
-  btn.onclick=async()=>{
-    if(!window.cloudInvoke){status.textContent='Roteiro com IA indisponível: a conexão com o Supabase não carregou.';return}
-    btn.disabled=true;status.textContent='Gerando roteiro... (até 30 segundos)';
-    try{
-      const text=info.text+(kw?` (assunto mais fraco: ${kw})`:'');
-      const res=await window.cloudInvoke('roteiro',{subject:info.subject,text,cargo:p.cargo,banca:p.banca});
-      const clean=cleanGuide({...res.guide,for:info.text,model:res.model,ts:Date.now()});
-      if(!clean)throw Error('A IA não devolveu um roteiro. Tente de novo.');
-      state.guides[info.id]=clean;save();render();
-    }catch(e){status.textContent=e.message;btn.disabled=false}
-  };
+  btn.onclick=()=>requestGuides([info]);
   const row=document.createElement('div');row.className='actions';row.append(btn,status);
   box.append(links);if(guide)box.append(guideView(guide));box.append(row);
   return box;
@@ -319,7 +343,7 @@ function renderWeek(){
     };
     if(info.subject){
       const {c,t}=themeStats(info.theme);
-      section('s:'+id,'Estudar'+(state.guides[id]?.for===info.text?' · roteiro pronto':''),studyBlock(info));
+      section('s:'+id,'Estudar'+(guidesPending.has(id)?' · gerando roteiro...':guideFor(info)?' · roteiro pronto':''),studyBlock(info));
       section('q:'+id,`Questões · meta ${info.goal}`+(t?` · ${t} feitas (${pct(c,t)}%)`:''),practiceBlock({...info,taskId:id}));
     }
     return card;
@@ -458,11 +482,11 @@ function applyGenerated(p,result){
   for(const k of Object.keys(state.goals))if(k.startsWith(prefix)&&state.goals[k].n)state.goals[k]={n:0,ts:now};
   for(const r of state.records)if(r.planId===p.id&&r.taskId){r.taskId='';r.theme=''}
   savePlan({...p,weeks:result.weeks,startDate:result.startDate,config:result.config});
-  setupPlanControls();render();
+  setupPlanControls();render();autoGuides();
 }
 
 // ---------- Ações de plano ----------
-function switchPlan(id){state.activePlan={id,ts:Date.now()};save();setupPlanControls();render()}
+function switchPlan(id){state.activePlan={id,ts:Date.now()};save();setupPlanControls();render();autoGuides()}
 function deletePlan(id){
   const p=getPlan(id);if(!p||BUILTIN_PLANS[id])return;
   if(!confirm(`Excluir o plano "${p.name}"? Os registros de questões dele continuam no backup.`))return;
@@ -620,7 +644,7 @@ $('importFile').onchange=async e=>{
 
 // API usada por cloud.js.
 window.TJSP={
-  getState:()=>state,normalize,merge,
+  getState:()=>state,normalize,merge,autoGuides,
   apply(next){
     const prev=JSON.stringify([state.qcLinks,state.plans,state.activePlan]);
     state=normalize(next);persist();

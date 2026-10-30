@@ -44,7 +44,7 @@ Em **Conta e planos → Criar plano a partir do edital (PDF)**: o PDF vai para a
 
 ## Material de estudo por tarefa
 
-Cada dia com matéria tem, além de **Questões**, a seção **Estudar**: busca de vídeo-aulas no YouTube e de PDFs/resumos no Google pelo tema do dia, e link da lei seca no Planalto quando a tarefa cita um código ou lei (ou pela matéria: CPP, CPC, CP, CC, CF). Nos dias de reforço, o tema é o assunto mais fraco do momento. **Gerar roteiro com IA** chama a Edge Function `roteiro`, que devolve resumo, o que ler (lei e artigos), pontos que mais caem, pegadinhas, autoteste e termos de busca de vídeo; a IA não gera links. O roteiro fica salvo na tarefa e sincroniza; se o cronograma for refeito e o texto da tarefa mudar, ele deixa de aparecer.
+Cada dia com matéria tem, além de **Questões**, a seção **Estudar**: busca de vídeo-aulas no YouTube e de PDFs/resumos no Google pelo tema do dia, e link da lei seca no Planalto quando a tarefa cita um código ou lei (ou pela matéria: CPP, CPC, CP, CC, CF). Nos dias de reforço, o tema é o assunto mais fraco do momento. Com login, o app gera sozinho, em segundo plano e numa só chamada, os roteiros dos próximos 7 dias (ao entrar, ao trocar de plano e ao gerar o cronograma), ficando sempre uma semana adiantado; o botão **Gerar/Refazer roteiro com IA** faz um dia avulso. A Edge Function `roteiro` (até 7 tarefas por chamada) devolve resumo, o que ler (lei e artigos), pontos que mais caem, pegadinhas, autoteste e termos de busca de vídeo; a IA não gera links. O roteiro fica salvo na tarefa e sincroniza; se o cronograma for refeito e o texto da tarefa mudar, ele deixa de aparecer.
 
 ## Publicação das funções de IA
 

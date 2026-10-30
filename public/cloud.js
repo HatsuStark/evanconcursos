@@ -17,6 +17,7 @@ else {
     if(error){let msg=error.message;try{msg=(await error.context.json()).error||msg}catch{}throw Error(msg)}
     return data;
   };
+  window.cloudReady=()=>!!user;
   const setUI=()=>{$('authArea').classList.toggle('hidden',!!user);$('loggedArea').classList.toggle('hidden',!user);$('syncNow').classList.toggle('hidden',!user);$('userInfo').textContent=user?`Conectado como ${user.email}`:''};
   // Busca a nuvem, mescla com o estado local atual e envia o resultado se houver diferença.
   async function sync(){
@@ -51,6 +52,7 @@ else {
     if(last&&last!==user.id&&!confirm('Este navegador tem dados de outra conta. Mesclar esses dados com a conta atual? (Cancelar começa só com os dados desta conta.)'))app.apply({});
     try{localStorage.setItem('tjsp-user',user.id)}catch{}
     await sync();
+    app.autoGuides();
   }
   const {data}=await db.auth.getSession();await onAuth(data.session);
   db.auth.onAuthStateChange((_event,session)=>{setTimeout(()=>onAuth(session),0)});
