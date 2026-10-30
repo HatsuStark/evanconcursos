@@ -15,8 +15,9 @@ Painel minimalista (preparação atual: TJSP Oficial de Justiça 2027) e respons
   - `config.js`: URL do Supabase e chave **pública** do projeto.
   - `manifest.webmanifest`, `sw.js`, ícones: suporte a PWA.
   - `_headers`: cabeçalhos de segurança (inclui CSP) para Netlify.
-- `supabase/functions/edital/`: Edge Function que lê o PDF do edital com o Gemini.
-- `scripts/`: `gemini-models.mjs` (lista modelos da sua chave) e `deploy-edital.mjs` (publica a função e os segredos).
+- `public/materials.js`: material de estudo de cada tarefa (buscas de vídeo-aula e PDF, lei seca no Planalto).
+- `supabase/functions/`: Edge Functions com o Gemini: `edital` (lê o PDF do edital), `roteiro` (roteiro de estudo da tarefa) e `_shared/` (login permitido e chamada ao Gemini).
+- `scripts/`: `gemini-models.mjs` (lista modelos da sua chave) e `deploy-functions.mjs` (publica as funções e os segredos).
 - `.env` (local, fora do Git; modelo em `.env.example`): chaves do Gemini e do Supabase.
 - `supabase.sql`: esquema e políticas de segurança (executar no SQL Editor; não é publicado).
 - `netlify.toml`: publica somente a pasta `public/`.
@@ -41,7 +42,13 @@ Em **Cronograma → Gerar cronograma automaticamente**: horas por dia da semana,
 
 Em **Conta e planos → Criar plano a partir do edital (PDF)**: o PDF vai para a Edge Function `edital`, que confere o login (só e-mails em `ALLOWED_EMAILS`) e pede ao Gemini um rascunho estruturado: órgão, cargo, banca, data da prova, matérias (específica ou não, nº de questões, peso 1–5, tópicos de estudo de ~2h) e observações. Você revisa, cria o plano e o gerador já vem preenchido; basta informar seu nível e as horas.
 
-Publicação (uma vez, e sempre que mudar a função ou os segredos): preencha o `.env` e rode `node scripts/deploy-edital.mjs`. Para conferir os modelos disponíveis: `node scripts/gemini-models.mjs`.
+## Material de estudo por tarefa
+
+Cada dia com matéria tem, além de **Questões**, a seção **Estudar**: busca de vídeo-aulas no YouTube e de PDFs/resumos no Google pelo tema do dia, e link da lei seca no Planalto quando a tarefa cita um código ou lei (ou pela matéria: CPP, CPC, CP, CC, CF). Nos dias de reforço, o tema é o assunto mais fraco do momento. **Gerar roteiro com IA** chama a Edge Function `roteiro`, que devolve resumo, o que ler (lei e artigos), pontos que mais caem, pegadinhas, autoteste e termos de busca de vídeo; a IA não gera links. O roteiro fica salvo na tarefa e sincroniza; se o cronograma for refeito e o texto da tarefa mudar, ele deixa de aparecer.
+
+## Publicação das funções de IA
+
+Uma vez, e sempre que mudar uma função ou os segredos: preencha o `.env` (o token do Supabase precisa de escrita em Edge Functions e em seus segredos) e rode `node scripts/deploy-functions.mjs`. Para conferir os modelos disponíveis: `node scripts/gemini-models.mjs`.
 
 ## Foco adaptativo de questões
 

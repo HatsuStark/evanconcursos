@@ -1,5 +1,5 @@
-// Publica a Edge Function "edital" no Supabase e grava os segredos dela, lendo tudo do .env.
-// Uso: node scripts/deploy-edital.mjs
+// Publica as Edge Functions de IA ("edital" e "roteiro") no Supabase e grava os segredos delas, lendo tudo do .env.
+// Uso: node scripts/deploy-functions.mjs
 // Os segredos vão por arquivo temporário (apagado no fim), nunca aparecem no terminal.
 import { readFileSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const CLI = 'supabase@2.120.0';
+const FUNCTIONS = ['edital', 'roteiro'];
 const root = new URL('..', import.meta.url);
 const env = Object.fromEntries(
   readFileSync(new URL('.env', root), 'utf8')
@@ -42,6 +43,6 @@ try {
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }
-// A função valida o login do usuário por conta própria (getUser + lista de e-mails).
-run(['functions', 'deploy', 'edital', '--project-ref', env.SUPABASE_PROJECT_REF, '--no-verify-jwt', '--use-api']);
-console.log('\nPronto: função "edital" publicada.');
+// As funções validam o login do usuário por conta própria (getUser + lista de e-mails).
+for (const name of FUNCTIONS) run(['functions', 'deploy', name, '--project-ref', env.SUPABASE_PROJECT_REF, '--no-verify-jwt', '--use-api']);
+console.log(`\nPronto: funções publicadas (${FUNCTIONS.join(', ')}).`);

@@ -21,14 +21,22 @@ function hash(s){let h=0;for(const c of s)h=(h*31+c.charCodeAt(0))|0;return (h>>
 function parseBR(d){const m=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec(d||'');return m?new Date(+m[3],m[2]-1,+m[1]).getTime():0}
 function isQcUrl(u){try{const x=new URL(u);return x.protocol==='https:'&&(x.hostname==='qconcursos.com'||x.hostname.endsWith('.qconcursos.com'))}catch{return false}}
 
+// Roteiro de estudo gerado pela IA para uma tarefa. `for` guarda o texto da tarefa: se o cronograma
+// for refeito e o texto mudar, o roteiro antigo deixa de aparecer.
+function cleanGuide(v){
+  const g=plain(v),list=(x,n,len=300)=>(Array.isArray(x)?x:[]).map(t=>String(t).trim().slice(0,len)).filter(Boolean).slice(0,n);
+  const out={resumo:String(g.resumo||'').trim().slice(0,800),leitura:list(g.leitura,8),pontos:list(g.pontos,10),pegadinhas:list(g.pegadinhas,6),perguntas:list(g.perguntas,6),buscas:list(g.buscas,3,80),for:String(g.for||'').slice(0,300),model:String(g.model||'').slice(0,60),ts:num(g.ts)};
+  return out.resumo||out.leitura.length||out.pontos.length?out:null;
+}
 function normalize(raw){
   raw=plain(raw);
-  const s={v:3,tasks:{},taskTimes:{},goals:{},records:[],notes:String(raw.notes||''),notesTime:num(raw.notesTime),discursivas:[],deleted:{},qcLinks:{},plans:{},activePlan:{id:'',ts:0},updatedAt:num(raw.updatedAt)};
+  const s={v:3,tasks:{},taskTimes:{},goals:{},records:[],notes:String(raw.notes||''),notesTime:num(raw.notesTime),discursivas:[],deleted:{},qcLinks:{},plans:{},guides:{},activePlan:{id:'',ts:0},updatedAt:num(raw.updatedAt)};
   for(const [k,v] of Object.entries(plain(raw.tasks))){const id=scopeTask(k);if(TASK_RE.test(id))s.tasks[id]=!!v}
   for(const [k,v] of Object.entries(plain(raw.taskTimes))){const id=scopeTask(k);if(id in s.tasks)s.taskTimes[id]=num(v)}
   for(const [k,v] of Object.entries(plain(raw.goals))){const id=scopeTask(k),g=plain(v),n=Number(g.n);if(TASK_RE.test(id)&&Number.isInteger(n)&&n>=0&&n<=500)s.goals[id]={n,ts:num(g.ts)}}
   for(const [k,v] of Object.entries(plain(raw.deleted)))s.deleted[k]=num(v);
   for(const [k,v] of Object.entries(plain(raw.plans))){const p=normalizePlan(v);if(p.id===k)s.plans[k]=p}
+  for(const [k,v] of Object.entries(plain(raw.guides))){const g=cleanGuide(v);if(TASK_RE.test(k)&&g)s.guides[k]=g}
   const ap=plain(raw.activePlan);if(isPlanId(ap.id))s.activePlan={id:ap.id,ts:num(ap.ts)};
   const records=new Map(),seen={};
   for(const r of Array.isArray(raw.records)?raw.records:[]){
@@ -76,7 +84,7 @@ function merge(a,b){
   const nb=b.notesTime>a.notesTime||(b.notesTime===a.notesTime&&b.notes.length>a.notes.length)?b:a;
   m.notes=nb.notes;m.notesTime=nb.notesTime;
   // Itens com carimbo próprio: vence o mais recente.
-  for(const field of ['qcLinks','goals','plans'])
+  for(const field of ['qcLinks','goals','plans','guides'])
     for(const s of [a,b])for(const [k,v] of Object.entries(s[field]))if(!m[field][k]||v.ts>m[field][k].ts)m[field][k]=v;
   for(const k of Object.keys(m.plans))if(('plan:'+k) in m.deleted&&m.deleted['plan:'+k]>=m.plans[k].ts)delete m.plans[k];
   m.activePlan=b.activePlan.ts>a.activePlan.ts?b.activePlan:a.activePlan;
@@ -227,8 +235,52 @@ function practiceBlock({subject,keyword,theme,goal,taskId,label}){
   return box;
 }
 
+// Bloco de estudo: vídeo-aulas, PDFs, lei seca e roteiro da IA (guardado por tarefa e sincronizado).
+function guideView(g){
+  const wrap=document.createElement('div');wrap.className='guide';
+  const el=(tag,text,cls)=>Object.assign(document.createElement(tag),{textContent:text,className:cls||''});
+  if(g.resumo)wrap.append(el('p',g.resumo));
+  for(const [title,items] of [['O que ler',g.leitura],['Pontos que mais caem',g.pontos],['Pegadinhas',g.pegadinhas]])
+    if(items.length){const ul=document.createElement('ul');ul.append(...items.map(t=>el('li',t)));wrap.append(el('strong',title),ul)}
+  if(g.perguntas.length){
+    // Autoteste: a resposta fica escondida até clicar na pergunta.
+    wrap.append(el('strong','Autoteste'),...g.perguntas.map(t=>{
+      const [q,...a]=t.split(' — '),d=document.createElement('details');
+      d.append(el('summary',q),el('p',a.join(' — ')||'—','note'));return d;
+    }));
+  }
+  wrap.append(el('p',`Gerado por IA (${g.model||'Gemini'}) em ${fmtDate(new Date(g.ts))}. Confira os artigos na lei seca.`,'note'));
+  return wrap;
+}
+function studyBlock(info){
+  const p=activePlan(),box=document.createElement('div');box.className='practice';
+  const g=state.guides[info.id],guide=g&&g.for===info.text?g:null;
+  const kw=info.keyword===WEAK_MARK?weakestKeyword(info.subject):'';
+  const links=document.createElement('div');links.className='actions';
+  studyLinks(kw?{...info,keyword:kw}:info,guide||{}).forEach((l,i)=>links.append(linkButton(l,i>0)));
+  const status=document.createElement('span');status.className='note';
+  const btn=document.createElement('button');btn.className='small'+(guide?' secondary':'');
+  btn.textContent=guide?'Refazer roteiro com IA':'Gerar roteiro com IA';
+  btn.onclick=async()=>{
+    if(!window.cloudInvoke){status.textContent='Roteiro com IA indisponível: a conexão com o Supabase não carregou.';return}
+    btn.disabled=true;status.textContent='Gerando roteiro... (até 30 segundos)';
+    try{
+      const text=info.text+(kw?` (assunto mais fraco: ${kw})`:'');
+      const res=await window.cloudInvoke('roteiro',{subject:info.subject,text,cargo:p.cargo,banca:p.banca});
+      const clean=cleanGuide({...res.guide,for:info.text,model:res.model,ts:Date.now()});
+      if(!clean)throw Error('A IA não devolveu um roteiro. Tente de novo.');
+      state.guides[info.id]=clean;save();render();
+    }catch(e){status.textContent=e.message;btn.disabled=false}
+  };
+  const row=document.createElement('div');row.className='actions';row.append(btn,status);
+  box.append(links);if(guide)box.append(guideView(guide));box.append(row);
+  return box;
+}
+
 // ---------- Renderização ----------
 const week=$('week');
+// Seções abertas/fechadas pelo usuário nos dias do cronograma (sobrevive aos re-renders).
+const openDetails=new Map();
 function currentWeek(p=activePlan()){return Math.max(0,Math.min(p.weeks.length-1,Math.floor((Date.now()-planStart(p).getTime())/(7*DAY_MS))))}
 function setupPlanControls(){
   const p=activePlan();
@@ -259,12 +311,16 @@ function renderWeek(){
     head.textContent=weekdays[i]+(day.hours?` · ${day.hours}h`:'')+(id===today?' · hoje':'');
     text.textContent=day.text||'—';text.className=cb.checked?'done':'';
     wrap.append(head,text);label.append(cb,wrap);card.append(label);
-    if(info.subject){
-      // Hoje: bloco aberto. Demais dias: recolhido, com o resumo no título.
-      const {c,t}=themeStats(info.theme);
+    // Hoje: blocos abertos. Demais dias: recolhidos, com o resumo no título.
+    const section=(key,label,content)=>{
       const det=document.createElement('details'),sum=document.createElement('summary');
-      sum.textContent=`Questões · meta ${info.goal}`+(t?` · ${t} feitas (${pct(c,t)}%)`:'');
-      det.open=id===today;det.append(sum,practiceBlock({...info,taskId:id}));card.append(det);
+      sum.textContent=label;det.open=openDetails.get(key)??id===today;det.ontoggle=()=>openDetails.set(key,det.open);
+      det.append(sum,content);card.append(det);
+    };
+    if(info.subject){
+      const {c,t}=themeStats(info.theme);
+      section('s:'+id,'Estudar'+(state.guides[id]?.for===info.text?' · roteiro pronto':''),studyBlock(info));
+      section('q:'+id,`Questões · meta ${info.goal}`+(t?` · ${t} feitas (${pct(c,t)}%)`:''),practiceBlock({...info,taskId:id}));
     }
     return card;
   }));
