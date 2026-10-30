@@ -95,7 +95,7 @@ A chave fica só no servidor (segredo `QUEST_API_KEY`) e o gabarito nunca vai ao
 | E4.2 | Lei seca: textos oficiais (normas.leg.br, CC BY 4.0) no banco e leitor com os artigos da sessão | feito |
 | E4.3 | Questões no app (Quest API): filtros automáticos por sessão, correção no servidor, explicação da IA com base na lei seca | feito |
 | E4.4 | Apostila da IA (completa ou revisão curta) baseada só no edital e na lei seca, com fontes e reaproveitamento | feito |
-| E4.5 | Biblioteca pessoal: PDFs privados, leitor PDF.js e mapeamento de páginas para as sessões | |
+| E4.5 | Biblioteca pessoal: PDFs privados, leitor PDF.js e mapeamento de páginas para as sessões | feito |
 | depois | Vídeos do YouTube integrados (precisa de chave da YouTube Data API) | |
 | E5 | Roteiros e materiais em segundo plano, desempenho, reforço e discursivas | |
 

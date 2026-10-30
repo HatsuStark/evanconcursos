@@ -3,6 +3,7 @@ import { Shell } from './components/Shell.tsx';
 import { useAuth } from './lib/auth.tsx';
 import { AuthPage } from './pages/Auth.tsx';
 import { HomePage } from './pages/Home.tsx';
+import { MaterialsPage } from './pages/Materials.tsx';
 import { NewNoticePage } from './pages/NewNotice.tsx';
 import { NoticesPage } from './pages/Notices.tsx';
 import { QuestionnairePage } from './pages/Questionnaire.tsx';
@@ -33,6 +34,7 @@ export function App() {
       <Route path="/concursos/:noticeId/questionario" element={<QuestionnairePage />} />
       <Route path="/cronograma" element={<SchedulePage />} />
       <Route path="/estudo/:taskId" element={<StudyPage />} />
+      <Route path="/materiais" element={<MaterialsPage />} />
       <Route path="/desempenho" element={<Soon title="Desempenho" stage="E5" />} />
       <Route path="/discursivas" element={<Soon title="Discursivas" stage="E5" />} />
       <Route path="*" element={<HomePage />} />

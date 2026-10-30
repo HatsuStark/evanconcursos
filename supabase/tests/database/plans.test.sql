@@ -85,6 +85,19 @@ select throws_ok($$update public.tasks set title = 'outro'$$, '42501', null, 't�
 select throws_ok($$update public.plan_versions set number = 99$$, '42501', null, 'versão não é alterável');
 select throws_ok($$delete from public.tasks$$, '42501', null, 'tarefas não são apagáveis direto');
 
+-- Biblioteca pessoal (E4.5): PDFs e mapeamento isolados; status/mapeamento só pelo backend.
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000a1');
+select lives_ok($$insert into public.materials (plan_id, title, storage_path, sha256, size_bytes)
+  select id, 'Apostila', '00000000-0000-4000-8000-0000000000a1/m/x.pdf', repeat('b', 64), 10 from public.study_plans$$, 'A envia material');
+select throws_ok($$update public.materials set status = 'mapped'$$, '42501', null, 'status do material é do backend');
+select throws_ok($$insert into public.material_maps (owner_id, material_id, session_id, page_from, page_to) select owner_id, id, (select id from public.study_sessions limit 1), 1, 2 from public.materials$$, '42501', null, 'mapeamento é do backend');
+select lives_ok($$insert into storage.objects (bucket_id, name) values ('materiais', '00000000-0000-4000-8000-0000000000a1/m/x.pdf')$$, 'A envia o PDF à própria pasta');
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000b1');
+select is((select count(*) from public.materials), 0::bigint, 'B não vê materiais de A');
+select is((select count(*) from storage.objects where bucket_id = 'materiais'), 0::bigint, 'B não vê PDFs de A');
+select throws_ok($$insert into storage.objects (bucket_id, name) values ('materiais', '00000000-0000-4000-8000-0000000000a1/intruso.pdf')$$, '42501', null, 'B não envia PDF à pasta de A');
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000a1');
+
 -- Apagar o edital apaga o plano em cascata.
 select lives_ok($$delete from public.notices where id = '20000000-0000-4000-8000-000000000001'$$, 'apagar edital com cronograma');
 select is((select count(*) from public.tasks), 0::bigint, 'tarefas apagadas junto');

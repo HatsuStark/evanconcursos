@@ -372,3 +372,12 @@ a.task-title:hover { color: var(--cyan); }
   .print-only { display: block; color: #222; }
   .warning-card { border-color: #c60; background: #fff7ed; color: #111; }
 }
+
+/* ---------- E4.5: materiais e leitor de PDF ---------- */
+.material-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pdf { display: grid; gap: 10px; }
+.pdf-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pdf-bar .icon-btn { width: 36px; height: 36px; }
+.pdf-page { width: 70px; display: inline-block; padding: 6px 8px; margin: 0 4px; text-align: center; }
+.pdf-canvas { overflow: auto; max-height: 80vh; border-radius: 12px; background: #2a2f3d; display: flex; justify-content: center; }
+.pdf-canvas canvas { display: block; background: #fff; }

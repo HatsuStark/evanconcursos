@@ -6,6 +6,7 @@ import { evaluate } from '../../../shared/domain/adaptive.ts';
 import { GuidePanel } from '../components/GuidePanel.tsx';
 import { LawReader } from '../components/LawReader.tsx';
 import { QuestionsPanel } from '../components/QuestionsPanel.tsx';
+import { SessionMaterials } from '../components/SessionMaterials.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
 import { sessionLawRefs } from '../lib/legal.ts';
@@ -17,7 +18,7 @@ const TABS = [
   { key: 'questoes', label: 'Questões', icon: ListChecks },
   { key: 'lei', label: 'Lei seca', icon: Scale },
   { key: 'apostila', label: 'Apostila', icon: BookOpen },
-  { key: 'material', label: 'Meus PDFs', icon: FileText, soon: 'E4.5' },
+  { key: 'material', label: 'Meus PDFs', icon: FileText },
   { key: 'videos', label: 'Vídeos', icon: Video, soon: 'depois' },
 ] as const;
 type TabKey = (typeof TABS)[number]['key'];
@@ -117,6 +118,7 @@ function StudyView({ d }: { d: StudyData }) {
       {tab === 'questoes' ? <QuestionsPanel taskId={d.task.id} goal={d.task.goal_questions} answered={mine.length} />
         : tab === 'lei' ? <LawReader refs={sessionLawRefs(d.task.title, d.topics, d.subject?.name ?? '')} />
         : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={!!d.task.session_id} />
+        : tab === 'material' ? <SessionMaterials sessionId={d.task.session_id} />
         : <div className="glass card muted">Chega na etapa {soonOf(tab)}.</div>}
     </Shell>
   );
