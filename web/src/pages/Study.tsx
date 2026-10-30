@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Check, FileText, ListChecks, Pause, Play, Scale } from 'lucide-react';
+import { BookOpen, Check, FileText, ListChecks, Maximize2, Minimize2, Pause, Play, Scale } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { evaluate } from '../../../shared/domain/adaptive.ts';
@@ -28,8 +28,13 @@ type TabKey = (typeof TABS)[number]['key'];
 function useTimer(taskId: string, initial: number) {
   const [running, setRunning] = useState(false);
   const [seconds, setSeconds] = useState(initial);
-  const ref = useRef({ seconds: initial, saved: initial });
-  useEffect(() => { ref.current = { seconds: initial, saved: initial }; setSeconds(initial); }, [taskId, initial]);
+  const ref = useRef({ taskId, seconds: initial, saved: initial });
+  // Recarregar os dados devolve o último tempo salvo: só reinicia em outra tarefa ou se o banco estiver à frente.
+  useEffect(() => {
+    if (ref.current.taskId === taskId && initial <= ref.current.saved) return;
+    ref.current = { taskId, seconds: initial, saved: initial };
+    setSeconds(initial);
+  }, [taskId, initial]);
   const flush = useCallback(() => {
     if (Math.abs(ref.current.seconds - ref.current.saved) >= 1) { ref.current.saved = ref.current.seconds; void saveTimeSpent(taskId, ref.current.seconds); }
   }, [taskId]);
@@ -63,7 +68,25 @@ function StudyView({ d }: { d: StudyData }) {
   const right = mine.filter((a) => a.correct).length;
   const subjectAcc = accuracy(d.attempts), verdict = evaluate(mine.length ? right / mine.length : null);
 
-  async function toggleDone() { await setTaskDone(d.task.id, !d.task.done_at); await qc.invalidateQueries(); }
+  const canFocus = d.task.kind !== 'simulado';
+  const [focus, setFocus] = useState(false);
+  // Esc sai do foco; o cronômetro continua até pausar.
+  useEffect(() => {
+    if (!focus) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFocus(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [focus]);
+  // Começar a estudar entra no modo foco (o simulado já tem tela própria).
+  function start() {
+    if (!timer.running) timer.toggle();
+    if (canFocus) setFocus(true);
+  }
+  async function toggleDone() {
+    if (focus) { if (timer.running) timer.toggle(); setFocus(false); }
+    await setTaskDone(d.task.id, !d.task.done_at);
+    await qc.invalidateQueries();
+  }
 
   const rail = (
     <>
@@ -73,7 +96,7 @@ function StudyView({ d }: { d: StudyData }) {
           <strong style={{ color: timer.running ? 'var(--cyan)' : 'var(--text)' }}>{fmtClock(timer.seconds)}</strong>
           <span className="muted small">previsto: {fmtClock(d.task.minutes * 60)}</span>
           <div className="bar"><span style={{ width: `${Math.min(100, (timer.seconds / Math.max(60, d.task.minutes * 60)) * 100)}%`, background: 'var(--cyan)', boxShadow: '0 0 10px var(--cyan)' }} /></div>
-          <button className={'btn' + (timer.running ? ' ghost' : '')} onClick={timer.toggle}>{timer.running ? <><Pause size={18} /> Pausar</> : <><Play size={18} /> {timer.seconds ? 'Continuar' : 'Começar'}</>}</button>
+          <button className={'btn' + (timer.running ? ' ghost' : '')} onClick={timer.running ? timer.toggle : start}>{timer.running ? <><Pause size={18} /> Pausar</> : <><Play size={18} /> {timer.seconds ? 'Continuar' : 'Começar'}</>}</button>
         </div>
       </section>
       <section>
@@ -95,8 +118,21 @@ function StudyView({ d }: { d: StudyData }) {
   );
 
   return (
-    <Shell title={d.subject?.name ?? KIND_LABEL[d.task.kind] ?? 'Estudo'} subtitle={`${fmtDate(d.task.date)} · ${KIND_LABEL[d.task.kind] ?? ''}`} rail={rail}
-      actions={<button className="btn ghost sm" onClick={() => navigate(-1)}>Voltar</button>}>
+    <Shell title={d.subject?.name ?? KIND_LABEL[d.task.kind] ?? 'Estudo'} subtitle={focus ? undefined : `${fmtDate(d.task.date)} · ${KIND_LABEL[d.task.kind] ?? ''}`} rail={focus ? undefined : rail} focus={focus}
+      actions={focus ? (
+        <div className="focus-bar">
+          <span className="focus-clock" style={{ color: timer.running ? 'var(--cyan)' : 'var(--text)' }}>{fmtClock(timer.seconds)}</span>
+          {d.task.goal_questions > 0 && <span className="muted small">{mine.length}/{d.task.goal_questions} questões</span>}
+          <button className="btn ghost sm" onClick={timer.toggle}>{timer.running ? <><Pause size={15} /> Pausar</> : <><Play size={15} /> Continuar</>}</button>
+          <button className="btn ghost sm" onClick={toggleDone}><Check size={15} /> {d.task.done_at ? 'Desfazer conclusão' : 'Concluir'}</button>
+          <button className="btn ghost sm" title="Esc" onClick={() => setFocus(false)}><Minimize2 size={15} /> Sair do foco</button>
+        </div>
+      ) : (
+        <div className="focus-bar">
+          {canFocus && <button className="btn ghost sm" onClick={start}><Maximize2 size={15} /> Modo foco</button>}
+          <button className="btn ghost sm" onClick={() => navigate(-1)}>Voltar</button>
+        </div>
+      )}>
       <div className="hero" style={{ borderColor: `color-mix(in srgb, ${color} 45%, transparent)` }}>
         <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
           {d.subject && <SubjectIcon name={d.subject.name} index={d.subjectIndex} />}

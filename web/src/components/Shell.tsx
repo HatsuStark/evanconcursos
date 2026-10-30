@@ -13,11 +13,12 @@ const NAV = [
 ];
 
 // Layout do app: barra lateral de ícones, conteúdo e painel direito (contexto secundário).
-export function Shell({ title, subtitle, actions, rail, children }: {
-  title: string; subtitle?: string; actions?: ReactNode; rail?: ReactNode; children: ReactNode;
+// focus: modo foco do estudo, só o conteúdo e o cabeçalho (sem barra lateral nem painel direito).
+export function Shell({ title, subtitle, actions, rail, focus, children }: {
+  title: string; subtitle?: string; actions?: ReactNode; rail?: ReactNode; focus?: boolean; children: ReactNode;
 }) {
   return (
-    <div className={'app' + (rail ? '' : ' no-rail')}>
+    <div className={'app' + (rail ? '' : ' no-rail') + (focus ? ' focus' : '')}>
       <nav className="sidebar" aria-label="Navegação principal">
         <div className="logo" aria-hidden>E</div>
         {NAV.map(({ to, label, icon: Icon, end }) => (
