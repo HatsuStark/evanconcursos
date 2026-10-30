@@ -1,6 +1,8 @@
 // Editais: envio do PDF, leitura pela IA (job), conferência e aprovação.
 import { useQuery } from '@tanstack/react-query';
 import { NoticeExtraction, subjectWeights, type NoticeWarning } from '../../../shared/ai/notice.ts';
+import { noticeLawKeys } from '../../../shared/legal/refs.ts';
+import { lawByKey } from '../../../shared/legal/registry.ts';
 import { supabase } from './supabase.ts';
 
 export interface NoticeRow {
@@ -126,6 +128,36 @@ export const useReview = (noticeId: string | undefined) => useQuery({
     return { notice, extraction, usage, draft, hasPlan: plans.length > 0 };
   },
 });
+
+// Apaga todos os arquivos de uma pasta do bucket (as pastas são por edital e por plano).
+async function clearFolder(bucket: string, folder: string) {
+  const { data, error } = await supabase.storage.from(bucket).list(folder, { limit: 1000 });
+  if (error) throw new Error(error.message);
+  if (!data?.length) return;
+  const removed = await supabase.storage.from(bucket).remove(data.map((f) => `${folder}/${f.name}`));
+  if (removed.error) throw new Error(`Falha ao apagar os PDFs: ${removed.error.message}`);
+}
+
+// Leis citadas só por este concurso: as marcações delas saem junto; as de leis de outro concurso ficam.
+async function lawUrnsOnlyIn(noticeId: string) {
+  const subs = must(await supabase.from('notice_subjects').select('notice_id, name, notice_topics(text)')) as { notice_id: string; name: string; notice_topics: { text: string }[] }[];
+  const keys = (mine: boolean) => noticeLawKeys(subs.filter((s) => (s.notice_id === noticeId) === mine).map((s) => ({ name: s.name, topics: s.notice_topics.map((t) => t.text) })));
+  const others = keys(false);
+  return [...keys(true)].filter((k) => !others.has(k)).map((k) => lawByKey(k)!.urn);
+}
+
+// Exclusão definitiva. Os PDFs saem antes do banco: se algo falhar no meio, o concurso continua na lista e
+// basta excluir de novo; na ordem inversa, os arquivos ficariam no bucket sem nada que apontasse para eles.
+export async function deleteNotice(noticeId: string) {
+  const { data: u } = await supabase.auth.getUser();
+  if (!u.user) throw new Error('Entre na sua conta.');
+  const plans = must(await supabase.from('study_plans').select('id').eq('notice_id', noticeId)) as { id: string }[];
+  const urns = await lawUrnsOnlyIn(noticeId);
+  await clearFolder('editais', `${u.user.id}/${noticeId}`);
+  for (const p of plans) await clearFolder('materiais', `${u.user.id}/${p.id}`);
+  const { error } = await supabase.rpc('delete_notice', { p_notice: noticeId, p_law_urns: urns });
+  if (error) throw new Error(error.message);
+}
 
 export async function approveNotice(noticeId: string, extractionId: string | null, draft: Draft) {
   const subjects = draft.subjects.filter((s) => s.name.trim());

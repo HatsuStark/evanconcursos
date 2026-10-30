@@ -12,7 +12,7 @@ import { ArticleChips } from './ArticlePeek.tsx';
 import { QuestionBody } from './QuestionBody.tsx';
 
 // De onde vêm as questões: tarefa do cronograma, busca livre ou revisão do caderno de erros.
-export type Source = { kind: 'task'; taskId: string } | { kind: 'free'; filters: FreeFilters } | { kind: 'review' };
+export type Source = { kind: 'task'; taskId: string; planId: string } | { kind: 'free'; filters: FreeFilters } | { kind: 'review' };
 
 const REASON: Record<string, string> = {
   'sem-materia': 'Esta tarefa não tem matéria para buscar questões.',
@@ -171,7 +171,7 @@ export function QuestionsPanel({ source, goal = 0, answered = 0 }: { source: Sou
         {tab === 'explicacao' && st.result && <ExplanationView ex={st.explanation} busy={busy === 'explain'} onExplain={explain} />}
         {tab === 'mnemonico' && st.result && showMnemo && <MnemonicView m={st.mnemonic} busy={busy === 'mnemonic'} onLoad={mnemonic} />}
         {st.mnemonic === null && tab === 'explicacao' && <p className="faint small" style={{ margin: 0 }}>Esta questão não pede memorização; o mnemônico foi dispensado.</p>}
-        {tab === 'anotacoes' && <NoteBox qid={q.qid} />}
+        {tab === 'anotacoes' && <NoteBox qid={q.qid} planId={source.kind === 'task' ? source.planId : undefined} />}
         {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
       </article>
       <p className="faint small" style={{ margin: 0 }}>Questões do banco Quest API{assuntos.length ? ` · assuntos desta sessão: ${assuntos.slice(0, 3).join(', ')}` : ''}.</p>
@@ -235,7 +235,7 @@ function BatchSummary({ queue, states, onBack }: { queue: Question[]; states: Re
 }
 
 // Anotação pessoal da questão (resumos), salva sozinha enquanto digita.
-function NoteBox({ qid }: { qid: string }) {
+function NoteBox({ qid, planId }: { qid: string; planId?: string }) {
   const [text, setText] = useState('');
   const [status, setStatus] = useState<'' | 'carregando' | 'salvando' | 'salvo' | 'erro'>('carregando');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -248,7 +248,7 @@ function NoteBox({ qid }: { qid: string }) {
   const change = (v: string) => {
     setText(v); setStatus('salvando');
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => { saveNote(qid, v).then(() => setStatus('salvo'), () => setStatus('erro')); }, 800);
+    timer.current = setTimeout(() => { saveNote(qid, v, planId).then(() => setStatus('salvo'), () => setStatus('erro')); }, 800);
   };
   return (
     <section className="q-note">

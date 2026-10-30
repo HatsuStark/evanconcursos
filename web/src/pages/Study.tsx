@@ -119,7 +119,7 @@ function StudyView({ d }: { d: StudyData }) {
               </button>
             ))}
           </div>
-          {tab === 'questoes' ? <QuestionsPanel source={{ kind: 'task', taskId: d.task.id }} goal={d.task.goal_questions} answered={mine.length} />
+          {tab === 'questoes' ? <QuestionsPanel source={{ kind: 'task', taskId: d.task.id, planId: d.task.plan_id }} goal={d.task.goal_questions} answered={mine.length} />
             : tab === 'lei' ? <LawReader refs={lawRefs} />
             : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={hasSession} />
             : <SessionMaterials sessionId={d.task.session_id} />}

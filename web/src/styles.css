@@ -154,6 +154,9 @@ a { color: var(--cyan); }
   background: currentColor; box-shadow: 0 0 16px currentColor; opacity: .9;
 }
 .course-card h3 { margin: 0; font-size: 18px; line-height: 1.25; color: var(--text); }
+.course-wrap { position: relative; display: grid; }
+.course-delete { position: absolute; right: 14px; bottom: 14px; width: 34px; height: 34px; z-index: 1; }
+.icon-btn.danger:hover { color: var(--danger); border-color: rgba(255, 92, 122, .5); }
 .warning-card {
   display: flex; gap: 12px; padding: 14px; border-radius: var(--radius-sm);
   background: rgba(255, 138, 76, .07); border: 1px solid rgba(255, 138, 76, .3); font-size: 14px;

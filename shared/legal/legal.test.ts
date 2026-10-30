@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseLawHtml } from './parse.ts';
-import { findLawRefs, inRanges, parseRanges } from './refs.ts';
+import { findLawRefs, inRanges, noticeLawKeys, parseRanges } from './refs.ts';
 
 // Trecho real do HTML do CPP no normas.leg.br (estrutura preservada).
 const HTML = `<html><body>
@@ -42,6 +42,13 @@ describe('parseLawHtml', () => {
     expect(arts[0]!.revoked).toBe(false);
     expect(arts[0]!.heading).toBe('TÍTULO II – DO INQUÉRITO POLICIAL');
     expect(arts[3]!.heading).toBe('TÍTULO II – DO INQUÉRITO POLICIAL › CAPÍTULO I – DA AÇÃO');
+  });
+});
+
+describe('leis de um edital', () => {
+  it('junta as citadas nos tópicos e a principal da matéria', () => {
+    expect([...noticeLawKeys([{ name: 'Direito Penal', topics: ['Lei 11.340/06 (Maria da Penha)', 'Peculato'] }])].sort()).toEqual(['CP', 'L11340']);
+    expect([...noticeLawKeys([{ name: 'Português', topics: ['Crase'] }])]).toEqual([]);
   });
 });
 

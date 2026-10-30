@@ -45,10 +45,11 @@ export async function loadNote(qid: string) {
   const { data } = await supabase.from('question_notes').select('note').eq('qid', qid).maybeSingle();
   return (data as { note: string } | null)?.note ?? '';
 }
-export async function saveNote(qid: string, note: string) {
+// planId liga a anotação ao concurso, mesmo em questão ainda não respondida (ela sai junto se ele for excluído).
+export async function saveNote(qid: string, note: string, planId?: string) {
   const { data: u } = await supabase.auth.getUser();
   const { error } = note.trim()
-    ? await supabase.from('question_notes').upsert({ owner_id: u.user?.id, qid, note: note.slice(0, 5000), updated_at: new Date().toISOString() }, { onConflict: 'owner_id,qid' })
+    ? await supabase.from('question_notes').upsert({ owner_id: u.user?.id, qid, note: note.slice(0, 5000), updated_at: new Date().toISOString(), ...(planId ? { plan_id: planId } : {}) }, { onConflict: 'owner_id,qid' })
     : await supabase.from('question_notes').delete().eq('qid', qid);
   if (error) throw new Error(error.message);
 }

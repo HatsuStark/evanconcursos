@@ -62,8 +62,8 @@ export async function recordAnswer(admin: SupabaseClient, a: AnswerInput) {
   return data as { correct: boolean; gabarito: string };
 }
 
-export async function upsertFlashcard(admin: SupabaseClient, ownerId: string, kind: 'mnemonic' | 'question', ref: string, front: string, back: string) {
-  await admin.from('flashcards').upsert({ owner_id: ownerId, kind, ref, front: front.slice(0, 2000), back: back.slice(0, 4000) }, { onConflict: 'owner_id,kind,ref', ignoreDuplicates: true });
+export async function upsertFlashcard(admin: SupabaseClient, ownerId: string, kind: 'mnemonic' | 'question', ref: string, front: string, back: string, planId?: string | null) {
+  await admin.from('flashcards').upsert({ owner_id: ownerId, kind, ref, front: front.slice(0, 2000), back: back.slice(0, 4000), plan_id: planId ?? null }, { onConflict: 'owner_id,kind,ref', ignoreDuplicates: true });
 }
 
 // Situação do mnemônico de cada questão (uma consulta por lote): 'yes' já existe, 'no' a IA já disse que não

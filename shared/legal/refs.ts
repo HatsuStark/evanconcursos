@@ -52,6 +52,14 @@ export function findLawRefs(text: string, subject = ''): LawRef[] {
   return [...found].map(([law, ranges]) => ({ law, ranges: dedupe(ranges) }));
 }
 
+// Leis de um edital: as citadas nos tópicos e a principal de cada matéria (sessões sem citação usam essa).
+export function noticeLawKeys(subjects: { name: string; topics: string[] }[]) {
+  return new Set(subjects.flatMap((s) => {
+    const main = lawForSubject(s.name);
+    return [...findLawRefs(s.topics.join('\n'), s.name).map((r) => r.law), ...(main ? [main] : [])];
+  }));
+}
+
 function dedupe(r: ArticleRange[]) {
   const seen = new Set<string>();
   return r.filter((x) => { const k = `${x.from}${x.fromSuffix ?? ''}-${x.to}${x.toSuffix ?? ''}`; if (seen.has(k)) return false; seen.add(k); return true; });
