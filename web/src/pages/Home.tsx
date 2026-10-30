@@ -1,5 +1,6 @@
 import { CalendarClock, CheckCircle2, FileUp, Layers, RotateCcw, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { ReplanBanner } from '../components/ReplanBanner.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { TaskCard } from '../components/TaskCard.tsx';
 import { daysUntil, fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
@@ -83,6 +84,7 @@ export function HomePage() {
           <span className="chip" style={{ color: 'var(--lime)' }}><CheckCircle2 /> {tasks.filter((t) => t.done_at).length} tarefas feitas</span>
         </div>
       </div>
+      <ReplanBanner active={active.data} />
       {!!(due.data?.errors || due.data?.cards) && (
         <div className="glass card review-today">
           <RotateCcw size={20} style={{ color: 'var(--orange)' }} />

@@ -2,6 +2,7 @@ import { AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, RefreshCw, Spar
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { parseYmd, ymd } from '../../../shared/domain/dates.ts';
+import { ReplanBanner } from '../components/ReplanBanner.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { TaskCard, taskColor } from '../components/TaskCard.tsx';
 import { fmtDate, subjectColor } from '../components/ui.tsx';
@@ -79,7 +80,7 @@ export function SchedulePage() {
         </div>
       </section>
       <section>
-        <p className="faint small" style={{ margin: '0 0 10px' }}>Versão {version?.number} · {version && new Date(version.created_at).toLocaleDateString('pt-BR')}</p>
+        <p className="faint small" style={{ margin: '0 0 10px' }}>Versão {version?.number}{version?.reason === 'adaptive' ? ' (reorganizada)' : ''} · {version && new Date(version.created_at).toLocaleDateString('pt-BR')}</p>
         <Link className="btn ghost sm" to={`/concursos/${notice.id}/questionario`}><RefreshCw size={15} /> Refazer cronograma</Link>
       </section>
     </>
@@ -94,6 +95,7 @@ export function SchedulePage() {
           <button className="icon-btn" onClick={() => shift(1)} aria-label="Próximo mês"><ChevronRight size={18} /></button>
         </div>
       }>
+      <ReplanBanner active={active.data} />
       <div className="calendar glass" role="grid" aria-label="Calendário de estudos">
         {WEEKDAYS.map((d) => <div key={d} className="cal-head" role="columnheader">{d}</div>)}
         {cells.map((d) => {

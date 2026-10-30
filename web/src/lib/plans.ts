@@ -1,6 +1,7 @@
 // Planos de estudo: geração (IA no backend + scheduler determinístico) e leitura do cronograma ativo.
 import { useQuery } from '@tanstack/react-query';
 import { ymd } from '../../../shared/domain/dates.ts';
+import type { Replan, ReplanAttempt } from '../../../shared/domain/replan.ts';
 import { buildPlanPayload, calendarSummary, GENERATOR_VERSION, theoryPlan, type PlanBase } from '../../../shared/ai/plan-build.ts';
 import { fallbackSessions, PLAN_PROMPT_VERSION, type PlanInputs, type Session } from '../../../shared/ai/plan.ts';
 import { supabase } from './supabase.ts';
@@ -116,6 +117,18 @@ export const useActivePlan = (noticeId?: string) => useQuery({
     return { plan, notice: must(notice) as ActivePlan['notice'], version: must(version) as ActivePlan['version'], subjects: must(subjects) as SubjectRow[], tasks: must(tasks) as TaskRow[] };
   },
 });
+
+// Reorganização depois de atrasos: tudo calculado no app, sem IA; o banco grava a nova versão.
+export const usePlanAttempts = (planId: string | undefined, enabled: boolean) => useQuery({
+  queryKey: ['plan-attempts', planId],
+  enabled: enabled && !!planId,
+  queryFn: async () => must(await supabase.from('question_attempts').select('subject_id, correct, error_reason, created_at').eq('plan_id', planId!).not('subject_id', 'is', null).order('created_at', { ascending: false }).limit(5000)) as ReplanAttempt[],
+});
+
+export async function applyReplan(planId: string, r: Replan) {
+  const { error } = await supabase.rpc('replan_version', { p_plan: planId, p_data: r });
+  if (error) throw new Error(error.message);
+}
 
 export async function setTaskDone(taskId: string, done: boolean) {
   const { error } = await supabase.from('tasks').update({ done_at: done ? new Date().toISOString() : null }).eq('id', taskId);

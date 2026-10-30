@@ -3,6 +3,7 @@ import { CheckCircle2, ChevronLeft, ChevronRight, Flag, Timer, XCircle } from 'l
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { CommentsPanel } from '../components/CommentsPanel.tsx';
+import { ErrorReasonPicker } from '../components/ErrorReason.tsx';
 import { ExplanationView } from '../components/QuestionsPanel.tsx';
 import { QuestionBody } from '../components/QuestionBody.tsx';
 import { Shell } from '../components/Shell.tsx';
@@ -122,6 +123,7 @@ function SimuladoResult({ d }: { d: SimuladoData }) {
               {open === i && x.question && (
                 <div className="grid" style={{ gap: 12, marginTop: 12 }}>
                   <QuestionBody q={x.question} number={i + 1} chosen={ch || null} struck={[]} gabarito={x.gabarito} locked onSelect={() => {}} onStrike={() => {}} />
+                  {!!ch && !ok && <ErrorReasonPicker qid={x.qid} />}
                   <ExplanationView ex={ex[x.qid] ?? null} busy={busy === x.qid} onExplain={async () => { setBusy(x.qid); try { const r2 = await explainQuestion(null, x.qid); setEx((s) => ({ ...s, [x.qid]: r2.explanation })); } finally { setBusy(''); } }} />
                   <h3 style={{ margin: 0, fontSize: 15 }}>Comentários</h3>
                   <CommentsPanel qid={x.qid} />

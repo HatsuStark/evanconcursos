@@ -1,6 +1,7 @@
 // Prática fora do cronograma: questões livres, caderno de erros, flashcards, simulados e desempenho por contexto.
 import { useQuery } from '@tanstack/react-query';
 import { ymd } from '../../../shared/domain/dates.ts';
+import type { ErrorReason } from '../../../shared/domain/replan.ts';
 import type { Question } from './questions.ts';
 import { supabase } from './supabase.ts';
 
@@ -94,12 +95,23 @@ export const useSimulados = () => useQuery({
 
 // ---------- desempenho por contexto ----------
 export type Ctx = 'plan' | 'free' | 'simulado' | 'review';
-export interface AttemptStat { context: Ctx; materia: string; assunto: string; correct: boolean; created_at: string; time_ms: number | null }
+export interface AttemptStat { context: Ctx; materia: string; assunto: string; correct: boolean; created_at: string; time_ms: number | null; error_reason: ErrorReason | null }
 export const useAttemptStats = () => useQuery({
   queryKey: ['attempt-stats'],
   queryFn: async () => {
-    const { data, error } = await supabase.from('question_attempts').select('context, materia, assunto, correct, created_at, time_ms').order('created_at', { ascending: false }).limit(5000);
+    const { data, error } = await supabase.from('question_attempts').select('context, materia, assunto, correct, created_at, time_ms, error_reason').order('created_at', { ascending: false }).limit(5000);
     if (error) throw new Error(error.message);
     return data as AttemptStat[];
   },
 });
+
+// ---------- motivo do erro ----------
+export async function lastErrorReason(qid: string) {
+  const { data, error } = await supabase.from('question_attempts').select('error_reason').eq('qid', qid).eq('correct', false).order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as { error_reason: ErrorReason | null } | null)?.error_reason ?? null;
+}
+export async function setErrorReason(qid: string, reason: ErrorReason | null) {
+  const { error } = await supabase.rpc('set_error_reason', { p_qid: qid, p_reason: reason });
+  if (error) throw new Error(error.message);
+}

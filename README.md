@@ -83,6 +83,12 @@ A chave fica só no servidor (segredo `QUEST_API_KEY`) e o gabarito nunca vai ao
 
 `scripts/e2e-questions.ts` testa a função ponta a ponta com um usuário temporário (exige incluir `e2e@evanconcursos.test` em `ALLOWED_EMAILS`).
 
+## Reorganizar depois de atrasos
+
+Com tarefas atrasadas, a tela Hoje e o Cronograma mostram o que mudaria e só gravam ao clicar em **Reorganizar** (`shared/domain/replan.ts`, sem IA e sem custo). Tarefas feitas não mudam. Toda sessão de teoria pendente continua no plano, na mesma ordem, a partir de hoje. O espaço vem dos dias de consolidação, depois da revisão final e da revisão semanal; simulados, véspera e prova ficam onde estão. Se ainda faltar tempo, um dia recebe mais de uma sessão, com tempo e meta divididos. Revisões e simulados que já passaram saem da agenda. Os dias de reforço restantes são redistribuídos pelo peso no edital e pela fraqueza da matéria, em que **erro por falta de atenção** conta metade. A função `replan_version` grava uma nova versão (`adaptive`), mantém as tarefas antigas no histórico, reaproveita as sessões (apostila, PDFs e questões continuam ligados) e leva tempo estudado e tentativas para a tarefa nova.
+
+**Motivo do erro:** ao errar, o estudante pode marcar falta de conteúdo, falta de atenção ou pegadinha (`question_attempts.error_reason`). O total aparece em Desempenho.
+
 ## Leitor por voz
 
 O botão **Ouvir** da apostila lê bloco a bloco com destaque na tela, escreve siglas e abreviações por extenso (`shared/ai/speech.ts`) e tem pausar, pular seção, velocidade e escolha de voz. A leitura para ao sair da aba Apostila. Nenhuma voz em uso tem custo por leitura:

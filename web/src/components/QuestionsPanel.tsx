@@ -10,6 +10,7 @@ import {
 import { mayHaveMnemonic } from '../../../shared/qbank/mnemonic.ts';
 import { ArticleChips } from './ArticlePeek.tsx';
 import { CommentsPanel } from './CommentsPanel.tsx';
+import { ErrorReasonPicker } from './ErrorReason.tsx';
 import { QuestionBody } from './QuestionBody.tsx';
 
 // De onde vêm as questões: tarefa do cronograma, busca livre ou revisão do caderno de erros.
@@ -162,6 +163,8 @@ export function QuestionsPanel({ source, goal = 0, answered = 0 }: { source: Sou
             <span className="faint small">Atalhos: letras para escolher · Enter responde · ← → navega · <Scissors size={11} /> tacha</span>
           </div>
         )}
+
+        {st.result && !st.result.correct && <ErrorReasonPicker qid={q.qid} />}
 
         <div className="q-tabs" role="tablist">
           <button role="tab" aria-selected={tab === 'explicacao'} className={'tab' + (tab === 'explicacao' ? ' on' : '')} disabled={!st.result} title={st.result ? '' : 'Responda primeiro'} onClick={() => patch({ tab: 'explicacao' })}><Lightbulb size={15} /> Explicação</button>

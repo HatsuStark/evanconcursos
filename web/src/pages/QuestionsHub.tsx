@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BarChart3, Layers, ListChecks, Plus, RotateCcw, Search, Trash2, Trophy, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { ERROR_REASONS } from '../../../shared/domain/replan.ts';
 import { QuestionsPanel } from '../components/QuestionsPanel.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { SimuladoStarter } from '../components/SimuladoStarter.tsx';
@@ -223,6 +224,7 @@ export function PerformanceTab() {
   const by = new Map<string, { t: number; c: number }>();
   for (const a of rows) { const k = a.materia || 'Sem matéria', e = by.get(k) ?? { t: 0, c: 0 }; e.t++; if (a.correct) e.c++; by.set(k, e); }
   const week = rows.filter((a) => Date.now() - new Date(a.created_at).getTime() < 7 * 864e5).length;
+  const wrong = rows.filter((a) => !a.correct), marked = wrong.filter((a) => a.error_reason);
   return (
     <div className="grid" style={{ gap: 14 }}>
       <div className="segmented" style={{ justifySelf: 'start' }}>{CTX.map((c) => <button key={c.key} className={ctx === c.key ? 'on' : ''} onClick={() => setCtx(c.key)}>{c.label}</button>)}</div>
@@ -238,6 +240,21 @@ export function PerformanceTab() {
             <tr key={m}><td>{m}</td><td>{e.c}/{e.t} · {Math.round((e.c / e.t) * 100)}%</td><td style={{ width: '35%' }}><div className="bar"><span style={{ width: `${(e.c / e.t) * 100}%`, background: e.c / e.t >= 0.75 ? 'var(--lime)' : 'var(--orange)' }} /></div></td></tr>
           ))}
         </tbody></table>
+      )}
+      {!!marked.length && (
+        <section className="glass card" style={{ display: 'grid', gap: 10 }}>
+          <strong>Por que você erra</strong>
+          {ERROR_REASONS.map((r) => {
+            const n = marked.filter((a) => a.error_reason === r.key).length, share = Math.round((n / marked.length) * 100);
+            return (
+              <div key={r.key}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}><span>{r.label}</span><span className="muted">{n} · {share}%</span></div>
+                <div className="bar" style={{ marginTop: 5 }}><span style={{ width: `${share}%`, background: 'var(--orange)' }} /></div>
+              </div>
+            );
+          })}
+          <span className="faint small">{marked.length} de {wrong.length} erros com motivo marcado.</span>
+        </section>
       )}
     </div>
   );

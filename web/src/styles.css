@@ -418,6 +418,10 @@ a.task-title:hover { color: var(--cyan); }
 .q-comment-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 @media (max-width: 720px) { .q-actions .faint { display: none; } }
 
+.replan { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 14px; border-color: rgba(255, 138, 76, .35); }
+.replan ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 3px; }
+.q-reason { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
 /* Leitor por voz: controles presos ao fim da tela enquanto a apostila rola. */
 .voice-bar { position: sticky; bottom: 12px; z-index: 4; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; }
 .voice-bar .icon-btn { width: 36px; height: 36px; }
