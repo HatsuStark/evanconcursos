@@ -1,4 +1,4 @@
-import { Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import { Shell } from './components/Shell.tsx';
 import { useAuth } from './lib/auth.tsx';
 import { AuthPage } from './pages/Auth.tsx';
@@ -6,6 +6,8 @@ import { HomePage } from './pages/Home.tsx';
 import { MaterialsPage } from './pages/Materials.tsx';
 import { NewNoticePage } from './pages/NewNotice.tsx';
 import { NoticesPage } from './pages/Notices.tsx';
+import { QuestionsHubPage } from './pages/QuestionsHub.tsx';
+import { SimuladoPage } from './pages/Simulado.tsx';
 import { QuestionnairePage } from './pages/Questionnaire.tsx';
 import { ReadingPage } from './pages/Reading.tsx';
 import { ReviewPage } from './pages/Review.tsx';
@@ -35,7 +37,9 @@ export function App() {
       <Route path="/cronograma" element={<SchedulePage />} />
       <Route path="/estudo/:taskId" element={<StudyPage />} />
       <Route path="/materiais" element={<MaterialsPage />} />
-      <Route path="/desempenho" element={<Soon title="Desempenho" stage="E5" />} />
+      <Route path="/questoes" element={<QuestionsHubPage />} />
+      <Route path="/simulados/:id" element={<SimuladoPage />} />
+      <Route path="/desempenho" element={<Navigate to="/questoes?aba=desempenho" replace />} />
       <Route path="/discursivas" element={<Soon title="Discursivas" stage="E5" />} />
       <Route path="*" element={<HomePage />} />
     </Routes>

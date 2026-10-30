@@ -22,8 +22,9 @@ async function call<T>(body: Record<string, unknown>): Promise<T> {
 }
 
 export const nextQuestions = (taskId: string, count = 5) => call<NextResult>({ action: 'next', taskId, count });
-export const answerQuestion = (taskId: string, qid: string, chosen: string) => call<{ correct: boolean; gabarito: string }>({ action: 'answer', taskId, qid, chosen });
-export const explainQuestion = (taskId: string, qid: string) => call<{ explanation: Explanation }>({ action: 'explain', taskId, qid });
+export const answerQuestion = (taskId: string, qid: string, chosen: string, timeMs?: number) => call<{ correct: boolean; gabarito: string }>({ action: 'answer', taskId, qid, chosen, timeMs });
+// taskId é opcional fora do cronograma (questões livres, revisão, simulado).
+export const explainQuestion = (taskId: string | null, qid: string) => call<{ explanation: Explanation }>({ action: 'explain', ...(taskId ? { taskId } : {}), qid });
 
 // Questões de "certo ou errado" podem vir sem alternativas: o app oferece Certo/Errado.
 export const optionsOf = (q: Question) => q.alternativas.length ? q.alternativas : [{ letra: 'C', texto: 'Certo', imagens: [] }, { letra: 'E', texto: 'Errado', imagens: [] }];
@@ -31,7 +32,7 @@ export const sameAnswer = (a: string, b: string) => a.trim().slice(0, 1).toUpper
 
 export interface Mnemonic { id: string; concept: string; mnemonic: string; explanation: string; items: { chave: string; significado: string }[] }
 // null = a IA avaliou que não cabe mnemônico para esta questão.
-export const mnemonicFor = (taskId: string, qid: string) => call<{ mnemonic: Mnemonic | null }>({ action: 'mnemonic', taskId, qid });
+export const mnemonicFor = (taskId: string | null, qid: string) => call<{ mnemonic: Mnemonic | null }>({ action: 'mnemonic', ...(taskId ? { taskId } : {}), qid });
 
 // Anotações pessoais por questão (RLS: só o dono lê e grava).
 export async function loadNote(qid: string) {

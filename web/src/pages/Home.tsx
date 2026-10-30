@@ -1,10 +1,11 @@
-import { CalendarClock, CheckCircle2, FileUp, Layers, Sparkles } from 'lucide-react';
+import { CalendarClock, CheckCircle2, FileUp, Layers, RotateCcw, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Shell } from '../components/Shell.tsx';
 import { TaskCard } from '../components/TaskCard.tsx';
 import { daysUntil, fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
 import { useAuth } from '../lib/auth.tsx';
 import { useNotices } from '../lib/notices.ts';
+import { useDueCounts } from '../lib/practice.ts';
 import { today, useActivePlan } from '../lib/plans.ts';
 
 // Tela inicial: o estudo do dia. Sem plano ainda, conduz o primeiro acesso até o cronograma.
@@ -12,6 +13,7 @@ export function HomePage() {
   const { session } = useAuth();
   const notices = useNotices();
   const active = useActivePlan();
+  const due = useDueCounts();
   const name = session?.user.email?.split('@')[0] ?? '';
   const subtitle = name ? `Olá, ${name}. Pronto para estudar?` : 'Pronto para estudar?';
   if (notices.isLoading || active.isLoading) return <Shell title="Hoje" subtitle={subtitle}><div className="spinner" /></Shell>;
@@ -81,6 +83,14 @@ export function HomePage() {
           <span className="chip" style={{ color: 'var(--lime)' }}><CheckCircle2 /> {tasks.filter((t) => t.done_at).length} tarefas feitas</span>
         </div>
       </div>
+      {!!(due.data?.errors || due.data?.cards) && (
+        <div className="glass card review-today">
+          <RotateCcw size={20} style={{ color: 'var(--orange)' }} />
+          <div style={{ flex: 1 }}><strong>Revisar hoje</strong><div className="muted small">{due.data!.errors} questão(ões) do caderno de erros · {due.data!.cards} flashcard(s)</div></div>
+          {!!due.data!.errors && <Link className="btn sm" to="/questoes?aba=revisar">Revisar erros</Link>}
+          {!!due.data!.cards && <Link className="btn ghost sm" to="/questoes?aba=flashcards">Flashcards</Link>}
+        </div>
+      )}
       <div className="section-title"><h2>Estudo do dia</h2><span className="badge cyan">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'short' })}</span></div>
       {todays.length ? <div className="grid" style={{ gap: 12 }}>{todays.map((t) => <TaskCard key={t.id} task={t} subjects={subjects} />)}</div> : (
         <div className="glass card">

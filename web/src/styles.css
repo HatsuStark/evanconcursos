@@ -408,3 +408,26 @@ a.task-title:hover { color: var(--cyan); }
 .q-note { display: grid; gap: 6px; }
 .q-note .textarea { min-height: 120px; }
 @media (max-width: 720px) { .q-actions .faint { display: none; } }
+
+/* ---------- prática: hub de questões, flashcards, simulados ---------- */
+.filters { display: grid; gap: 14px; }
+.chips-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.chip-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-2); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+.chip-btn.on, .chip-btn:hover { color: var(--text); border-color: var(--cyan); }
+.article-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.article-peek { flex-basis: 100%; padding: 14px; border-radius: 12px; background: rgba(8, 12, 24, .6); border: 1px solid rgba(42, 212, 232, .35); line-height: 1.6; }
+.article-peek header { display: flex; justify-content: space-between; margin-bottom: 6px; }
+.article-peek p { margin: 0 0 6px; }
+.summary { display: grid; gap: 16px; }
+.sum-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.sum-table th { text-align: left; color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.sum-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); }
+.flashcard { display: grid; gap: 14px; min-height: 240px; padding: 26px; text-align: left; cursor: pointer; color: var(--text); width: 100%; border-radius: var(--radius); transition: box-shadow .2s; }
+.flashcard.flipped { box-shadow: var(--glow-violet); }
+.fc-text { font-size: 17px; line-height: 1.6; }
+.fc-text p { margin: 0 0 8px; }
+.sim-start { display: grid; gap: 14px; }
+.sim-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.sim-score { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.sim-block { padding: 14px 18px; }
+.review-today { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 18px; border-color: rgba(255, 138, 76, .35); }
