@@ -1,3 +1,10 @@
-# Site estático, sem build. Só a pasta public/ é publicada.
+# App React (Vite). O build sai em web/dist.
 [build]
-  publish = "public"
+  command = "npm run build"
+  publish = "web/dist"
+
+# SPA: rotas do React Router caem no index.html.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
