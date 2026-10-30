@@ -1,30 +1,36 @@
 import { Route, Routes } from 'react-router-dom';
+import { Shell } from './components/Shell.tsx';
+import { useAuth } from './lib/auth.tsx';
+import { AuthPage } from './pages/Auth.tsx';
+import { HomePage } from './pages/Home.tsx';
+import { NewNoticePage } from './pages/NewNotice.tsx';
+import { NoticesPage } from './pages/Notices.tsx';
+import { ReadingPage } from './pages/Reading.tsx';
+import { ReviewPage } from './pages/Review.tsx';
 
-// Fluxo do primeiro acesso. Cada passo ganha sua tela nas próximas etapas (E1–E4).
-const ONBOARDING = ['Cadastro', 'Envio do edital', 'Conferência dos dados', 'Questionário', 'Geração do cronograma', 'Estudo diário'];
-
-function Home() {
+function Soon({ title, stage }: { title: string; stage: string }) {
   return (
-    <main className="page">
-      <header className="brand">
-        <span className="logo" aria-hidden>§</span>
-        <h1>Evan Concursos</h1>
-      </header>
-      <section className="panel">
-        <h2>Em construção</h2>
-        <p className="muted">Envie o edital, responda algumas perguntas e receba um cronograma personalizado, com orientação diária, materiais, revisões e questões.</p>
-        <ol className="steps">
-          {ONBOARDING.map((s) => <li key={s}>{s}</li>)}
-        </ol>
-      </section>
-    </main>
+    <Shell title={title}>
+      <div className="glass card"><span className="badge orange">{stage}</span><p className="muted" style={{ marginBottom: 0 }}>Esta área chega numa das próximas etapas.</p></div>
+    </Shell>
   );
 }
 
 export function App() {
+  const { session, loading } = useAuth();
+  if (loading) return <div className="center-page"><div className="spinner" /></div>;
+  if (!session) return <AuthPage />;
   return (
     <Routes>
-      <Route path="*" element={<Home />} />
+      <Route path="/" element={<HomePage />} />
+      <Route path="/concursos" element={<NoticesPage />} />
+      <Route path="/concursos/novo" element={<NewNoticePage />} />
+      <Route path="/concursos/:noticeId/leitura/:jobId" element={<ReadingPage />} />
+      <Route path="/concursos/:noticeId/conferencia" element={<ReviewPage />} />
+      <Route path="/cronograma" element={<Soon title="Cronograma" stage="E3" />} />
+      <Route path="/desempenho" element={<Soon title="Desempenho" stage="E5" />} />
+      <Route path="/discursivas" element={<Soon title="Discursivas" stage="E5" />} />
+      <Route path="*" element={<HomePage />} />
     </Routes>
   );
 }

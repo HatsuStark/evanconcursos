@@ -73,11 +73,25 @@ select throws_ok($$insert into public.notices (owner_id, title) values ('0000000
 select throws_ok($$insert into public.notice_subjects (notice_id, name) values ('10000000-0000-4000-8000-000000000001', 'x')$$, '23503', null, 'B não pendura matéria no edital de A (FK composta)');
 select throws_ok($$insert into storage.objects (bucket_id, name) values ('editais', '00000000-0000-4000-8000-00000000000a/intruso.pdf')$$, '42501', null, 'B não envia PDF para a pasta de A');
 
+select throws_ok($$select public.approve_notice('10000000-0000-4000-8000-000000000001', null, '{"subjects":[{"name":"X"}]}')$$, 'P0002', null, 'B não aprova o edital de A');
+
 -- Os dados de A continuam intactos.
 select pg_temp.as_user('00000000-0000-4000-8000-00000000000a');
 select is((select title from public.notices), 'Edital A', 'update de B não afetou A');
 select is((select count(*) from public.notice_topics), 1::bigint, 'delete de B não afetou A');
 select is((select count(*) from storage.objects where bucket_id = 'editais'), 1::bigint, 'PDF de A continua lá');
+
+-- A aprova o próprio edital: substitui matérias e tópicos, atualiza os dados.
+select lives_ok($$select public.approve_notice('10000000-0000-4000-8000-000000000001', null,
+  '{"title":"TJ","board":"VUNESP","examDate":"2027-03-14","totalQuestions":70,
+    "subjects":[{"name":"Português","questions":16,"weight":5,"topics":[{"text":"Crase","page":3},{"text":"Regência","page":0}]},
+                {"name":"Penal","core":true,"block":"Direito","topics":[{"text":"Dolo"}]}]}')$$, 'A aprova o próprio edital');
+select is((select status from public.notices), 'reviewed', 'edital fica conferido');
+select is((select exam_date from public.notices), '2027-03-14'::date, 'data da prova gravada');
+select is((select count(*) from public.notice_subjects), 2::bigint, 'matérias substituídas');
+select is((select string_agg(t.text, ',' order by t.position) from public.notice_topics t join public.notice_subjects s on s.id = t.subject_id where s.name = 'Português'),
+  'Crase,Regência', 'tópicos na ordem');
+select throws_ok($$select public.approve_notice('10000000-0000-4000-8000-000000000001', null, '{"subjects":[]}')$$, '22023', null, 'sem disciplinas é recusado');
 
 -- ---------- anônimo ----------
 select pg_temp.as_admin();

@@ -1,4 +1,4 @@
-// Publica as Edge Functions de IA ("edital" e "roteiro") no Supabase e grava os segredos delas, lendo tudo do .env.
+// Publica as Edge Functions de IA no Supabase e grava os segredos delas, lendo tudo do .env.
 // Uso: node scripts/deploy-functions.mjs
 // Os segredos vão por arquivo temporário (apagado no fim), nunca aparecem no terminal.
 import { readFileSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
@@ -7,7 +7,9 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const CLI = 'supabase@2.120.0';
-const FUNCTIONS = ['edital', 'plano', 'roteiro'];
+const FUNCTIONS = ['notice-extract'];
+// Funções do app legado: removidas do projeto se ainda existirem.
+const REMOVED = ['edital', 'plano', 'roteiro'];
 const root = new URL('..', import.meta.url);
 const env = Object.fromEntries(
   readFileSync(new URL('.env', root), 'utf8')
@@ -21,7 +23,7 @@ if (missing.length) {
   process.exit(1);
 }
 
-const run = (args) => {
+const run = (args, { optional = false } = {}) => {
   console.log(`> supabase ${args.join(' ')}`);
   const r = spawnSync('npx', ['--yes', CLI, ...args], {
     cwd: root,
@@ -29,7 +31,7 @@ const run = (args) => {
     shell: process.platform === 'win32',
     env: { ...process.env, SUPABASE_ACCESS_TOKEN: env.SUPABASE_ACCESS_TOKEN },
   });
-  if (r.status !== 0) process.exit(r.status ?? 1);
+  if (r.status !== 0 && !optional) process.exit(r.status ?? 1);
 };
 
 const dir = mkdtempSync(join(tmpdir(), 'evan-secrets-'));
@@ -45,4 +47,5 @@ try {
 }
 // As funções validam o login do usuário por conta própria (getUser + lista de e-mails).
 for (const name of FUNCTIONS) run(['functions', 'deploy', name, '--project-ref', env.SUPABASE_PROJECT_REF, '--no-verify-jwt', '--use-api']);
+for (const name of REMOVED) run(['functions', 'delete', name, '--project-ref', env.SUPABASE_PROJECT_REF], { optional: true });
 console.log(`\nPronto: funções publicadas (${FUNCTIONS.join(', ')}).`);

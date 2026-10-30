@@ -8,13 +8,15 @@ Começa como projeto pessoal (primeiro caso real: TJSP · Oficial de Justiça), 
 
 ```
 shared/      TypeScript puro, usado pelo web e pelas Edge Functions
+  ai/        schemas Zod, prompts versionados, chamada ao Gemini e verificações da extração
   domain/    scheduler (calendário determinístico), foco adaptativo e revisão espaçada,
              filtro do QConcursos, materiais (buscas e lei seca)
 web/         React + TypeScript (Vite)
 supabase/
   migrations/ SQL versionado (aplicado com scripts/db.mjs push)
   tests/     testes pgTAP de isolamento entre usuários (scripts/db.mjs test)
-  functions/ Edge Functions de IA (Gemini). Serão reescritas na E2/E3 (notice-extract, plan-design, study-guide)
+  functions/ Edge Functions: notice-extract (E2); plan-design e study-guide nas próximas etapas
+evals/       editais de referência (gabaritos) e avaliação da extração
 scripts/     db.mjs (migrações e testes do banco), deploy-functions.mjs (funções e segredos), gemini-models.mjs
 ```
 
@@ -45,13 +47,33 @@ node scripts/db.mjs push   # aplica as migrações
 node scripts/db.mjs test   # testes pgTAP (RLS, Storage), numa transação desfeita no fim
 ```
 
+## Qualidade da extração
+
+A leitura do edital é medida contra gabaritos feitos à mão (`evals/gabaritos`), com editais públicos de bancas diferentes (VUNESP, FGV, Cebraspe, inclusive edital com vários cargos). Os PDFs ficam fora do Git; o gabarito guarda a URL e o sha256.
+
+| Métrica | Limite |
+|---|---|
+| Banca, cargo, data da prova, total de questões, discursiva e blocos | 100% |
+| Matérias encontradas / corretas | 100% / ≥ 95% |
+| Questões por matéria (quando o edital informa) | 100% |
+| Tópicos que não aparecem no texto do PDF | ≤ 2% |
+
+Prompt `notice-v2` com `gemini-3.8-flash`: 4/4 editais dentro dos limites (0% de tópicos fora do PDF), 35–80 s e US$ 0,03–0,07 por edital. Rode a avaliação antes de trocar modelo ou prompt:
+
+```bash
+node evals/pdf-text.mjs <pasta> evals/editais/*.pdf     # texto dos PDFs, para montar gabaritos
+node --experimental-strip-types evals/run.ts [filtro]    # chama o Gemini (custo real) e gera evals/results/
+```
+
+No app, as mesmas verificações viram avisos na conferência (tópico não encontrado no PDF, soma de questões, data ausente ou passada).
+
 ## Etapas
 
 | # | Etapa | Status |
 |---|---|---|
 | E0 | Base React/TS, domínio portado com testes (equivalência com o gerador antigo), CI | feito |
 | E1 | Banco: migrações, bucket privado de editais, RLS e testes de isolamento | feito |
-| E2 | Upload do edital → extração (`notice-extract`) → conferência; registro de custo da IA | |
+| E2 | Upload do edital → extração (`notice-extract`) → conferência; registro de custo da IA | feito |
 | E3 | Questionário → planejamento (`plan-design`, sessões ligadas aos tópicos) → cronograma versionado no banco | |
 | E4 | Tela "Hoje": assunto, tempo, roteiro, materiais e questões | |
 | E5 | Roteiros e materiais em segundo plano, desempenho, reforço e discursivas | |
