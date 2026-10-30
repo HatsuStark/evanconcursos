@@ -24,6 +24,13 @@ export function PdfViewer({ url, page: initial, range }: { url: string; page: nu
     return () => { cancelled = true; void task?.destroy(); };
   }, [url]);
   useEffect(() => { setPage(initial); }, [initial]);
+  // A página acompanha a largura disponível (janela redimensionada ou entrada no modo foco).
+  const [resized, setResized] = useState(0);
+  useEffect(() => {
+    const onResize = () => setResized((n) => n + 1);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     if (!doc || !canvas.current || !box.current) return;
@@ -40,7 +47,7 @@ export function PdfViewer({ url, page: initial, range }: { url: string; page: nu
       render.promise.catch(() => {});
     });
     return () => { cancelled = true; render?.cancel(); };
-  }, [doc, page, zoom]);
+  }, [doc, page, zoom, resized]);
 
   const total = doc?.numPages ?? 0;
   const inRange = range && page >= range[0] && page <= range[1];

@@ -77,6 +77,8 @@ function StudyView({ d }: { d: StudyData }) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [focus]);
+  // A largura do conteúdo muda sem a janela mudar: avisa quem mede a tela (visualizador de PDF).
+  useEffect(() => { window.dispatchEvent(new Event('resize')); }, [focus]);
   // Começar a estudar entra no modo foco (o simulado já tem tela própria).
   function start() {
     if (!timer.running) timer.toggle();
@@ -87,6 +89,16 @@ function StudyView({ d }: { d: StudyData }) {
     await setTaskDone(d.task.id, !d.task.done_at);
     await qc.invalidateQueries();
   }
+
+  const tabBar = (
+    <div className="tabs" role="tablist">
+      {tabs.map((t) => (
+        <button key={t.key} role="tab" aria-selected={tab === t.key} className={'tab' + (tab === t.key ? ' on' : '')} onClick={() => setTab(t.key)}>
+          <t.icon size={16} /> {t.label}
+        </button>
+      ))}
+    </div>
+  );
 
   const rail = (
     <>
@@ -121,6 +133,8 @@ function StudyView({ d }: { d: StudyData }) {
     <Shell title={d.subject?.name ?? KIND_LABEL[d.task.kind] ?? 'Estudo'} subtitle={focus ? undefined : `${fmtDate(d.task.date)} · ${KIND_LABEL[d.task.kind] ?? ''}`} rail={focus ? undefined : rail} focus={focus}
       actions={focus ? (
         <div className="focus-bar">
+          {tabBar}
+          <div className="focus-spacer" />
           <span className="focus-clock" style={{ color: timer.running ? 'var(--cyan)' : 'var(--text)' }}>{fmtClock(timer.seconds)}</span>
           {d.task.goal_questions > 0 && <span className="muted small">{mine.length}/{d.task.goal_questions} questões</span>}
           <button className="btn ghost sm" onClick={timer.toggle}>{timer.running ? <><Pause size={15} /> Pausar</> : <><Play size={15} /> Continuar</>}</button>
@@ -133,28 +147,24 @@ function StudyView({ d }: { d: StudyData }) {
           <button className="btn ghost sm" onClick={() => navigate(-1)}>Voltar</button>
         </div>
       )}>
-      <div className="hero" style={{ borderColor: `color-mix(in srgb, ${color} 45%, transparent)` }}>
-        <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-          {d.subject && <SubjectIcon name={d.subject.name} index={d.subjectIndex} />}
-          <h2 style={{ margin: 0, fontSize: 24, lineHeight: 1.25 }}>{d.task.title}</h2>
+      {!focus && (
+        <div className="hero" style={{ borderColor: `color-mix(in srgb, ${color} 45%, transparent)` }}>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+            {d.subject && <SubjectIcon name={d.subject.name} index={d.subjectIndex} />}
+            <h2 style={{ margin: 0, fontSize: 24, lineHeight: 1.25 }}>{d.task.title}</h2>
+          </div>
+          {!!d.topics.length && (
+            <details style={{ marginTop: 16 }}>
+              <summary className="muted" style={{ cursor: 'pointer' }}>Conteúdo do edital desta sessão ({d.topics.length})</summary>
+              <ul className="advice" style={{ marginTop: 10 }}>{d.topics.map((t, i) => <li key={i}>{t}</li>)}</ul>
+            </details>
+          )}
         </div>
-        {!!d.topics.length && (
-          <details style={{ marginTop: 16 }}>
-            <summary className="muted" style={{ cursor: 'pointer' }}>Conteúdo do edital desta sessão ({d.topics.length})</summary>
-            <ul className="advice" style={{ marginTop: 10 }}>{d.topics.map((t, i) => <li key={i}>{t}</li>)}</ul>
-          </details>
-        )}
-      </div>
+      )}
 
       {d.task.kind === 'simulado' ? <SimuladoStarter planId={d.task.plan_id} taskId={d.task.id} /> : (
         <>
-          <div className="tabs" role="tablist">
-            {tabs.map((t) => (
-              <button key={t.key} role="tab" aria-selected={tab === t.key} className={'tab' + (tab === t.key ? ' on' : '')} onClick={() => setTab(t.key)}>
-                <t.icon size={16} /> {t.label}
-              </button>
-            ))}
-          </div>
+          {!focus && tabBar}
           {tab === 'questoes' ? <QuestionsPanel source={{ kind: 'task', taskId: d.task.id, planId: d.task.plan_id }} goal={d.task.goal_questions} answered={mine.length} />
             : tab === 'lei' ? <LawReader refs={lawRefs} />
             : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={hasSession} />

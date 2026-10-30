@@ -13,7 +13,7 @@ const NAV = [
 ];
 
 // Layout do app: barra lateral de ícones, conteúdo e painel direito (contexto secundário).
-// focus: modo foco do estudo, só o conteúdo e o cabeçalho (sem barra lateral nem painel direito).
+// focus: modo foco do estudo, só o conteúdo e as ações (sem título, barra lateral nem painel direito).
 export function Shell({ title, subtitle, actions, rail, focus, children }: {
   title: string; subtitle?: string; actions?: ReactNode; rail?: ReactNode; focus?: boolean; children: ReactNode;
 }) {
@@ -34,10 +34,12 @@ export function Shell({ title, subtitle, actions, rail, focus, children }: {
       </nav>
       <main className="main">
         <header className="page-head">
-          <div>
-            <h1>{title}</h1>
-            {subtitle && <p>{subtitle}</p>}
-          </div>
+          {!focus && (
+            <div>
+              <h1>{title}</h1>
+              {subtitle && <p>{subtitle}</p>}
+            </div>
+          )}
           {actions}
         </header>
         {children}

@@ -421,11 +421,20 @@ a.task-title:hover { color: var(--cyan); }
 /* Modo foco: depois das regras responsivas de .app, para valer em qualquer largura. */
 .app.focus { grid-template-columns: minmax(0, 1fr); padding-bottom: 0; }
 .app.focus .sidebar { display: none; }
-.app.focus .main { width: 100%; max-width: 1000px; margin-inline: auto; padding-top: 0; }
-.app.focus .page-head { position: sticky; top: 0; z-index: 5; align-items: center; flex-wrap: wrap; margin: 0 0 20px; padding: 14px 0; background: var(--bg); border-bottom: 1px solid var(--line); }
-.app.focus .page-head h1 { font-size: 20px; }
+.app.focus .main { width: 100%; max-width: 1600px; margin-inline: auto; padding: 0 24px 24px; }
+.app.focus .page-head { position: sticky; top: 0; z-index: 5; margin: 0 0 14px; padding: 8px 0; background: var(--bg); border-bottom: 1px solid var(--line); }
+.app.focus .tabs { margin: 0; padding: 3px; }
+.app.focus .tab { padding: 7px 12px; }
+.app.focus .guide { font-size: 17px; }
+.app.focus .pdf-canvas { max-height: calc(100vh - 130px); }
 .focus-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.focus-clock { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.app.focus .focus-bar { width: 100%; }
+.focus-spacer { flex: 1; }
+.focus-clock { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) {
+  .app.focus .main { padding: 0 12px 16px; }
+  .app.focus .page-head { position: static; }
+}
 
 /* ---------- prática: hub de questões, flashcards, simulados ---------- */
 .filters { display: grid; gap: 14px; }
