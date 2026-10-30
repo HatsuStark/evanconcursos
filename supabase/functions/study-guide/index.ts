@@ -3,7 +3,8 @@
 // Reaproveita apostilas idênticas (mesmo tema, fontes e profundidade) entre sessões e estudantes.
 // Não há "gerar de novo" pelo estudante (economia de créditos): uma apostila existente é sempre reaproveitada.
 import { generateJson } from '../../../shared/ai/gemini.ts';
-import { Guide, GUIDE_PROMPT_VERSION, guideCacheKey, guideJsonSchema, guidePrompt, sourceRef, unlistedLaws, verifyGuide, type GuideDepth } from '../../../shared/ai/guide.ts';
+import { Guide, GUIDE_PROMPT_VERSION, guideCacheKey, guideJsonSchema, guidePrompt, lawKeys, pickSimilarGuide, sourceRef, topicKeys, unlistedLaws, verifyGuide, type GuideDepth } from '../../../shared/ai/guide.ts';
+import { normalizeText } from '../../../shared/ai/notice.ts';
 import { findLawRefs, inRanges } from '../../../shared/legal/refs.ts';
 import { lawByKey } from '../../../shared/legal/registry.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
@@ -47,14 +48,21 @@ Deno.serve(async (req) => {
     const law = provided.slice(0, MAX_ARTICLES).map((p) => ({ ref: sourceRef(p.lawKey, p.label), text: p.text.slice(0, 1500) }));
     const input = { depth, banca: notice?.board ?? '', subject: subject!.name, title: session!.title, topics, law };
     const key = guideCacheKey(input);
+    const subjectKey = normalizeText(subject!.name), banca = normalizeText(input.banca), tKeys = topicKeys(topics), lKeys = lawKeys(law);
 
+    // 1) Apostila igual (mesmo conteúdo); 2) semelhante (mesma matéria/banca/profundidade, mesmos artigos e
+    // tópicos parecidos), de qualquer sessão ou estudante. Só gera com a IA quando não há nenhuma.
     const { data: cached } = await admin.from('study_guides').select('*').eq('cache_key', key).maybeSingle();
     if (cached) return json(200, { guide: cached, cached: true });
+    const { data: similar } = await admin.from('study_guides').select('*').eq('subject_key', subjectKey).eq('depth', depth)
+      .eq('banca', banca).eq('prompt_version', GUIDE_PROMPT_VERSION).order('created_at', { ascending: false }).limit(60);
+    const hit = pickSimilarGuide({ topics: tKeys, law: lKeys }, similar ?? []);
+    if (hit >= 0) return json(200, { guide: similar![hit], cached: true, similar: true });
     const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: Guide, jsonSchema: guideJsonSchema(), temperature: 0.3,
       parts: [{ text: guidePrompt({ ...input, cargo: notice?.role_name ?? '' }) }] });
     const v = verifyGuide(r.data, provided.slice(0, MAX_ARTICLES), subject!.name);
     const row = {
-      cache_key: key, depth, subject_name: subject!.name, title: session!.title, content: v.guide,
+      cache_key: key, depth, subject_name: subject!.name, subject_key: subjectKey, banca, topic_keys: tKeys, title: session!.title, content: v.guide,
       sources: law.map((l) => l.ref), unlisted_sources: unlistedLaws([session!.title, ...topics].join('\n')), unverified: v.unverified,
       model, prompt_version: GUIDE_PROMPT_VERSION, created_at: new Date().toISOString(),
     };

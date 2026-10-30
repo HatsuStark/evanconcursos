@@ -67,11 +67,36 @@ export function verifyGuide(g: Guide, provided: { lawKey: string; label: string;
 }
 
 // Chave de reaproveitamento: mesmo tema, mesmas fontes, mesma profundidade e versão do prompt.
-export function guideCacheKey(p: { depth: GuideDepth; subject: string; title: string; topics: string[]; law: GuideSource[]; banca: string }) {
-  const s = JSON.stringify([GUIDE_PROMPT_VERSION, p.depth, p.banca, p.subject, p.title, p.topics, p.law.map((l) => l.ref + '|' + l.text.length)]);
+// O título da sessão (escrito pela IA, muda a cada cronograma) fica de fora: o que define a apostila é o
+// conteúdo — matéria, tópicos do edital e artigos de lei —, além de banca e profundidade.
+const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+export const topicKeys = (topics: string[]) => [...new Set(topics.map(norm).filter(Boolean))].sort();
+export const lawKeys = (law: GuideSource[]) => [...new Set(law.map((l) => l.ref))].sort();
+
+export function guideCacheKey(p: { depth: GuideDepth; subject: string; topics: string[]; law: GuideSource[]; banca: string }) {
+  const s = JSON.stringify([GUIDE_PROMPT_VERSION, p.depth, norm(p.banca), norm(p.subject), topicKeys(p.topics), p.law.map((l) => l.ref + '|' + l.text.length).sort()]);
   let h1 = 0x811c9dc5, h2 = 0;
   for (let i = 0; i < s.length; i++) { h1 = Math.imul(h1 ^ s.charCodeAt(i), 16777619) >>> 0; h2 = (h2 * 31 + s.charCodeAt(i)) >>> 0; }
   return `${h1.toString(16)}${h2.toString(16)}`;
+}
+
+// Semelhança entre conjuntos (0–1).
+const jaccard = (a: string[], b: string[]) => {
+  if (!a.length && !b.length) return 1;
+  const sb = new Set(b), inter = a.filter((x) => sb.has(x)).length;
+  return inter / (a.length + b.length - inter);
+};
+// Apostila já existente que serve para este tema: mesmos artigos (≥ 80%) e tópicos parecidos (≥ 50%);
+// sem lei, os tópicos precisam coincidir (≥ 80%). Devolve o índice da melhor ou -1.
+export function pickSimilarGuide(target: { topics: string[]; law: string[] }, candidates: { topic_keys: string[]; sources: string[] }[]) {
+  let best = -1, bestScore = 0;
+  candidates.forEach((c, i) => {
+    const t = jaccard(target.topics, c.topic_keys), l = jaccard(target.law, c.sources);
+    const ok = target.law.length ? l >= 0.8 && t >= 0.5 : !c.sources.length && t >= 0.8;
+    const score = l * 2 + t;
+    if (ok && score > bestScore) { best = i; bestScore = score; }
+  });
+  return best;
 }
 
 // Leis citadas no tema que não estão no registro (ex.: leis estaduais): a apostila avisa que não há texto oficial integrado.
