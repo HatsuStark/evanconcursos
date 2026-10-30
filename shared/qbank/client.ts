@@ -35,6 +35,8 @@ export class QuestClient {
     return body.data as T;
   }
 
+  // Listas gerais de filtros (anos, dificuldades, tipos de questão, UFs, esferas); gratuito.
+  async geral() { return this.get<Record<string, unknown>>('/filtros', {}); }
   async bancas(q: string) { return (await this.get<Page<string>>('/filtros/bancas', { q, per_page: 20 })).items; }
   async materias(q: string, limit = 12) { return (await this.get<{ items: string[] }>('/filtros/materias', { q, limit })).items; }
   // Todos os assuntos de uma matéria (paginado; gratuito). Limite de páginas para matérias enormes.

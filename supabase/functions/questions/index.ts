@@ -1,34 +1,21 @@
 // Edge Function "questions": questões do banco (Quest API) dentro do app.
-//   {action:'next', taskId, count}     → questões da sessão (sem gabarito), sem repetir as já respondidas
-//   {action:'answer', taskId, qid, chosen} → corrige no servidor e grava a tentativa
-//   {action:'explain', taskId, qid}    → explicação da IA ancorada nos artigos oficiais (cache por questão)
-// A chave da Quest API e o gabarito ficam só no servidor.
-import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
+//   {action:'next', taskId, count}        → questões da sessão (sem gabarito), sem repetir as já respondidas
+//   {action:'answer', qid, chosen, taskId? | context:'free'|'review', timeMs?} → corrige no servidor e registra
+//   {action:'explain', qid, taskId?}      → explicação da IA ancorada nos artigos oficiais (cache por questão)
+//   {action:'mnemonic', qid, taskId?}     → mnemônico compartilhado (ou nenhum), vira flashcard do estudante
+// A chave da Quest API e o gabarito ficam só no servidor. taskId é opcional fora do cronograma.
+import type { GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { findLawRefs, inRanges, type LawRef } from '../../../shared/legal/refs.ts';
 import { lawByKey } from '../../../shared/legal/registry.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import {
   EXPLAIN_PROMPT_VERSION, Explanation, explainPrompt, explanationJsonSchema, mapSession, mapSubject,
-  QMAP_PROMPT_VERSION, searchFilters, type MapDeps, type SessionFilter,
+  QMAP_PROMPT_VERSION, searchFilters, type SessionFilter,
 } from '../../../shared/qbank/map.ts';
 import { conceptKey, MNEMONIC_PROMPT_VERSION, MnemonicChoice, mnemonicJsonSchema, mnemonicPrompt, pickExisting } from '../../../shared/qbank/mnemonic.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-
-const ASSUNTOS_MAX_AGE_MS = 30 * 864e5;
-const plain = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
-const normAnswer = (s: string) => normalizeText(String(s)).slice(0, 1); // "A", "c" (Certo), "e" (Errado)
-
-function publicQuestion(q: QuestQuestion) {
-  const p = q.provas?.[0];
-  return {
-    qid: q.id, enunciado: q.enunciado, tipo: q.tipo, dificuldade: q.dificuldade,
-    alternativas: (q.alternativas ?? []).map((a) => ({ letra: a.letra, texto: a.texto, imagens: a.imagens ?? [] })),
-    textos: q.textos_associados ?? [], anexos: q.anexos ?? [],
-    prova: p ? { banca: p.banca, ano: p.ano, orgao: p.orgao, cargo: p.cargo } : null,
-    materia: q.classificacao?.materia ?? '', assunto: q.classificacao?.assunto ?? '',
-  };
-}
+import { cacheQuestions, mapDeps, plain, publicQuestion, recordAnswer, upsertFlashcard, type PublicQuestion } from '../_shared/qbank.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -41,51 +28,35 @@ Deno.serve(async (req) => {
   const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash', apiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
   const usage: GeminiUsage = { inputTokens: 0, outputTokens: 0, thinkingTokens: 0 };
   const started = Date.now();
-  const deps: MapDeps = {
-    materias: (q) => quest.materias(q),
-    assuntosOf: async (materia) => {
-      const { data } = await admin.from('qbank_assunto_lists').select('assuntos, fetched_at').eq('materia', materia).maybeSingle();
-      if (data && Date.now() - new Date(data.fetched_at).getTime() < ASSUNTOS_MAX_AGE_MS) return data.assuntos as string[];
-      const list = await quest.assuntos(materia);
-      await admin.from('qbank_assunto_lists').upsert({ materia, assuntos: list, fetched_at: new Date().toISOString() });
-      return list;
-    },
-    ai: async (schema, jsonSchema, prompt) => {
-      const r = await generateJson({ apiKey, model, schema, jsonSchema, parts: [{ text: prompt }] });
-      usage.inputTokens += r.usage.inputTokens; usage.outputTokens += r.usage.outputTokens; usage.thinkingTokens += r.usage.thinkingTokens;
-      return r.data;
-    },
-  };
+  const deps = mapDeps(admin, quest, usage);
   const log = (operation: string, status: 'ok' | 'error', error?: string) => logUsage(admin, {
     ownerId: auth.user.id, operation, model: usage.inputTokens ? model : 'quest-api', promptVersion: operation === 'qbank_explain' ? EXPLAIN_PROMPT_VERSION : operation === 'qbank_mnemonic' ? MNEMONIC_PROMPT_VERSION : QMAP_PROMPT_VERSION,
     usage: usage.inputTokens ? usage : null, latencyMs: Date.now() - started, status, error, credits: quest.credits,
   });
 
   try {
-    // Tarefa e matéria lidas como o usuário: a RLS garante que são dele.
-    const { data: task } = await auth.client.from('tasks').select('id, plan_id, subject_id, session_id, kind').eq('id', String(body.taskId ?? '')).maybeSingle();
-    if (!task) return json(404, { error: 'Tarefa não encontrada.' });
-    const { data: subject } = task.subject_id
+    // Tarefa e matéria lidas como o usuário: a RLS garante que são dele. Fora do cronograma não há tarefa.
+    const { data: task } = body.taskId
+      ? await auth.client.from('tasks').select('id, plan_id, subject_id, session_id, kind').eq('id', String(body.taskId)).maybeSingle()
+      : { data: null };
+    if (body.taskId && !task) return json(404, { error: 'Tarefa não encontrada.' });
+    const { data: subject } = task?.subject_id
       ? await auth.client.from('notice_subjects').select('id, name, notice_id, notice_topics(text, position)').eq('id', task.subject_id).maybeSingle()
       : { data: null };
 
     if (body.action === 'answer') {
-      const { data: q } = await admin.from('qbank_questions').select('gabarito, materia, assunto').eq('qid', String(body.qid ?? '')).maybeSingle();
-      if (!q) return json(404, { error: 'Questão não encontrada.' });
-      const chosen = String(body.chosen ?? '').slice(0, 20);
-      const correct = normAnswer(chosen) === normAnswer(q.gabarito);
-      const { error } = await admin.from('question_attempts').insert({
-        owner_id: auth.user.id, plan_id: task.plan_id, task_id: task.id, session_id: task.session_id, subject_id: task.subject_id,
-        qid: String(body.qid), materia: q.materia, assunto: q.assunto, chosen, correct,
+      const context = task ? 'plan' : body.context === 'review' ? 'review' : 'free';
+      const r = await recordAnswer(admin, {
+        ownerId: auth.user.id, qid: String(body.qid ?? ''), chosen: String(body.chosen ?? ''), context, timeMs: Number(body.timeMs) || null,
+        planId: task?.plan_id, taskId: task?.id, sessionId: task?.session_id, subjectId: task?.subject_id,
       });
-      if (error) throw new Error(error.message);
-      return json(200, { correct, gabarito: q.gabarito });
+      return json(200, r);
     }
 
     // Trechos oficiais da lei: os citados na questão e os da sessão (só com artigos definidos).
-    const lawExcerpts = async (p: ReturnType<typeof publicQuestion>) => {
+    const lawExcerpts = async (p: PublicQuestion) => {
       let sessionTitle = '';
-      if (task.session_id) sessionTitle = (await auth.client.from('study_sessions').select('title').eq('id', task.session_id).maybeSingle()).data?.title ?? '';
+      if (task?.session_id) sessionTitle = (await auth.client.from('study_sessions').select('title').eq('id', task.session_id).maybeSingle()).data?.title ?? '';
       const text = [plain(p.enunciado), ...p.alternativas.map((a) => plain(a.texto))].join('\n');
       const refs: LawRef[] = [...findLawRefs(text, subject?.name ?? ''), ...findLawRefs(sessionTitle, subject?.name ?? '')].filter((r) => r.ranges.length).slice(0, 4);
       const lei: { ref: string; text: string }[] = [];
@@ -106,11 +77,15 @@ Deno.serve(async (req) => {
       const { data: q } = await admin.from('qbank_questions').select('payload, gabarito, materia, assunto, mnemonic_id, mnemonic_checked').eq('qid', qid).maybeSingle();
       if (!q) return json(404, { error: 'Questão não encontrada.' });
       const fields = 'id, concept, mnemonic, explanation, items';
+      const toCard = async (m: { id: string; concept: string; mnemonic: string; items: { chave: string; significado: string }[] } | null) => {
+        if (m) await upsertFlashcard(admin, auth.user.id, 'mnemonic', m.id, `Mnemônico: ${m.concept}`, [m.mnemonic, ...(m.items ?? []).map((i) => `${i.chave} = ${i.significado}`)].join('\n'));
+      };
       if (q.mnemonic_checked) {
         const m = q.mnemonic_id ? (await admin.from('mnemonics').select(fields).eq('id', q.mnemonic_id).maybeSingle()).data : null;
+        await toCard(m);
         return json(200, { mnemonic: m, cached: true });
       }
-      const p = q.payload as ReturnType<typeof publicQuestion>;
+      const p = q.payload as PublicQuestion;
       const { data: existing } = await admin.from('mnemonics').select('id, concept, mnemonic').eq('materia', q.materia).eq('assunto', q.assunto).limit(12);
       const c = await deps.ai(MnemonicChoice, mnemonicJsonSchema(), mnemonicPrompt({
         enunciado: plain(p.enunciado), alternativas: p.alternativas.map((a) => ({ letra: a.letra, texto: plain(a.texto) })), gabarito: q.gabarito,
@@ -129,6 +104,7 @@ Deno.serve(async (req) => {
       await admin.from('qbank_questions').update({ mnemonic_id: mnemonicId, mnemonic_checked: true }).eq('qid', qid);
       await log('qbank_mnemonic', 'ok');
       const m = mnemonicId ? (await admin.from('mnemonics').select(fields).eq('id', mnemonicId).single()).data : null;
+      await toCard(m);
       return json(200, { mnemonic: m });
     }
 
@@ -137,7 +113,7 @@ Deno.serve(async (req) => {
       const { data: q } = await admin.from('qbank_questions').select('payload, gabarito, explanation').eq('qid', qid).maybeSingle();
       if (!q) return json(404, { error: 'Questão não encontrada.' });
       if (q.explanation) return json(200, { explanation: q.explanation, cached: true });
-      const p = q.payload as ReturnType<typeof publicQuestion>;
+      const p = q.payload as PublicQuestion;
       const lei = await lawExcerpts(p);
       const ex = await deps.ai(Explanation, explanationJsonSchema(), explainPrompt({
         banca: p.prova?.banca ?? '', enunciado: plain(p.enunciado), alternativas: p.alternativas.map((a) => ({ letra: a.letra, texto: plain(a.texto) })),
@@ -152,6 +128,7 @@ Deno.serve(async (req) => {
     }
 
     if (body.action !== 'next') return json(400, { error: 'Ação inválida.' });
+    if (!task) return json(400, { error: 'Informe a tarefa.' });
     if (!subject) return json(200, { questions: [], reason: 'sem-materia' });
     const count = Math.max(1, Math.min(10, Number(body.count) || 5));
     const topics = ((subject.notice_topics ?? []) as { text: string; position: number }[]).sort((a, b) => a.position - b.position).map((t) => t.text);
@@ -205,11 +182,7 @@ Deno.serve(async (req) => {
       for (let round = 0; round < 3 && out.length < count && !exhausted; round++) {
         const r = await quest.questoes(f.params, count - out.length, after);
         const fresh = r.items.filter((q) => q.gabarito && !seen.has(q.id) && !out.some((o) => o.id === q.id));
-        if (r.items.length) {
-          await admin.from('qbank_questions').upsert(r.items.filter((q) => q.gabarito).map((q) => ({
-            qid: q.id, materia: q.classificacao?.materia ?? '', assunto: q.classificacao?.assunto ?? '', payload: publicQuestion(q), gabarito: String(q.gabarito),
-          })), { onConflict: 'qid', ignoreDuplicates: true });
-        }
+        await cacheQuestions(admin, r.items);
         out.push(...fresh);
         after = r.next ?? r.items[r.items.length - 1]?.id ?? after;
         exhausted = !r.hasMore || !r.items.length;
