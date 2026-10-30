@@ -12,8 +12,10 @@ shared/      TypeScript puro, usado pelo web e pelas Edge Functions
              filtro do QConcursos, materiais (buscas e lei seca)
 web/         React + TypeScript (Vite)
 supabase/
+  migrations/ SQL versionado (aplicado com scripts/db.mjs push)
+  tests/     testes pgTAP de isolamento entre usuários (scripts/db.mjs test)
   functions/ Edge Functions de IA (Gemini). Serão reescritas na E2/E3 (notice-extract, plan-design, study-guide)
-scripts/     gemini-models.mjs (modelos da chave) e deploy-functions.mjs (publica funções e segredos)
+scripts/     db.mjs (migrações e testes do banco), deploy-functions.mjs (funções e segredos), gemini-models.mjs
 ```
 
 Princípios:
@@ -35,12 +37,20 @@ npm run check      # tipos + testes + build (o mesmo da CI)
 
 Segredos ficam no `.env` (fora do Git; modelo em `.env.example`).
 
+Banco (projeto Supabase linkado; sem Docker):
+
+```bash
+node scripts/db.mjs dry    # migrações pendentes
+node scripts/db.mjs push   # aplica as migrações
+node scripts/db.mjs test   # testes pgTAP (RLS, Storage), numa transação desfeita no fim
+```
+
 ## Etapas
 
 | # | Etapa | Status |
 |---|---|---|
 | E0 | Base React/TS, domínio portado com testes (equivalência com o gerador antigo), CI | feito |
-| E1 | Banco: migrações, bucket privado de editais, RLS e testes de isolamento | |
+| E1 | Banco: migrações, bucket privado de editais, RLS e testes de isolamento | feito |
 | E2 | Upload do edital → extração (`notice-extract`) → conferência; registro de custo da IA | |
 | E3 | Questionário → planejamento (`plan-design`, sessões ligadas aos tópicos) → cronograma versionado no banco | |
 | E4 | Tela "Hoje": assunto, tempo, roteiro, materiais e questões | |
