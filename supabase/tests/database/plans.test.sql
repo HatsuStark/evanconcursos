@@ -80,6 +80,11 @@ select is((select count(*) from public.question_filters), 0::bigint, 'B não vê
 select throws_ok($$insert into public.question_logs (plan_id, correct, total) values ((select id from public.study_plans limit 1), 1, 1)$$, '23502', null, 'B não registra no plano de A (invisível)');
 select pg_temp.as_user('00000000-0000-4000-8000-0000000000a1');
 
+-- Permissões por coluna: só o necessário é alterável.
+select throws_ok($$update public.tasks set title = 'outro'$$, '42501', null, 'título da tarefa não é alterável');
+select throws_ok($$update public.plan_versions set number = 99$$, '42501', null, 'versão não é alterável');
+select throws_ok($$delete from public.tasks$$, '42501', null, 'tarefas não são apagáveis direto');
+
 -- Apagar o edital apaga o plano em cascata.
 select lives_ok($$delete from public.notices where id = '20000000-0000-4000-8000-000000000001'$$, 'apagar edital com cronograma');
 select is((select count(*) from public.tasks), 0::bigint, 'tarefas apagadas junto');

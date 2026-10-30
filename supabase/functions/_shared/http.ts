@@ -19,7 +19,8 @@ export const adminClient = (): SupabaseClient =>
 
 // Valida o token e devolve o usuário + um cliente que age como ele (RLS aplicada).
 // Enquanto não há cotas por usuário, só e-mails em ALLOWED_EMAILS usam a IA (cada chamada tem custo).
-export async function requireUser(req: Request): Promise<{ user: User; client: SupabaseClient } | Response> {
+// `ai: false` dispensa a lista de e-mails (rotas sem custo de IA, como a lei seca).
+export async function requireUser(req: Request, { ai = true } = {}): Promise<{ user: User; client: SupabaseClient } | Response> {
   const authorization = req.headers.get('Authorization') ?? '';
   const client = createClient(env('SUPABASE_URL'), env('SUPABASE_ANON_KEY'), {
     auth: { persistSession: false },
@@ -29,7 +30,7 @@ export async function requireUser(req: Request): Promise<{ user: User; client: S
   const user = data?.user;
   if (!user?.email) return json(401, { error: 'Entre na sua conta para continuar.' });
   const allowed = env('ALLOWED_EMAILS').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
-  if (!allowed.includes(user.email.toLowerCase())) return json(403, { error: 'Sua conta ainda não tem acesso aos recursos de IA.' });
+  if (ai && !allowed.includes(user.email.toLowerCase())) return json(403, { error: 'Sua conta ainda não tem acesso aos recursos de IA.' });
   return { user, client };
 }
 

@@ -17,7 +17,7 @@ supabase/
   tests/     testes pgTAP de isolamento entre usuários (scripts/db.mjs test)
   functions/ Edge Functions: notice-extract (leitura do edital), plan-design (estratégia e sessões); study-guide na E5
 evals/       editais de referência (gabaritos) e avaliação da extração
-scripts/     db.mjs (migrações e testes do banco), deploy-functions.mjs (funções e segredos), gemini-models.mjs
+scripts/     legal-seed.ts (carrega as leis do registro), db.mjs (migrações e testes do banco), deploy-functions.mjs (funções e segredos), gemini-models.mjs
 ```
 
 Princípios:
@@ -86,7 +86,7 @@ Avaliação com a IA real (`node --experimental-strip-types evals/plan-run.ts [f
 | E2 | Upload do edital → extração (`notice-extract`) → conferência; registro de custo da IA | feito |
 | E3 | Questionário → planejamento (`plan-design`, sessões ligadas aos tópicos) → cronograma versionado no banco | feito |
 | E4.1 | Modo estudo: cronômetro, questões no QConcursos/TecConcursos em outra aba com filtro pronto e registro rápido na volta | feito |
-| E4.2 | Lei seca: textos oficiais (normas.leg.br, CC BY 4.0) no banco e leitor com os artigos da sessão | |
+| E4.2 | Lei seca: textos oficiais (normas.leg.br, CC BY 4.0) no banco e leitor com os artigos da sessão | feito |
 | E4.3 | Apostila da IA (completa ou revisão curta) baseada só no edital e na lei seca, com fontes e reaproveitamento | |
 | E4.4 | Vídeos do YouTube integrados (Data API + player) | |
 | E4.5 | Biblioteca pessoal: PDFs privados, leitor PDF.js e mapeamento de páginas para as sessões | |

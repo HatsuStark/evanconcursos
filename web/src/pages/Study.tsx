@@ -3,16 +3,18 @@ import { BookOpen, Check, ExternalLink, FileText, ListChecks, Pause, Play, Rotat
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { evaluate } from '../../../shared/domain/adaptive.ts';
+import { LawReader } from '../components/LawReader.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
 import { KIND_LABEL, setTaskDone } from '../lib/plans.ts';
+import { sessionLawRefs } from '../lib/legal.ts';
 import { accuracy, addQuestionLog, questionsUrl, saveFilter, saveTimeSpent, useStudy, type Provider, type StudyData } from '../lib/study.ts';
 
 const fmtClock = (s: number) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ':' : ''}${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const TABS = [
   { key: 'questoes', label: 'Questões', icon: ListChecks },
   { key: 'roteiro', label: 'Roteiro e apostila', icon: BookOpen, soon: 'E4.3' },
-  { key: 'lei', label: 'Lei seca', icon: Scale, soon: 'E4.2' },
+  { key: 'lei', label: 'Lei seca', icon: Scale },
   { key: 'videos', label: 'Vídeos', icon: Video, soon: 'E4.4' },
   { key: 'material', label: 'Meus PDFs', icon: FileText, soon: 'E4.5' },
 ] as const;
@@ -150,6 +152,8 @@ function StudyView({ d }: { d: StudyData }) {
           )}
           <FiltersConfig d={d} onSaved={refresh} />
         </div>
+      ) : tab === 'lei' ? (
+        <LawReader refs={sessionLawRefs(d.task.title, d.topics, d.subject?.name ?? '')} />
       ) : (
         <div className="glass card muted">Chega na etapa {soonOf(tab)}.</div>
       )}
