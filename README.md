@@ -83,6 +83,10 @@ A chave fica só no servidor (segredo `QUEST_API_KEY`) e o gabarito nunca vai ao
 
 `scripts/e2e-questions.ts` testa a função ponta a ponta com um usuário temporário (exige incluir `e2e@evanconcursos.test` em `ALLOWED_EMAILS`).
 
+## Leitor por voz
+
+O botão **Ouvir** da apostila lê o texto com a voz do próprio navegador (Web Speech API): sem custo de IA e sem enviar nada a servidores do app. Lê bloco a bloco com destaque na tela, escreve siglas e abreviações por extenso (`shared/ai/speech.ts`) e tem pausar, pular seção, velocidade e escolha de voz. A qualidade da voz depende do aparelho; a leitura para ao sair da aba Apostila.
+
 ## Modo foco
 
 Começar o cronômetro de uma sessão (ou o botão **Modo foco**) esconde barra lateral, painel direito e título da sessão e deixa só o elemento em uso (apostila, lei, PDF ou questões) ocupando a tela, com abas, tempo, meta de questões, pausar e concluir numa barra fina no topo. **Esc** ou "Sair do foco" volta ao normal sem parar o cronômetro; concluir a tarefa pausa e sai. Dias de simulado não entram no foco: já têm tela própria.

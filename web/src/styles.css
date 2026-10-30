@@ -418,6 +418,14 @@ a.task-title:hover { color: var(--cyan); }
 .q-comment-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 @media (max-width: 720px) { .q-actions .faint { display: none; } }
 
+/* Leitor por voz: controles presos ao fim da tela enquanto a apostila rola. */
+.voice-bar { position: sticky; bottom: 12px; z-index: 4; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; }
+.voice-bar .icon-btn { width: 36px; height: 36px; }
+.voice-title { flex: 1; min-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.voice-select { width: auto; max-width: 170px; padding: 7px 10px; font-size: 13px; }
+.guide .speaking { padding: 12px 14px; margin: -12px -14px; border-radius: 12px; background: rgba(42, 212, 232, .07); box-shadow: inset 3px 0 0 var(--cyan); }
+@media (max-width: 720px) { .voice-bar { bottom: 84px; } .app.focus .voice-bar { bottom: 12px; } }
+
 /* Modo foco: depois das regras responsivas de .app, para valer em qualquer largura. */
 .app.focus { grid-template-columns: minmax(0, 1fr); padding-bottom: 0; }
 .app.focus .sidebar { display: none; }

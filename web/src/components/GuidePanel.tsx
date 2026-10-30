@@ -1,6 +1,8 @@
-import { AlertTriangle, BookOpen, CheckCircle2, Printer, Sparkles } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { AlertTriangle, BookOpen, CheckCircle2, Headphones, Pause, Play, Printer, SkipBack, SkipForward, Sparkles, Square } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { guideSpeech } from '../../../shared/ai/speech.ts';
 import { supabase } from '../lib/supabase.ts';
+import { RATES, useGuideVoice, voiceSupported } from '../lib/voice.ts';
 
 interface GuideContent {
   titulo: string; introducao: string;
@@ -39,8 +41,17 @@ export function GuidePanel({ taskId, hasSession }: { taskId: string; hasSession:
   }
   useEffect(() => { setGuide(null); if (hasSession) void load(); }, [depth, taskId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!hasSession) return <div className="glass card muted">A apostila é gerada para as tarefas de teoria. Nos dias de revisão e reforço, use as questões e a lei seca.</div>;
   const g = guide?.content;
+  const speech = useMemo(() => (g ? guideSpeech(g) : []), [g]);
+  const voice = useGuideVoice(speech);
+  // O bloco lido fica destacado e visível.
+  const article = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (voice.activeKey) article.current?.querySelector(`[data-voice="${voice.activeKey}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [voice.activeKey]);
+  const reading = (key: string) => ({ 'data-voice': key, className: voice.activeKey === key ? 'speaking' : undefined });
+
+  if (!hasSession) return <div className="glass card muted">A apostila é gerada para as tarefas de teoria. Nos dias de revisão e reforço, use as questões e a lei seca.</div>;
   return (
     <div className="grid" style={{ gap: 14 }}>
       <div className="guide-bar no-print">
@@ -48,13 +59,18 @@ export function GuidePanel({ taskId, hasSession }: { taskId: string; hasSession:
           <button className={depth === 'completa' ? 'on' : ''} onClick={() => setDepth('completa')}>Completa</button>
           <button className={depth === 'revisao' ? 'on' : ''} onClick={() => setDepth('revisao')}>Revisão curta</button>
         </div>
-        {g && <button className="btn ghost sm" onClick={() => window.print()}><Printer size={15} /> Imprimir / PDF</button>}
+        {g && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {voiceSupported() && voice.status === 'idle' && <button className="btn ghost sm" onClick={voice.play}><Headphones size={15} /> Ouvir</button>}
+            <button className="btn ghost sm" onClick={() => window.print()}><Printer size={15} /> Imprimir / PDF</button>
+          </div>
+        )}
       </div>
       {loading && <div className="glass card" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> Montando a apostila com base no edital e na lei seca… (até 40 segundos na primeira vez)</div>}
       {error && <div className="glass card"><p className="error" style={{ margin: 0 }}>{error}</p><button className="btn sm" style={{ marginTop: 10 }} onClick={() => load()}>Tentar de novo</button></div>}
       {g && !loading && (
-        <article className="glass guide printable">
-          <header>
+        <article ref={article} className="glass guide printable">
+          <header {...reading('intro')}>
             <span className="badge violet"><BookOpen size={12} /> Apostila · {guide!.depth === 'completa' ? 'completa' : 'revisão curta'}</span>
             <h2>{g.titulo}</h2>
             <p className="lead">{g.introducao}</p>
@@ -69,22 +85,22 @@ export function GuidePanel({ taskId, hasSession }: { taskId: string; hasSession:
             </div>
           )}
           {g.secoes.map((s, i) => (
-            <section key={i}>
+            <section key={i} {...reading(`s${i}`)}>
               <h3>{s.titulo}</h3>
               {paragraphs(s.texto).map((p, j) => <p key={j}>{p}</p>)}
               {!!s.exemplos.length && <div className="guide-examples">{s.exemplos.map((e, j) => <p key={j}><b>Exemplo:</b> {e}</p>)}</div>}
             </section>
           ))}
           {!!g.legislacao.length && (
-            <section><h3>Lei seca comentada</h3>
+            <section {...reading('lei')}><h3>Lei seca comentada</h3>
               <ul>{g.legislacao.map((l, i) => <li key={i}><b>{l.ref}:</b> {l.comentario}</li>)}</ul>
             </section>
           )}
-          {!!g.pontos_banca.length && <section><h3>O que mais cai</h3><ul>{g.pontos_banca.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
-          {!!g.pegadinhas.length && <section className="guide-traps"><h3>Pegadinhas</h3><ul>{g.pegadinhas.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
-          {!!g.resumo.length && <section><h3>Resumo</h3><ul>{g.resumo.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
+          {!!g.pontos_banca.length && <section {...reading('banca')}><h3>O que mais cai</h3><ul>{g.pontos_banca.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
+          {!!g.pegadinhas.length && <section data-voice="pegadinhas" className={'guide-traps' + (voice.activeKey === 'pegadinhas' ? ' speaking' : '')}><h3>Pegadinhas</h3><ul>{g.pegadinhas.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
+          {!!g.resumo.length && <section {...reading('resumo')}><h3>Resumo</h3><ul>{g.resumo.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
           {!!g.perguntas.length && (
-            <section><h3>Perguntas de revisão</h3>
+            <section {...reading('perguntas')}><h3>Perguntas de revisão</h3>
               {g.perguntas.map((q, i) => (
                 <div key={i} className="guide-q">
                   <button className="link-btn" onClick={() => setOpen(open === i ? null : i)}>{i + 1}. {q.pergunta}</button>
@@ -100,6 +116,27 @@ export function GuidePanel({ taskId, hasSession }: { taskId: string; hasSession:
             {g.depende_legislacao ? ' Depende de legislação que pode ser alterada: confira se houve mudança após essa data.' : ''} Não substitui a leitura da lei seca.
           </footer>
         </article>
+      )}
+      {g && !loading && voice.status !== 'idle' && (
+        <div className="glass voice-bar no-print" role="group" aria-label="Leitor por voz">
+          <button className="icon-btn" aria-label="Seção anterior" title="Seção anterior" disabled={voice.section === 0} onClick={() => voice.jump(-1)}><SkipBack size={16} /></button>
+          {voice.status === 'playing'
+            ? <button className="btn sm" onClick={voice.pause}><Pause size={15} /> Pausar</button>
+            : <button className="btn sm" onClick={voice.play}><Play size={15} /> Continuar</button>}
+          <button className="icon-btn" aria-label="Próxima seção" title="Próxima seção" disabled={voice.section >= speech.length - 1} onClick={() => voice.jump(1)}><SkipForward size={16} /></button>
+          <button className="icon-btn" aria-label="Parar" title="Parar" onClick={voice.stop}><Square size={15} /></button>
+          <span className="voice-title small">{speech[voice.section]?.title}</span>
+          <select className="select voice-select" aria-label="Velocidade" value={voice.rate} onChange={(e) => voice.setRate(Number(e.target.value))}>
+            {RATES.map((r) => <option key={r} value={r}>{String(r).replace('.', ',')}x</option>)}
+          </select>
+          {voice.voices.length > 1 && (
+            <select className="select voice-select" aria-label="Voz" value={voice.voice?.voiceURI ?? ''} onChange={(e) => voice.setVoice(e.target.value)}>
+              {voice.voices.map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>)}
+            </select>
+          )}
+          {!voice.voices.length && <span className="faint small">Sem voz em português instalada: a pronúncia pode sair errada. Instale uma nas configurações do sistema.</span>}
+          {voice.error && <span className="error small">{voice.error}</span>}
+        </div>
       )}
     </div>
   );
