@@ -22,7 +22,12 @@ async function call<T>(body: Record<string, unknown>): Promise<T> {
 }
 
 export const nextQuestions = (taskId: string, count = 5) => call<NextResult>({ action: 'next', taskId, count });
-export const answerQuestion = (taskId: string, qid: string, chosen: string, timeMs?: number) => call<{ correct: boolean; gabarito: string }>({ action: 'answer', taskId, qid, chosen, timeMs });
+// Resposta corrigida direto no banco (answer_question): uma ida e volta, sem passar pela Edge Function.
+export async function answerQuestion(taskId: string | null, qid: string, chosen: string, context: 'plan' | 'free' | 'review' = 'plan') {
+  const { data, error } = await supabase.rpc('answer_question', { p_qid: qid, p_chosen: chosen, p_task: taskId, p_context: context });
+  if (error) throw new Error(error.message);
+  return data as { correct: boolean; gabarito: string };
+}
 // taskId é opcional fora do cronograma (questões livres, revisão, simulado).
 export const explainQuestion = (taskId: string | null, qid: string) => call<{ explanation: Explanation }>({ action: 'explain', ...(taskId ? { taskId } : {}), qid });
 

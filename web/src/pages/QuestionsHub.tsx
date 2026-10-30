@@ -220,7 +220,6 @@ export function PerformanceTab() {
   const [ctx, setCtx] = useState<Ctx | 'all'>('plan');
   const rows = useMemo(() => (stats.data ?? []).filter((a) => ctx === 'all' || a.context === ctx), [stats.data, ctx]);
   const right = rows.filter((a) => a.correct).length, pct = rows.length ? Math.round((right / rows.length) * 100) : 0;
-  const times = rows.map((a) => a.time_ms).filter((t): t is number => t != null);
   const by = new Map<string, { t: number; c: number }>();
   for (const a of rows) { const k = a.materia || 'Sem matéria', e = by.get(k) ?? { t: 0, c: 0 }; e.t++; if (a.correct) e.c++; by.set(k, e); }
   const week = rows.filter((a) => Date.now() - new Date(a.created_at).getTime() < 7 * 864e5).length;
@@ -230,7 +229,7 @@ export function PerformanceTab() {
       <div className="stats glass card">
         <div className="stat"><strong style={{ color: 'var(--violet)' }}>{rows.length}</strong><span>questões</span></div>
         <div className="stat"><strong style={{ color: pct >= 75 ? 'var(--lime)' : 'var(--orange)' }}>{rows.length ? pct + '%' : '—'}</strong><span>de acerto</span></div>
-        <div className="stat"><strong style={{ color: 'var(--cyan)' }}>{times.length ? Math.round(times.reduce((a, b) => a + b, 0) / times.length / 1000) + 's' : '—'}</strong><span>por questão</span></div>
+        <div className="stat"><strong style={{ color: 'var(--cyan)' }}>{by.size}</strong><span>matérias</span></div>
       </div>
       <p className="faint small" style={{ margin: 0 }}><ListChecks size={12} style={{ verticalAlign: -2 }} /> {week} questões nos últimos 7 dias.</p>
       {!rows.length ? <div className="glass card muted">Sem questões neste contexto ainda.</div> : (

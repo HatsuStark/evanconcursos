@@ -25,8 +25,6 @@ export const filterLists = {
 };
 export const searchFree = (filters: FreeFilters, count = 10) => practice<{ questions: Question[]; reason: string | null }>({ action: 'search', filters, count });
 export const reviewDue = (count = 15) => practice<{ questions: Question[]; stages: Record<string, { stage: number; wrong: number }> }>({ action: 'review', count });
-export const answerFree = (qid: string, chosen: string, context: 'free' | 'review', timeMs: number) =>
-  invoke<{ correct: boolean; gabarito: string }>('questions', { action: 'answer', qid, chosen, context, timeMs });
 
 // Matérias do concurso já ligadas ao banco de questões (atalhos nos filtros).
 export const useMappedMaterias = () => useQuery({

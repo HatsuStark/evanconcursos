@@ -33,5 +33,23 @@ select is((select count(*) from public.flashcards), 0::bigint, 'B não vê flash
 select is((select count(*) from public.simulados), 0::bigint, 'B não vê simulados de A');
 select throws_ok($$insert into public.simulado_answers (simulado_id, qid, chosen) values ('50000000-0000-4000-8000-000000000001', 'q2', 'C')$$, '42501', null, 'B não responde simulado de A');
 
+-- Resposta pelo banco (answer_question): correção, caderno de erros, flashcard e revisão.
+reset role;
+insert into public.qbank_questions (qid, payload, gabarito, materia, assunto) values
+  ('qa', '{"enunciado":"<p>Quanto é 2+2?</p>","alternativas":[{"letra":"A","texto":"3"},{"letra":"B","texto":"4"}]}', 'B', 'Matemática', 'Soma');
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000a4');
+select is((select public.answer_question('qa', 'A') ->> 'correct'), 'false', 'errou: correção no banco');
+select is((select stage from public.error_book where qid = 'qa'), 0, 'errada entra no caderno (etapa 0)');
+select is((select due_on from public.error_book where qid = 'qa'), current_date + 1, 'volta amanhã');
+select ok((select back like 'Resposta: B — 4%' from public.flashcards where ref = 'qa'), 'flashcard da errada com a resposta');
+select is((select public.answer_question('qa', 'b', null, 'review') ->> 'correct'), 'true', 'acerto na revisão (minúscula aceita)');
+select is((select stage from public.error_book where qid = 'qa'), 1, 'revisão boa avança para 7 dias');
+select is((select due_on from public.error_book where qid = 'qa'), current_date + 7, 'próxima revisão em 7 dias');
+select is((select count(*) from public.question_attempts where qid = 'qa'), 2::bigint, 'duas tentativas registradas');
+select is((select context from public.question_attempts where qid = 'qa' and correct), 'review', 'contexto da revisão');
+select throws_ok($$select public.record_answer_for('00000000-0000-4000-8000-0000000000a4', 'qa', 'B', 'free')$$, '42501', null, 'função interna não é chamável pelo usuário');
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000b4');
+select throws_ok($$select public.answer_question('qa', 'B', '41000000-0000-4000-8000-000000000001')$$, 'P0002', null, 'B não responde pela tarefa de outro');
+
 select * from finish();
 rollback;

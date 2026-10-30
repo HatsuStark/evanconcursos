@@ -47,7 +47,7 @@ Deno.serve(async (req) => {
     if (body.action === 'answer') {
       const context = task ? 'plan' : body.context === 'review' ? 'review' : 'free';
       const r = await recordAnswer(admin, {
-        ownerId: auth.user.id, qid: String(body.qid ?? ''), chosen: String(body.chosen ?? ''), context, timeMs: Number(body.timeMs) || null,
+        ownerId: auth.user.id, qid: String(body.qid ?? ''), chosen: String(body.chosen ?? ''), context,
         planId: task?.plan_id, taskId: task?.id, sessionId: task?.session_id, subjectId: task?.subject_id,
       });
       return json(200, r);

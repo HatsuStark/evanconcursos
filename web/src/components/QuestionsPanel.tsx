@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { BarChart3, BookOpenCheck, Brain, CheckCircle2, ChevronLeft, ChevronRight, Lightbulb, NotebookPen, RotateCcw, Scissors, Sparkles, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { answerFree, reviewDue, searchFree, type FreeFilters } from '../lib/practice.ts';
+import { reviewDue, searchFree, type FreeFilters } from '../lib/practice.ts';
 import {
   answerQuestion, explainQuestion, loadNote, mnemonicFor, nextQuestions, optionsOf, saveNote,
   type Explanation, type Mnemonic, type Question,
@@ -25,12 +25,11 @@ interface QState {
   chosen: string | null; struck: string[];
   result: { correct: boolean; gabarito: string } | null;
   explanation: Explanation | null; mnemonic: Mnemonic | null | undefined; tab: Tab | null;
-  shownAt: number; timeMs: number | null;
 }
-const blank = (): QState => ({ chosen: null, struck: [], result: null, explanation: null, mnemonic: undefined, tab: null, shownAt: Date.now(), timeMs: null });
+const blank = (): QState => ({ chosen: null, struck: [], result: null, explanation: null, mnemonic: undefined, tab: null });
 
 // Resolução de questões: navegação livre, tachar, responder com botão, abas (explicação, mnemônico,
-// anotações), tempo por questão e resumo da bateria.
+// anotações) e resumo da bateria. Tempo só existe no simulado.
 export function QuestionsPanel({ source, goal = 0, answered = 0 }: { source: Source; goal?: number; answered?: number }) {
   const qc = useQueryClient();
   const taskId = source.kind === 'task' ? source.taskId : null;
@@ -74,10 +73,8 @@ export function QuestionsPanel({ source, goal = 0, answered = 0 }: { source: Sou
   const go = (i: number) => {
     if (i < 0 || i >= queue.length) return;
     const next = queue[i]!;
-    setStates((s) => (s[next.qid] ? s : { ...s, [next.qid]: blank() })); // começa a contar o tempo ao abrir
     setIdx(i); setError(''); setSummary(false); window.scrollTo({ top: 0, behavior: 'smooth' });
   };
-  useEffect(() => { if (q && !states[q.qid]) setStates((s) => ({ ...s, [q.qid]: blank() })); }, [q, states]);
 
   const select = (letra: string) => { if (!st.result && !st.struck.includes(letra)) patch({ chosen: st.chosen === letra ? null : letra }); };
   const strike = (letra: string) => {
@@ -87,10 +84,9 @@ export function QuestionsPanel({ source, goal = 0, answered = 0 }: { source: Sou
   async function answer() {
     if (!q || !st.chosen || st.result) return;
     setBusy('answer');
-    const timeMs = Date.now() - st.shownAt;
     try {
-      const r = source.kind === 'task' ? await answerQuestion(source.taskId, q.qid, st.chosen, timeMs) : await answerFree(q.qid, st.chosen, source.kind, timeMs);
-      patch({ result: r, tab: 'explicacao', timeMs });
+      const r = await answerQuestion(taskId, q.qid, st.chosen, source.kind === 'task' ? 'plan' : source.kind);
+      patch({ result: r, tab: 'explicacao' });
       void qc.invalidateQueries({ queryKey: ['study'] });
       void qc.invalidateQueries({ queryKey: ['due-counts'] });
     } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
@@ -151,7 +147,6 @@ export function QuestionsPanel({ source, goal = 0, answered = 0 }: { source: Sou
         {st.result ? (
           <div className={'q-result ' + (st.result.correct ? 'ok' : 'bad')}>
             {st.result.correct ? <><CheckCircle2 size={20} /> Você acertou!</> : <><XCircle size={20} /> Resposta certa: {st.result.gabarito}</>}
-            {st.timeMs != null && <span className="faint small">{Math.round(st.timeMs / 1000)}s</span>}
             <div style={{ flex: 1 }} />
             {idx < queue.length - 1 ? <button className="btn sm" onClick={() => go(idx + 1)}>Próxima <ChevronRight size={15} /></button>
               : <button className="btn sm" onClick={() => setSummary(true)}><BarChart3 size={15} /> Ver resumo</button>}
@@ -206,11 +201,10 @@ export function MnemonicView({ m, busy, onLoad }: { m: Mnemonic | null | undefin
   );
 }
 
-// Resumo da bateria: acertos, tempo médio e desempenho por assunto (o mais fraco primeiro).
+// Resumo da bateria: acertos e desempenho por assunto (o mais fraco primeiro).
 function BatchSummary({ queue, states, onBack }: { queue: Question[]; states: Record<string, QState>; onBack: () => void }) {
   const done = queue.filter((x) => states[x.qid]?.result);
   const right = done.filter((x) => states[x.qid]!.result!.correct).length;
-  const times = done.map((x) => states[x.qid]!.timeMs).filter((t): t is number => t != null);
   const by = new Map<string, { t: number; c: number }>();
   for (const x of done) { const e = by.get(x.assunto || 'Sem assunto') ?? { t: 0, c: 0 }; e.t++; if (states[x.qid]!.result!.correct) e.c++; by.set(x.assunto || 'Sem assunto', e); }
   const rows = [...by].sort((a, b) => a[1].c / a[1].t - b[1].c / b[1].t);
@@ -221,7 +215,7 @@ function BatchSummary({ queue, states, onBack }: { queue: Question[]; states: Re
       <div className="stats">
         <div className="stat"><strong style={{ color: 'var(--violet)' }}>{done.length}</strong><span>respondidas</span></div>
         <div className="stat"><strong style={{ color: pct >= 75 ? 'var(--lime)' : 'var(--orange)' }}>{pct}%</strong><span>de acerto</span></div>
-        <div className="stat"><strong style={{ color: 'var(--cyan)' }}>{times.length ? Math.round(times.reduce((a, b) => a + b, 0) / times.length / 1000) + 's' : '—'}</strong><span>por questão</span></div>
+        <div className="stat"><strong style={{ color: 'var(--cyan)' }}>{by.size}</strong><span>assuntos</span></div>
       </div>
       <table className="sum-table"><thead><tr><th>Assunto</th><th>Acertos</th><th /></tr></thead><tbody>
         {rows.map(([a, e]) => <tr key={a}><td>{a}</td><td>{e.c}/{e.t}</td><td style={{ width: '40%' }}><div className="bar"><span style={{ width: `${(e.c / e.t) * 100}%`, background: e.c / e.t >= 0.75 ? 'var(--lime)' : 'var(--orange)' }} /></div></td></tr>)}
