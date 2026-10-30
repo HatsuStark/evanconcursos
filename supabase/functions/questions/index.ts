@@ -12,6 +12,7 @@ import {
   EXPLAIN_PROMPT_VERSION, Explanation, explainPrompt, explanationJsonSchema, mapSession, mapSubject,
   QMAP_PROMPT_VERSION, searchFilters, type MapDeps, type SessionFilter,
 } from '../../../shared/qbank/map.ts';
+import { conceptKey, MNEMONIC_PROMPT_VERSION, MnemonicChoice, mnemonicJsonSchema, mnemonicPrompt, pickExisting } from '../../../shared/qbank/mnemonic.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 
 const ASSUNTOS_MAX_AGE_MS = 30 * 864e5;
@@ -56,7 +57,7 @@ Deno.serve(async (req) => {
     },
   };
   const log = (operation: string, status: 'ok' | 'error', error?: string) => logUsage(admin, {
-    ownerId: auth.user.id, operation, model: usage.inputTokens ? model : 'quest-api', promptVersion: operation === 'qbank_explain' ? EXPLAIN_PROMPT_VERSION : QMAP_PROMPT_VERSION,
+    ownerId: auth.user.id, operation, model: usage.inputTokens ? model : 'quest-api', promptVersion: operation === 'qbank_explain' ? EXPLAIN_PROMPT_VERSION : operation === 'qbank_mnemonic' ? MNEMONIC_PROMPT_VERSION : QMAP_PROMPT_VERSION,
     usage: usage.inputTokens ? usage : null, latencyMs: Date.now() - started, status, error, credits: quest.credits,
   });
 
@@ -81,13 +82,8 @@ Deno.serve(async (req) => {
       return json(200, { correct, gabarito: q.gabarito });
     }
 
-    if (body.action === 'explain') {
-      const qid = String(body.qid ?? '');
-      const { data: q } = await admin.from('qbank_questions').select('payload, gabarito, explanation').eq('qid', qid).maybeSingle();
-      if (!q) return json(404, { error: 'Questão não encontrada.' });
-      if (q.explanation) return json(200, { explanation: q.explanation, cached: true });
-      const p = q.payload as ReturnType<typeof publicQuestion>;
-      // Leis: as citadas na questão e as da sessão (com artigos); só trechos com intervalo definido.
+    // Trechos oficiais da lei: os citados na questão e os da sessão (só com artigos definidos).
+    const lawExcerpts = async (p: ReturnType<typeof publicQuestion>) => {
       let sessionTitle = '';
       if (task.session_id) sessionTitle = (await auth.client.from('study_sessions').select('title').eq('id', task.session_id).maybeSingle()).data?.title ?? '';
       const text = [plain(p.enunciado), ...p.alternativas.map((a) => plain(a.texto))].join('\n');
@@ -102,6 +98,47 @@ Deno.serve(async (req) => {
           .gte('num', Math.min(...r.ranges.map((x) => x.from))).lte('num', Math.max(...r.ranges.map((x) => x.to))).order('ord').limit(40);
         for (const a of (arts ?? []).filter((a) => inRanges(r.ranges, a.num, a.suffix)).slice(0, 8)) lei.push({ ref: `${law.short}, art. ${a.label}`, text: a.text.slice(0, 1500) });
       }
+      return lei;
+    };
+
+    if (body.action === 'mnemonic') {
+      const qid = String(body.qid ?? '');
+      const { data: q } = await admin.from('qbank_questions').select('payload, gabarito, materia, assunto, mnemonic_id, mnemonic_checked').eq('qid', qid).maybeSingle();
+      if (!q) return json(404, { error: 'Questão não encontrada.' });
+      const fields = 'id, concept, mnemonic, explanation, items';
+      if (q.mnemonic_checked) {
+        const m = q.mnemonic_id ? (await admin.from('mnemonics').select(fields).eq('id', q.mnemonic_id).maybeSingle()).data : null;
+        return json(200, { mnemonic: m, cached: true });
+      }
+      const p = q.payload as ReturnType<typeof publicQuestion>;
+      const { data: existing } = await admin.from('mnemonics').select('id, concept, mnemonic').eq('materia', q.materia).eq('assunto', q.assunto).limit(12);
+      const c = await deps.ai(MnemonicChoice, mnemonicJsonSchema(), mnemonicPrompt({
+        enunciado: plain(p.enunciado), alternativas: p.alternativas.map((a) => ({ letra: a.letra, texto: plain(a.texto) })), gabarito: q.gabarito,
+        assunto: q.assunto, existing: existing ?? [], law: (await lawExcerpts(p)).map((l) => `[${l.ref}] ${l.text}`),
+      }));
+      let mnemonicId: string | null = pickExisting(c, (existing ?? []).map((m) => m.id));
+      if (!mnemonicId && c.acao === 'criar' && c.mnemonico.trim() && c.conceito.trim()) {
+        // Mesmo conceito já criado por outra questão: reaproveita (chave normalizada).
+        const key = conceptKey(c.conceito);
+        const { data: same } = await admin.from('mnemonics').select('id').eq('concept_key', key).maybeSingle();
+        mnemonicId = same?.id ?? (await admin.from('mnemonics').insert({
+          concept: c.conceito.slice(0, 200), concept_key: key, materia: q.materia, assunto: q.assunto, mnemonic: c.mnemonico.slice(0, 300),
+          explanation: c.explicacao.slice(0, 1000), items: c.itens.slice(0, 15), model, prompt_version: MNEMONIC_PROMPT_VERSION,
+        }).select('id').single()).data?.id ?? null;
+      }
+      await admin.from('qbank_questions').update({ mnemonic_id: mnemonicId, mnemonic_checked: true }).eq('qid', qid);
+      await log('qbank_mnemonic', 'ok');
+      const m = mnemonicId ? (await admin.from('mnemonics').select(fields).eq('id', mnemonicId).single()).data : null;
+      return json(200, { mnemonic: m });
+    }
+
+    if (body.action === 'explain') {
+      const qid = String(body.qid ?? '');
+      const { data: q } = await admin.from('qbank_questions').select('payload, gabarito, explanation').eq('qid', qid).maybeSingle();
+      if (!q) return json(404, { error: 'Questão não encontrada.' });
+      if (q.explanation) return json(200, { explanation: q.explanation, cached: true });
+      const p = q.payload as ReturnType<typeof publicQuestion>;
+      const lei = await lawExcerpts(p);
       const ex = await deps.ai(Explanation, explanationJsonSchema(), explainPrompt({
         banca: p.prova?.banca ?? '', enunciado: plain(p.enunciado), alternativas: p.alternativas.map((a) => ({ letra: a.letra, texto: plain(a.texto) })),
         gabarito: q.gabarito, textos: p.textos.map(plain), lei,
@@ -183,7 +220,7 @@ Deno.serve(async (req) => {
     return json(200, { questions: out.slice(0, count).map(publicQuestion), filter: { materia: filter.materia, assuntos: filter.assuntos, how: filter.how }, reason: out.length ? null : 'esgotado' });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await log(body.action === 'explain' ? 'qbank_explain' : 'qbank_fetch', 'error', message).catch(() => {});
+    await log(body.action === 'explain' ? 'qbank_explain' : body.action === 'mnemonic' ? 'qbank_mnemonic' : 'qbank_fetch', 'error', message).catch(() => {});
     return json(502, { error: 'Não foi possível buscar as questões agora.', detail: message.slice(0, 300) });
   }
 });

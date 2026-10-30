@@ -1,6 +1,7 @@
 // Edge Function "study-guide": apostila da sessão gerada pela IA, baseada só no conteúdo do edital e nos
-// artigos oficiais da lei seca. POST {taskId, depth:'completa'|'revisao', refresh?} → {guide}.
+// artigos oficiais da lei seca. POST {taskId, depth:'completa'|'revisao'} → {guide}.
 // Reaproveita apostilas idênticas (mesmo tema, fontes e profundidade) entre sessões e estudantes.
+// Não há "gerar de novo" pelo estudante (economia de créditos): uma apostila existente é sempre reaproveitada.
 import { generateJson } from '../../../shared/ai/gemini.ts';
 import { Guide, GUIDE_PROMPT_VERSION, guideCacheKey, guideJsonSchema, guidePrompt, sourceRef, unlistedLaws, verifyGuide, type GuideDepth } from '../../../shared/ai/guide.ts';
 import { findLawRefs, inRanges } from '../../../shared/legal/refs.ts';
@@ -47,10 +48,8 @@ Deno.serve(async (req) => {
     const input = { depth, banca: notice?.board ?? '', subject: subject!.name, title: session!.title, topics, law };
     const key = guideCacheKey(input);
 
-    if (!body.refresh) {
-      const { data: cached } = await admin.from('study_guides').select('*').eq('cache_key', key).maybeSingle();
-      if (cached) return json(200, { guide: cached, cached: true });
-    }
+    const { data: cached } = await admin.from('study_guides').select('*').eq('cache_key', key).maybeSingle();
+    if (cached) return json(200, { guide: cached, cached: true });
     const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: Guide, jsonSchema: guideJsonSchema(), temperature: 0.3,
       parts: [{ text: guidePrompt({ ...input, cargo: notice?.role_name ?? '' }) }] });
     const v = verifyGuide(r.data, provided.slice(0, MAX_ARTICLES), subject!.name);

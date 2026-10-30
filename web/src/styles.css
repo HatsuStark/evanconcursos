@@ -381,3 +381,30 @@ a.task-title:hover { color: var(--cyan); }
 .pdf-page { width: 70px; display: inline-block; padding: 6px 8px; margin: 0 4px; text-align: center; }
 .pdf-canvas { overflow: auto; max-height: 80vh; border-radius: 12px; background: #2a2f3d; display: flex; justify-content: center; }
 .pdf-canvas canvas { display: block; background: #fff; }
+
+/* ---------- questões: navegação, tachado, abas, mnemônico ---------- */
+.q-nav { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 16px; }
+.q-nav .icon-btn { width: 36px; height: 36px; flex: none; }
+.q-dots { display: flex; gap: 6px; overflow-x: auto; flex: 1; align-items: center; padding: 2px; }
+.q-dot { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line-2); background: var(--surface); color: var(--muted); font-size: 12px; font-weight: 700; cursor: pointer; }
+.q-dot.on { border-color: var(--cyan); color: var(--text); box-shadow: var(--glow-cyan); }
+.q-dot.picked { background: rgba(42, 212, 232, .12); }
+.q-dot.right { background: var(--lime); color: #0b1020; border-color: var(--lime); }
+.q-dot.wrong { background: var(--danger); color: #fff; border-color: var(--danger); }
+.q-opt-row { display: flex; gap: 8px; align-items: stretch; }
+.q-opt-row .q-opt { flex: 1; }
+.q-opt-row.struck .q-opt { opacity: .45; }
+.q-opt-row.struck .q-opt-text { text-decoration: line-through; text-decoration-thickness: 2px; text-decoration-color: var(--danger); }
+.q-strike { flex: none; width: 40px; border-radius: 12px; border: 1px solid var(--line); background: rgba(8, 12, 24, .5); color: var(--faint); cursor: pointer; }
+.q-strike:hover { color: var(--danger); border-color: rgba(255, 92, 122, .5); }
+.q-strike.on { color: var(--danger); border-color: var(--danger); background: rgba(255, 92, 122, .1); }
+.q-actions { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.q-tabs { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px; border-radius: 14px; background: rgba(8, 12, 24, .45); border: 1px solid var(--line); }
+.q-tabs .tab:disabled { opacity: .4; cursor: not-allowed; }
+.q-mnemonic { display: grid; gap: 10px; padding: 18px; border-radius: 14px; background: rgba(169, 116, 255, .08); border: 1px solid rgba(169, 116, 255, .35); }
+.q-mnemonic-word { font-size: 26px; letter-spacing: .02em; color: var(--violet); text-shadow: 0 0 18px rgba(169, 116, 255, .5); }
+.q-mnemonic ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.q-mnemonic li b { color: var(--violet); margin-right: 6px; }
+.q-note { display: grid; gap: 6px; }
+.q-note .textarea { min-height: 120px; }
+@media (max-width: 720px) { .q-actions .faint { display: none; } }

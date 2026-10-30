@@ -28,5 +28,15 @@ select throws_ok($$insert into public.question_attempts (owner_id, plan_id, qid,
 select pg_temp.as_user('00000000-0000-4000-8000-0000000000b3');
 select is((select count(*) from public.question_attempts), 0::bigint, 'B não vê tentativas de A');
 
+-- Anotações por questão (pessoais) e mnemônicos (compartilhados, só o backend grava).
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000a3');
+select lives_ok($$insert into public.question_notes (qid, note) values ('q1', 'resumo de A')$$, 'A anota a questão');
+reset role;
+insert into public.mnemonics (concept, concept_key, mnemonic, model, prompt_version) values ('Requisitos do ato', 'requisitos do ato', 'COFIFOMOB', 'm', 'v');
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000b3');
+select is((select count(*) from public.question_notes), 0::bigint, 'B não vê anotações de A');
+select is((select count(*) from public.mnemonics), 1::bigint, 'mnemônico é compartilhado (leitura)');
+select throws_ok($$insert into public.mnemonics (concept, concept_key, mnemonic, model, prompt_version) values ('x', 'x', 'x', 'm', 'v')$$, '42501', null, 'usuário não grava mnemônico');
+
 select * from finish();
 rollback;

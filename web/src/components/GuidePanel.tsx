@@ -1,4 +1,4 @@
-import { AlertTriangle, BookOpen, CheckCircle2, Printer, RefreshCw, Sparkles } from 'lucide-react';
+import { AlertTriangle, BookOpen, CheckCircle2, Printer, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase.ts';
 
@@ -12,8 +12,9 @@ interface GuideContent {
 }
 interface GuideRow { content: GuideContent; sources: string[]; unlisted_sources: string[]; unverified: string[]; model: string; created_at: string; depth: string }
 
-async function fetchGuide(taskId: string, depth: string, refresh = false) {
-  const { data, error } = await supabase.functions.invoke('study-guide', { body: { taskId, depth, refresh } });
+// Sem "gerar de novo" (economia de créditos): a apostila existente é sempre reaproveitada.
+async function fetchGuide(taskId: string, depth: string) {
+  const { data, error } = await supabase.functions.invoke('study-guide', { body: { taskId, depth } });
   if (error) {
     let msg = error.message;
     try { msg = (await (error as { context?: Response }).context?.json())?.error ?? msg; } catch { /* sem JSON */ }
@@ -32,9 +33,9 @@ export function GuidePanel({ taskId, hasSession }: { taskId: string; hasSession:
   const [error, setError] = useState('');
   const [open, setOpen] = useState<number | null>(null);
 
-  async function load(refresh = false) {
+  async function load() {
     setLoading(true); setError('');
-    try { setGuide(await fetchGuide(taskId, depth, refresh)); } catch (e) { setError((e as Error).message); } finally { setLoading(false); }
+    try { setGuide(await fetchGuide(taskId, depth)); } catch (e) { setError((e as Error).message); } finally { setLoading(false); }
   }
   useEffect(() => { setGuide(null); if (hasSession) void load(); }, [depth, taskId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -97,7 +98,6 @@ export function GuidePanel({ taskId, hasSession }: { taskId: string; hasSession:
             <Sparkles size={12} /> Gerada por IA ({guide!.model}) em {new Date(guide!.created_at).toLocaleDateString('pt-BR')} a partir do conteúdo do edital
             {guide!.sources.length ? ` e do texto oficial da lei (normas.leg.br): ${guide!.sources.length} artigo(s)` : ''}.
             {g.depende_legislacao ? ' Depende de legislação que pode ser alterada: confira se houve mudança após essa data.' : ''} Não substitui a leitura da lei seca.
-            <button className="link-btn no-print" onClick={() => load(true)}><RefreshCw size={12} /> Gerar de novo</button>
           </footer>
         </article>
       )}
