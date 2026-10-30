@@ -31,5 +31,13 @@ delete from public.legal_marks;
 select pg_temp.as_user('00000000-0000-4000-8000-0000000000a2');
 select is((select note from public.legal_marks), 'cai muito', 'delete de B não afetou A');
 
+-- Apostilas: compartilhadas (leitura), gravadas só pelo backend.
+reset role;
+insert into public.study_guides (cache_key, depth, subject_name, title, content, model, prompt_version) values ('k1', 'completa', 'Penal', 'Peculato', '{}', 'm', 'v');
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000b2');
+select is((select count(*) from public.study_guides where cache_key = 'k1'), 1::bigint, 'apostila é lida por qualquer usuário logado');
+select throws_ok($$insert into public.study_guides (cache_key, depth, subject_name, title, content, model, prompt_version) values ('k2', 'completa', 'x', 'x', '{}', 'm', 'v')$$, '42501', null, 'usuário não grava apostila');
+select throws_ok($$update public.study_guides set title = 'x'$$, '42501', null, 'usuário não altera apostila');
+
 select * from finish();
 rollback;

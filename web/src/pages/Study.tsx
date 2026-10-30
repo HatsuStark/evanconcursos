@@ -3,6 +3,7 @@ import { BookOpen, Check, FileText, ListChecks, Pause, Play, Scale, Video } from
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { evaluate } from '../../../shared/domain/adaptive.ts';
+import { GuidePanel } from '../components/GuidePanel.tsx';
 import { LawReader } from '../components/LawReader.tsx';
 import { QuestionsPanel } from '../components/QuestionsPanel.tsx';
 import { Shell } from '../components/Shell.tsx';
@@ -15,7 +16,7 @@ const fmtClock = (s: number) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) +
 const TABS = [
   { key: 'questoes', label: 'Questões', icon: ListChecks },
   { key: 'lei', label: 'Lei seca', icon: Scale },
-  { key: 'apostila', label: 'Apostila', icon: BookOpen, soon: 'E4.4' },
+  { key: 'apostila', label: 'Apostila', icon: BookOpen },
   { key: 'material', label: 'Meus PDFs', icon: FileText, soon: 'E4.5' },
   { key: 'videos', label: 'Vídeos', icon: Video, soon: 'depois' },
 ] as const;
@@ -115,6 +116,7 @@ function StudyView({ d }: { d: StudyData }) {
 
       {tab === 'questoes' ? <QuestionsPanel taskId={d.task.id} goal={d.task.goal_questions} answered={mine.length} />
         : tab === 'lei' ? <LawReader refs={sessionLawRefs(d.task.title, d.topics, d.subject?.name ?? '')} />
+        : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={!!d.task.session_id} />
         : <div className="glass card muted">Chega na etapa {soonOf(tab)}.</div>}
     </Shell>
   );
