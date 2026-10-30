@@ -21,7 +21,7 @@ export function ReviewPage() {
 
   if (review.isError) return <Shell title="Conferência"><p className="error">{(review.error as Error).message}</p></Shell>;
   if (!review.data || !draft) return <Shell title="Conferência"><div className="spinner" /></Shell>;
-  const { extraction, usage, notice } = review.data;
+  const { extraction, usage, notice, hasPlan } = review.data;
 
   const set = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch });
   const setSubject = (i: number, patch: Partial<DraftSubject>) =>
@@ -35,7 +35,7 @@ export function ReviewPage() {
     try {
       await approveNotice(notice.id, extraction?.id ?? null, draft);
       await qc.invalidateQueries();
-      navigate('/');
+      navigate(`/concursos/${notice.id}/questionario`);
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -151,7 +151,9 @@ export function ReviewPage() {
       )}
 
       <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', marginTop: 28 }}>
-        <button className="btn" disabled={busy} onClick={confirm}><CheckCircle2 size={18} /> {busy ? 'Salvando…' : 'Confirmar dados'}</button>
+        {hasPlan
+          ? <span className="muted">Este edital já tem cronograma; as matérias ficam fixas. Para mudar horas ou níveis, use "Refazer cronograma".</span>
+          : <button className="btn" disabled={busy} onClick={confirm}><CheckCircle2 size={18} /> {busy ? 'Salvando…' : 'Confirmar e seguir'}</button>}
         {error && <span className="error" role="alert">{error}</span>}
       </div>
     </Shell>

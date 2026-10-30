@@ -85,6 +85,7 @@ export interface ReviewData {
   extraction: { id: string; model: string; prompt_version: string; warnings: NoticeWarning[]; created_at: string } | null;
   usage: { cost_usd: number | null; latency_ms: number | null } | null;
   draft: Draft;
+  hasPlan: boolean;
 }
 
 // Dados para a conferência: se já conferido, vem das tabelas; senão, da última leitura da IA.
@@ -121,7 +122,8 @@ export const useReview = (noticeId: string | undefined) => useQuery({
         subjects: e.subjects.map((s, i) => ({ name: s.name, block: s.block, questions: s.questions, core: s.core, weight: weights[i] ?? 2, topics: s.topics })),
       };
     } else throw new Error('Este edital ainda não foi lido pela IA.');
-    return { notice, extraction, usage, draft };
+    const plans = must(await supabase.from('study_plans').select('id').eq('notice_id', notice.id).limit(1)) as { id: string }[];
+    return { notice, extraction, usage, draft, hasPlan: plans.length > 0 };
   },
 });
 

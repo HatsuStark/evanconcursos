@@ -4,9 +4,9 @@
 // confere contra o texto do PDF, grava a extração (notice_extractions), o consumo (ai_usage) e o job (ai_jobs).
 // O app acompanha pelo job; o usuário confere e aprova depois (approve_notice).
 import { extractText } from 'unpdf';
-import { costUsd, GeminiError, generateJson, toBase64, type GeminiUsage } from '../../../shared/ai/gemini.ts';
+import { GeminiError, generateJson, toBase64, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { checkNotice, NOTICE_PROMPT_VERSION, NoticeExtraction, noticeJsonSchema, noticePrompt } from '../../../shared/ai/notice.ts';
-import { adminClient, CORS, json, modelPrice, requireUser } from '../_shared/http.ts';
+import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -74,22 +74,13 @@ async function process(p: { jobId: string; ownerId: string; noticeId: string; fi
     }).select('id').single();
     if (exErr || !extraction) throw new Error('Não foi possível salvar a leitura do edital.');
 
-    await logUsage(admin, p, model, usage, latencyMs, 'ok');
+    await logUsage(admin, { ownerId: p.ownerId, jobId: p.jobId, operation: OPERATION, model, promptVersion: NOTICE_PROMPT_VERSION, usage, latencyMs, status: 'ok' });
     await admin.from('ai_jobs').update({ status: 'succeeded', finished_at: new Date().toISOString(), result: { extractionId: extraction.id }, progress: { step: 'done' } }).eq('id', p.jobId);
   } catch (err) {
     if (err instanceof GeminiError) usage = err.usage;
     const message = err instanceof Error ? err.message : String(err);
-    await logUsage(admin, p, model, usage, latencyMs, 'error', message);
+    await logUsage(admin, { ownerId: p.ownerId, jobId: p.jobId, operation: OPERATION, model, promptVersion: NOTICE_PROMPT_VERSION, usage, latencyMs, status: 'error', error: message });
     await admin.from('ai_jobs').update({ status: 'failed', finished_at: new Date().toISOString(), error: message.slice(0, 1000) }).eq('id', p.jobId);
   }
 }
 
-async function logUsage(admin: ReturnType<typeof adminClient>, p: { jobId: string; ownerId: string }, model: string,
-  usage: GeminiUsage | null, latencyMs: number | null, status: 'ok' | 'error', error?: string) {
-  const price = usage ? await modelPrice(admin, model) : null;
-  await admin.from('ai_usage').insert({
-    owner_id: p.ownerId, job_id: p.jobId, operation: OPERATION, model, prompt_version: NOTICE_PROMPT_VERSION,
-    input_tokens: usage?.inputTokens ?? 0, output_tokens: usage?.outputTokens ?? 0, thinking_tokens: usage?.thinkingTokens ?? 0,
-    cost_usd: usage && price ? costUsd(usage, price) : null, latency_ms: latencyMs, status, error: error?.slice(0, 1000) ?? null,
-  });
-}

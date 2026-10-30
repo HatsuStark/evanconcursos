@@ -18,7 +18,7 @@ export function NoticesPage() {
           {notices.data.map((n, i) => {
             const s = stats.data?.[n.id];
             return (
-              <Link key={n.id} to={`/concursos/${n.id}/conferencia`} className="glass course-card" style={{ color: subjectColor(i), textDecoration: 'none' }}>
+              <Link key={n.id} to={n.status === 'reviewed' ? `/concursos/${n.id}/questionario` : `/concursos/${n.id}/conferencia`} className="glass course-card" style={{ color: subjectColor(i), textDecoration: 'none' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <SubjectIcon name={n.role_name || n.title} index={i} />
                   <span className={'badge ' + (n.status === 'reviewed' ? 'lime' : 'orange')}>{n.status === 'reviewed' ? 'Conferido' : 'Rascunho'}</span>

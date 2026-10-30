@@ -14,7 +14,9 @@ export interface SubjectConfig { weight: number; level: number; topics: string[]
 export interface ScheduleConfig { hours: number[]; weeklyReview: boolean; subjects: Record<string, SubjectConfig> }
 
 export type Phase = '' | 'theory' | 'consol' | 'final' | 'review';
-export interface ScheduledDay { text: string; hours: number; subject: string; keyword: string; goal: number }
+// kind: tipo da tarefa; item: na teoria, o índice do tópico/sessão da matéria que o dia cobre (-1 nos demais).
+export type DayKind = '' | 'rest' | 'exam' | 'eve' | 'weekly_review' | 'theory' | 'consolidation' | 'final_review' | 'simulado';
+export interface ScheduledDay { text: string; hours: number; subject: string; keyword: string; goal: number; kind: DayKind; item: number }
 export interface Week { title: string; days: ScheduledDay[] }
 export interface ScheduleSummary {
   weeks: number; studyDays: number; theory: number; consol: number; final: number; hours: number;
@@ -85,15 +87,15 @@ export function interleave(counts: number[]): number[] {
   return seq;
 }
 
-interface TaskText { text: string; keyword: string }
+interface TaskText { text: string; keyword: string; item: number }
 
 // Transforma n dias de uma matéria em tarefas a partir dos tópicos (agrupa ou divide em partes).
 export function subjectTasks(name: string, topics: string[], n: number): TaskText[] {
-  if (!topics.length) return Array.from({ length: n }, (_, j) => ({ text: `${name}: estudo ${j + 1} de ${n}`, keyword: '' }));
+  if (!topics.length) return Array.from({ length: n }, (_, j) => ({ text: `${name}: estudo ${j + 1} de ${n}`, keyword: '', item: -1 }));
   if (n >= topics.length) {
     const per = apportion(topics.map(() => 1), n), out: TaskText[] = [];
     topics.forEach((t, i) => {
-      for (let p = 0; p < per[i]!; p++) out.push({ text: `${name}: ${t}` + (per[i]! > 1 ? ` (parte ${p + 1} de ${per[i]})` : ''), keyword: topicKeyword(t) });
+      for (let p = 0; p < per[i]!; p++) out.push({ text: `${name}: ${t}` + (per[i]! > 1 ? ` (parte ${p + 1} de ${per[i]})` : ''), keyword: topicKeyword(t), item: i });
     });
     return out;
   }
@@ -102,7 +104,7 @@ export function subjectTasks(name: string, topics: string[], n: number): TaskTex
   for (const size of sizes) {
     const chunk = topics.slice(k, k + size);
     k += size;
-    out.push({ text: `${name}: ${chunk.join('; ')}`.slice(0, 200), keyword: topicKeyword(chunk[0]!) });
+    out.push({ text: `${name}: ${chunk.join('; ')}`.slice(0, 200), keyword: topicKeyword(chunk[0]!), item: k - size });
   }
   return out;
 }
@@ -124,17 +126,18 @@ export function generateSchedule(input: ScheduleInput, rawConfig: unknown): Sche
     slots.push({
       date: new Date(d), week: Math.floor(slots.length / 7), hours, phase: '',
       text: d.getTime() === exam.getTime() ? 'PROVA' : !inRange ? '' : hours ? '' : 'Descanso', subject: '', keyword: '', goal: 0,
+      kind: d.getTime() === exam.getTime() ? 'exam' : inRange && !hours ? 'rest' : '', item: -1,
     });
   }
   let study = slots.filter((s) => s.hours > 0);
   if (study.length < input.subjects.length + 1) throw Error('Pouco tempo até a prova para cobrir todas as matérias com essas horas.');
   // Véspera da prova: revisão leve.
-  Object.assign(study.pop()!, { text: 'Revisão leve e descanso', phase: 'final' });
+  Object.assign(study.pop()!, { text: 'Revisão leve e descanso', phase: 'final', kind: 'eve' });
   // Revisão semanal: último dia de estudo de cada semana com 4 ou mais dias de estudo.
   if (cfg.weeklyReview) {
     const byWeek = new Map<number, Slot[]>();
     for (const s of study) { if (!byWeek.has(s.week)) byWeek.set(s.week, []); byWeek.get(s.week)!.push(s); }
-    for (const list of byWeek.values()) if (list.length >= 4) Object.assign(list[list.length - 1]!, { text: 'Revisão da semana e caderno de erros', phase: 'review' });
+    for (const list of byWeek.values()) if (list.length >= 4) Object.assign(list[list.length - 1]!, { text: 'Revisão da semana e caderno de erros', phase: 'review', kind: 'weekly_review' });
     study = study.filter((s) => !s.text);
   }
   const N = study.length, names = input.subjects.map((s) => s.name);
@@ -146,10 +149,10 @@ export function generateSchedule(input: ScheduleInput, rawConfig: unknown): Sche
   // Peso efetivo: importância no edital × reforço para quem tem menos domínio (iniciante pesa 2×, avançado 1×).
   const weights = names.map((n) => { const s = cfg.subjects[n]!; return s.weight * (1 + (3 - s.level) / 3); });
   const counts = apportion(weights, theory.length), queues = names.map((n, i) => subjectTasks(n, cfg.subjects[n]!.topics, counts[i]!));
-  interleave(counts).forEach((si, k) => Object.assign(theory[k]!, { ...queues[si]!.shift(), subject: names[si], phase: 'theory' }));
+  interleave(counts).forEach((si, k) => Object.assign(theory[k]!, { ...queues[si]!.shift(), subject: names[si], phase: 'theory', kind: 'theory' }));
   // Consolidação e reta final: questões dos pontos fracos, distribuídas pelo mesmo peso.
   const weakDay = (s: Slot, si: number, label: string, phase: Phase) =>
-    Object.assign(s, { text: `${names[si]}: ${label}`, subject: names[si], keyword: WEAK_MARK, goal: Math.round(s.hours * 15), phase });
+    Object.assign(s, { text: `${names[si]}: ${label}`, subject: names[si], keyword: WEAK_MARK, goal: Math.round(s.hours * 15), phase, kind: phase === 'consol' ? 'consolidation' : 'final_review' });
   if (consol.length) {
     interleave(apportion(weights, Math.max(consol.length, names.length))).slice(0, consol.length)
       .forEach((si, k) => weakDay(consol[k]!, si, 'questões dos pontos fracos', 'consol'));
@@ -164,7 +167,7 @@ export function generateSchedule(input: ScheduleInput, rawConfig: unknown): Sche
       if (w === examWeek && byWeek.size > 1) continue; // semana da prova: só revisão, sem simulado
       const review = slots.find((s) => s.week === w && s.phase === 'review');
       const big = review && review.hours >= Math.max(...list.map((s) => s.hours)) ? review : list.reduce((a, b) => (b.hours > a.hours ? b : a));
-      Object.assign(big, { text: 'Simulado completo da banca + correção', phase: 'final' });
+      Object.assign(big, { text: 'Simulado completo da banca + correção', phase: 'final', kind: 'simulado' });
     }
     const rest = final.filter((s) => !s.text), seq = interleave(apportion(weights, Math.max(rest.length, names.length)));
     rest.forEach((s, k) => weakDay(s, seq[k % seq.length]!, 'revisão final dos pontos fracos', 'final'));
@@ -179,7 +182,7 @@ export function generateSchedule(input: ScheduleInput, rawConfig: unknown): Sche
     const main = Object.entries(tally).sort((a, b) => b[1] - a[1])[0]?.[0];
     const subs = [...new Set(days.filter((d) => d.subject).map((d) => d.subject))].slice(0, 3);
     const title = days.some((d) => d.text === 'PROVA') && !subs.length ? 'Semana da prova' : `${(main && phaseName[main]) || 'Semana'}${subs.length ? ': ' + subs.join(', ') : ''}`;
-    weeks.push({ title, days: days.map((d) => ({ text: d.text, hours: d.hours, subject: d.subject, keyword: d.keyword, goal: d.goal })) });
+    weeks.push({ title, days: days.map((d) => ({ text: d.text, hours: d.hours, subject: d.subject, keyword: d.keyword, goal: d.goal, kind: d.kind, item: d.item })) });
   }
   const summary: ScheduleSummary = {
     weeks: weeks.length, studyDays: N + 1, theory: theory.length, consol: consol.length, final: final.length,

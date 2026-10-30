@@ -36,7 +36,12 @@ function scenario(seed: number) {
   return { plan: { id: 'p', name: 'P', startDate: ymd(start), examDate: ymd(exam), subjects }, cfg };
 }
 
-const pick = (s: { weeks: unknown; startDate: string; summary: unknown }) => ({ weeks: s.weeks, startDate: s.startDate, summary: s.summary });
+// Compara só os campos que o gerador legado produzia (kind e item são novos).
+type AnyWeek = { title: string; days: { text: string; hours: number; subject: string; keyword: string; goal: number }[] };
+const pick = (s: { weeks: unknown; startDate: string; summary: unknown }) => ({
+  weeks: (s.weeks as AnyWeek[]).map((w) => ({ title: w.title, days: w.days.map(({ text, hours, subject, keyword, goal }) => ({ text, hours, subject, keyword, goal })) })),
+  startDate: s.startDate, summary: s.summary,
+});
 const run = <T,>(f: () => T): T | { error: string } => { try { return f(); } catch (e) { return { error: (e as Error).message }; } };
 
 describe('scheduler ≡ gerador legado', () => {

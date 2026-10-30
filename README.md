@@ -15,7 +15,7 @@ web/         React + TypeScript (Vite)
 supabase/
   migrations/ SQL versionado (aplicado com scripts/db.mjs push)
   tests/     testes pgTAP de isolamento entre usuários (scripts/db.mjs test)
-  functions/ Edge Functions: notice-extract (E2); plan-design e study-guide nas próximas etapas
+  functions/ Edge Functions: notice-extract (leitura do edital), plan-design (estratégia e sessões); study-guide na E5
 evals/       editais de referência (gabaritos) e avaliação da extração
 scripts/     db.mjs (migrações e testes do banco), deploy-functions.mjs (funções e segredos), gemini-models.mjs
 ```
@@ -67,6 +67,16 @@ node --experimental-strip-types evals/run.ts [filtro]    # chama o Gemini (custo
 
 No app, as mesmas verificações viram avisos na conferência (tópico não encontrado no PDF, soma de questões, data ausente ou passada).
 
+## Planejamento do cronograma
+
+1. **Questionário**: horas por dia da semana, data de início, revisão semanal, nível por matéria e um texto livre sobre o candidato.
+2. **Estratégia (IA)**: prioridade 1–5 e foco de cada matéria (questões na prova × nível × perfil) e até 6 orientações.
+3. **Dias por matéria (scheduler)**: o calendário determinístico calcula quantos dias de teoria cada matéria recebe.
+4. **Sessões (IA)**: cada matéria é dividida em exatamente esse número de sessões, na ordem de aprendizado, cada uma apontando para os tópicos do edital. Uma correção determinística (`repairSessions`) garante contagem exata e cobertura de 100% dos tópicos; se a IA falhar, as sessões saem direto dos tópicos.
+5. **Gravação**: `create_plan_version` grava versão, sessões e tarefas numa transação. Refazer cria nova versão a partir de hoje: tarefas futuras não feitas ficam substituídas; concluídas e passadas são preservadas.
+
+Avaliação com a IA real (`node --experimental-strip-types evals/plan-run.ts [filtro]`), prompt `plan-v2`: TJSP Escrevente 11/11 e TJRJ 9/9 matérias com contagem exata e cobertura total já na resposta da IA (194/194 tópicos no TJRJ), cerca de 50 s e US$ 0,11 por plano.
+
 ## Etapas
 
 | # | Etapa | Status |
@@ -74,7 +84,7 @@ No app, as mesmas verificações viram avisos na conferência (tópico não enco
 | E0 | Base React/TS, domínio portado com testes (equivalência com o gerador antigo), CI | feito |
 | E1 | Banco: migrações, bucket privado de editais, RLS e testes de isolamento | feito |
 | E2 | Upload do edital → extração (`notice-extract`) → conferência; registro de custo da IA | feito |
-| E3 | Questionário → planejamento (`plan-design`, sessões ligadas aos tópicos) → cronograma versionado no banco | |
+| E3 | Questionário → planejamento (`plan-design`, sessões ligadas aos tópicos) → cronograma versionado no banco | feito |
 | E4 | Tela "Hoje": assunto, tempo, roteiro, materiais e questões | |
 | E5 | Roteiros e materiais em segundo plano, desempenho, reforço e discursivas | |
 

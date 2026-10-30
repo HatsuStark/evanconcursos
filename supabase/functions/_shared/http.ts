@@ -1,5 +1,6 @@
 // Código comum das Edge Functions: CORS, respostas JSON, usuário autenticado e cliente administrativo.
 import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
+import { costUsd, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 
 export const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -30,6 +31,19 @@ export async function requireUser(req: Request): Promise<{ user: User; client: S
   const allowed = env('ALLOWED_EMAILS').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
   if (!allowed.includes(user.email.toLowerCase())) return json(403, { error: 'Sua conta ainda não tem acesso aos recursos de IA.' });
   return { user, client };
+}
+
+// Registra consumo e custo de uma chamada à IA (ai_usage), com sucesso ou erro.
+export async function logUsage(admin: SupabaseClient, u: {
+  ownerId: string; jobId?: string | null; operation: string; model: string; promptVersion: string;
+  usage: GeminiUsage | null; latencyMs: number | null; status: 'ok' | 'error'; error?: string;
+}) {
+  const price = u.usage ? await modelPrice(admin, u.model) : null;
+  await admin.from('ai_usage').insert({
+    owner_id: u.ownerId, job_id: u.jobId ?? null, operation: u.operation, model: u.model, prompt_version: u.promptVersion,
+    input_tokens: u.usage?.inputTokens ?? 0, output_tokens: u.usage?.outputTokens ?? 0, thinking_tokens: u.usage?.thinkingTokens ?? 0,
+    cost_usd: u.usage && price ? costUsd(u.usage, price) : null, latency_ms: u.latencyMs, status: u.status, error: u.error?.slice(0, 1000) ?? null,
+  });
 }
 
 // Preço vigente do modelo (USD por milhão de tokens); null se não cadastrado.
