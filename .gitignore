@@ -11,3 +11,5 @@ dist/
 supabase/.temp/
 web/dist/
 coverage/
+evals/editais/*.pdf
+evals/results/

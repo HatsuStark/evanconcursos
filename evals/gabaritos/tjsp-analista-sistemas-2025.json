@@ -1,0 +1,86 @@
+{
+  "pdf": "tjsp-analista-sistemas-2025.pdf",
+  "source": "https://cdn.direcaoconcursos.com.br/uploads/2025/02/edital-TJ-SP-Analista-Sistemas.pdf",
+  "sha256": "da45e5c71b20077adf75e403999339508ee603e88ac845884c0f80e6729f9bc2",
+  "roleHint": "",
+  "expected": {
+    "board": "VUNESP",
+    "examDate": "2025-05-11",
+    "roleKeywords": [
+      "analista",
+      "sistemas"
+    ],
+    "totalQuestions": 70,
+    "essay": true,
+    "blockQuestions": [
+      10,
+      50,
+      10
+    ],
+    "subjects": [
+      {
+        "name": "Língua Portuguesa",
+        "aliases": [
+          "Português"
+        ],
+        "questions": 10
+      },
+      {
+        "name": "Engenharia de Software"
+      },
+      {
+        "name": "Desenvolvimento de Sistemas"
+      },
+      {
+        "name": "Arquitetura de Software"
+      },
+      {
+        "name": "Bancos de Dados",
+        "aliases": [
+          "Banco de Dados"
+        ]
+      },
+      {
+        "name": "Inteligência Artificial"
+      },
+      {
+        "name": "DevOps e DevSecOps",
+        "aliases": [
+          "DevOps"
+        ]
+      },
+      {
+        "name": "Metodologias Ágeis"
+      },
+      {
+        "name": "Segurança da Informação e Desenvolvimento Seguro",
+        "aliases": [
+          "Segurança da Informação"
+        ]
+      },
+      {
+        "name": "Infraestrutura e Computação em Nuvem",
+        "aliases": [
+          "Computação em Nuvem"
+        ]
+      },
+      {
+        "name": "Arquitetura de Desenvolvimento da PDPJ-Br",
+        "aliases": [
+          "PDPJ"
+        ]
+      },
+      {
+        "name": "Raciocínio Lógico Matemático",
+        "aliases": [
+          "Raciocínio Lógico"
+        ],
+        "questions": 5
+      },
+      {
+        "name": "Legislação",
+        "questions": 5
+      }
+    ]
+  }
+}

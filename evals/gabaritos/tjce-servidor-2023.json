@@ -1,0 +1,25 @@
+{
+  "pdf": "tjce-servidor-2023.pdf",
+  "source": "https://cdn.direcaoconcursos.com.br/uploads/2023/01/ED_1_TJCE_SERVIDOR_2022_ABERTURA.pdf",
+  "sha256": "6aab4a468ad3cf97e643b4c3d2815c7c89346e101c239a75e13976983f1b3055",
+  "roleHint": "Técnico Judiciário – Área Judiciária",
+  "note": "Edital com dois cargos; a tabela 7.1.1 troca o nome das áreas (teste de robustez). O cargo pedido tem Processual Civil e Penal.",
+  "expected": {
+    "board": "Cebraspe",
+    "examDate": "2023-04-23",
+    "roleKeywords": ["judiciária"],
+    "totalQuestions": 60,
+    "essay": true,
+    "blockQuestions": [20, 40],
+    "subjects": [
+      { "name": "Língua Portuguesa", "aliases": ["Português"] },
+      { "name": "Noções de Informática", "aliases": ["Informática"] },
+      { "name": "Raciocínio Lógico" },
+      { "name": "Noções de Direito Constitucional", "aliases": ["Direito Constitucional"] },
+      { "name": "Noções de Direito Administrativo", "aliases": ["Direito Administrativo"] },
+      { "name": "Noções de Direito Processual Civil", "aliases": ["Direito Processual Civil"] },
+      { "name": "Noções de Direito Processual Penal", "aliases": ["Direito Processual Penal"] }
+    ],
+    "forbiddenSubjects": ["Administração Pública", "Gestão Pública"]
+  }
+}

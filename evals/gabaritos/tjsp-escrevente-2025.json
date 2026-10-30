@@ -1,0 +1,27 @@
+{
+  "pdf": "tjsp-escrevente-2025.pdf",
+  "source": "https://cdn.direcaoconcursos.com.br/uploads/2025/08/Tjsp-56-78.pdf",
+  "sha256": "a05af6d2001c674faf6fb95d5a478e7f7837c9ef0765f7823f3eecdfa0c7c490",
+  "roleHint": "",
+  "expected": {
+    "board": "VUNESP",
+    "examDate": "2025-12-07",
+    "roleKeywords": ["escrevente"],
+    "totalQuestions": 70,
+    "essay": true,
+    "blockQuestions": [16, 30, 24],
+    "subjects": [
+      { "name": "Língua Portuguesa", "aliases": ["Português"], "questions": 16 },
+      { "name": "Direito Penal" },
+      { "name": "Direito Processual Penal" },
+      { "name": "Direito Processual Civil" },
+      { "name": "Direito Constitucional" },
+      { "name": "Direito Administrativo" },
+      { "name": "Legislação Interna", "aliases": ["Normas da Corregedoria"] },
+      { "name": "Atualidades", "questions": 4 },
+      { "name": "Matemática", "questions": 4 },
+      { "name": "Informática", "questions": 9 },
+      { "name": "Raciocínio Lógico", "questions": 7 }
+    ]
+  }
+}

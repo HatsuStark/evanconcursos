@@ -1,0 +1,25 @@
+{
+  "pdf": "tjrj-tecnico-2025.pdf",
+  "source": "https://conhecimento.fgv.br/sites/default/files/concursos/edital-de-abertura-tjrj-tecnico-de-atividade-judiciaria-final-23.10.pdf",
+  "sha256": "9e45ef1d32fc12073433e0d40f90d952a78e03fb748d0abe6a3f8e4c563b0195",
+  "roleHint": "",
+  "expected": {
+    "board": "FGV",
+    "examDate": "2026-02-01",
+    "roleKeywords": ["técnico", "atividade judiciária"],
+    "totalQuestions": 70,
+    "essay": false,
+    "blockQuestions": [30, 40],
+    "subjects": [
+      { "name": "Língua Portuguesa", "aliases": ["Português"], "questions": 20 },
+      { "name": "Legislação Especial" },
+      { "name": "Noções dos Direitos das Pessoas com Deficiência", "aliases": ["Pessoas com Deficiência"] },
+      { "name": "Ética no Serviço Público" },
+      { "name": "Noções de Direito Administrativo", "aliases": ["Direito Administrativo"] },
+      { "name": "Noções de Direito Constitucional", "aliases": ["Direito Constitucional"] },
+      { "name": "Noções de Direito Processual Civil", "aliases": ["Direito Processual Civil"] },
+      { "name": "Noções de Direito Processual Penal", "aliases": ["Direito Processual Penal"] },
+      { "name": "Legislação", "aliases": ["Legislação Institucional", "Legislação Específica"] }
+    ]
+  }
+}
