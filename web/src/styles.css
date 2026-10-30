@@ -310,3 +310,35 @@ a.task-title:hover { color: var(--cyan); }
 .link-btn:hover { color: var(--cyan); }
 .law-note { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--cyan); background: rgba(42, 212, 232, .06); border-radius: 6px; font-size: 14px; white-space: pre-wrap; }
 .law-credit a { color: var(--muted); }
+
+/* ---------- E4.3: questões no app ---------- */
+.q-card { padding: 22px; display: grid; gap: 16px; }
+.q-meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.q-meta .badge { text-transform: none; letter-spacing: 0; white-space: normal; }
+.q-texts { font-size: 14.5px; color: var(--muted); }
+.q-texts summary { cursor: pointer; }
+.q-body { font-size: 16.5px; line-height: 1.65; }
+.q-body p { margin: 0 0 10px; }
+.q-img { max-width: 100%; border-radius: 10px; background: #fff; }
+.q-options { display: grid; gap: 10px; }
+.q-opt {
+  display: flex; gap: 12px; align-items: flex-start; text-align: left; width: 100%; padding: 13px 15px; border-radius: 14px; cursor: pointer;
+  background: rgba(8, 12, 24, .5); border: 1px solid var(--line-2); color: var(--text); font-size: 15.5px; line-height: 1.5; transition: border-color .15s, background .15s;
+}
+.q-opt:hover:not(:disabled) { border-color: var(--cyan); }
+.q-opt:disabled { cursor: default; }
+.q-opt b { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--surface-3); font-size: 13px; }
+.q-opt p { margin: 0; }
+.q-opt.picked { border-color: var(--cyan); box-shadow: var(--glow-cyan); }
+.q-opt.right { border-color: var(--lime); background: rgba(181, 229, 80, .1); }
+.q-opt.right b { background: var(--lime); color: #0b1020; }
+.q-opt.wrong { border-color: var(--danger); background: rgba(255, 92, 122, .1); }
+.q-opt.wrong b { background: var(--danger); color: #fff; }
+.q-opt.dim { opacity: .55; }
+.q-result { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; border-radius: 14px; font-weight: 600; }
+.q-result.ok { background: rgba(181, 229, 80, .1); color: var(--lime); }
+.q-result.bad { background: rgba(255, 92, 122, .1); color: var(--danger); }
+.q-explain { padding: 16px; border-radius: 14px; background: rgba(255, 138, 76, .06); border: 1px solid rgba(255, 138, 76, .25); line-height: 1.55; }
+.q-explain p { margin: 0 0 10px; }
+.q-explain ul { margin: 0 0 10px; padding-left: 20px; display: grid; gap: 6px; }
+.goal-done { display: flex; gap: 10px; align-items: center; color: var(--lime); border-color: rgba(181, 229, 80, .4); }

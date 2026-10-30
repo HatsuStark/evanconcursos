@@ -77,6 +77,12 @@ No app, as mesmas verificações viram avisos na conferência (tópico não enco
 
 Avaliação com a IA real (`node --experimental-strip-types evals/plan-run.ts [filtro]`), prompt `plan-v2`: TJSP Escrevente 11/11 e TJRJ 9/9 matérias com contagem exata e cobertura total já na resposta da IA (194/194 tópicos no TJRJ), cerca de 50 s e US$ 0,11 por plano.
 
+## Questões (Quest API)
+
+A chave fica só no servidor (segredo `QUEST_API_KEY`) e o gabarito nunca vai ao navegador antes da resposta. Filtros automáticos (`shared/qbank/map.ts`, prompt `qmap-v3`): matéria do edital → matéria da API (nome + tamanho da lista de assuntos; IA nos casos ambíguos) e sessão → até 5 assuntos escolhidos pela IA dentro da lista oficial (sem assunto correspondente, a sessão fica sem questões em vez de mostrar questões erradas). Busca: banca nos assuntos, depois os mesmos assuntos em outras bancas; Atualidades só em provas recentes; dias de reforço usam os assuntos com pior acerto. Avaliação nas sessões reais do TJSP (`evals/qmap-run.ts`): 93% de relevância ponderada, nenhuma questão irrelevante.
+
+`scripts/e2e-questions.ts` testa a função ponta a ponta com um usuário temporário (exige incluir `e2e@evanconcursos.test` em `ALLOWED_EMAILS`).
+
 ## Etapas
 
 | # | Etapa | Status |
@@ -87,9 +93,10 @@ Avaliação com a IA real (`node --experimental-strip-types evals/plan-run.ts [f
 | E3 | Questionário → planejamento (`plan-design`, sessões ligadas aos tópicos) → cronograma versionado no banco | feito |
 | E4.1 | Modo estudo: cronômetro, questões no QConcursos/TecConcursos em outra aba com filtro pronto e registro rápido na volta | feito |
 | E4.2 | Lei seca: textos oficiais (normas.leg.br, CC BY 4.0) no banco e leitor com os artigos da sessão | feito |
-| E4.3 | Apostila da IA (completa ou revisão curta) baseada só no edital e na lei seca, com fontes e reaproveitamento | |
-| E4.4 | Vídeos do YouTube integrados (Data API + player) | |
+| E4.3 | Questões no app (Quest API): filtros automáticos por sessão, correção no servidor, explicação da IA com base na lei seca | feito |
+| E4.4 | Apostila da IA (completa ou revisão curta) baseada só no edital e na lei seca, com fontes e reaproveitamento | |
 | E4.5 | Biblioteca pessoal: PDFs privados, leitor PDF.js e mapeamento de páginas para as sessões | |
+| depois | Vídeos do YouTube integrados (precisa de chave da YouTube Data API) | |
 | E5 | Roteiros e materiais em segundo plano, desempenho, reforço e discursivas | |
 
 O app estático original está na tag `v0-legado`.

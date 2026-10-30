@@ -37,13 +37,14 @@ export async function requireUser(req: Request, { ai = true } = {}): Promise<{ u
 // Registra consumo e custo de uma chamada à IA (ai_usage), com sucesso ou erro.
 export async function logUsage(admin: SupabaseClient, u: {
   ownerId: string; jobId?: string | null; operation: string; model: string; promptVersion: string;
-  usage: GeminiUsage | null; latencyMs: number | null; status: 'ok' | 'error'; error?: string;
+  usage: GeminiUsage | null; latencyMs: number | null; status: 'ok' | 'error'; error?: string; credits?: number;
 }) {
   const price = u.usage ? await modelPrice(admin, u.model) : null;
   await admin.from('ai_usage').insert({
     owner_id: u.ownerId, job_id: u.jobId ?? null, operation: u.operation, model: u.model, prompt_version: u.promptVersion,
     input_tokens: u.usage?.inputTokens ?? 0, output_tokens: u.usage?.outputTokens ?? 0, thinking_tokens: u.usage?.thinkingTokens ?? 0,
     cost_usd: u.usage && price ? costUsd(u.usage, price) : null, latency_ms: u.latencyMs, status: u.status, error: u.error?.slice(0, 1000) ?? null,
+    credits: u.credits ?? 0,
   });
 }
 
