@@ -16,7 +16,7 @@ Painel minimalista (preparação atual: TJSP Oficial de Justiça 2027) e respons
   - `manifest.webmanifest`, `sw.js`, ícones: suporte a PWA.
   - `_headers`: cabeçalhos de segurança (inclui CSP) para Netlify.
 - `public/materials.js`: material de estudo de cada tarefa (buscas de vídeo-aula e PDF, lei seca no Planalto).
-- `supabase/functions/`: Edge Functions com o Gemini: `edital` (lê o PDF do edital), `roteiro` (roteiro de estudo da tarefa) e `_shared/` (login permitido e chamada ao Gemini).
+- `supabase/functions/`: Edge Functions com o Gemini: `edital` (lê o PDF do edital), `plano` (estratégia e sessões por matéria), `roteiro` (roteiro de estudo da tarefa) e `_shared/` (login permitido e chamada ao Gemini).
 - `scripts/`: `gemini-models.mjs` (lista modelos da sua chave) e `deploy-functions.mjs` (publica as funções e os segredos).
 - `.env` (local, fora do Git; modelo em `.env.example`): chaves do Gemini e do Supabase.
 - `supabase.sql`: esquema e políticas de segurança (executar no SQL Editor; não é publicado).
@@ -40,11 +40,13 @@ Em **Cronograma → Gerar cronograma automaticamente**: horas por dia da semana,
 
 ## Plano a partir do edital (IA)
 
-Em **Conta e planos → Criar plano a partir do edital (PDF)**: o PDF vai para a Edge Function `edital`, que confere o login (só e-mails em `ALLOWED_EMAILS`) e pede ao Gemini um rascunho estruturado: órgão, cargo, banca, data da prova, matérias (específica ou não, nº de questões, peso 1–5, tópicos de estudo de ~2h) e observações. Você revisa, cria o plano e o gerador já vem preenchido; basta informar seu nível e as horas.
+Em **Conta e planos → Criar plano a partir do edital (PDF)**: o PDF vai para a Edge Function `edital`, que confere o login (só e-mails em `ALLOWED_EMAILS`) e pede ao Gemini um rascunho estruturado: órgão, cargo, banca, data da prova, matérias (específica ou não, nº de questões, peso 1–5, tópicos de estudo de ~2h) e observações. Você revisa, cria o plano e vai para as perguntas do Cronograma: horas por dia, nível em cada matéria e um texto livre sobre você.
+
+**Montar plano com IA** (Edge Function `plano`): (1) a IA define a estratégia e a prioridade (peso 1–5) e o foco de cada matéria pelas questões na prova, seu nível e seu perfil; (2) o gerador calcula quantos dias cada matéria recebe e a IA divide o conteúdo do edital em exatamente essas sessões, na ordem de aprendizado e no seu nível; (3) o gerador monta o calendário (teoria, consolidação, reta final, revisões, simulados), que continua determinístico; (4) os roteiros de todas as sessões são gerados em lotes de 7, em segundo plano, com o progresso acima da lista de dias. **Gerar sem IA** usa só o gerador.
 
 ## Material de estudo por tarefa
 
-Cada dia com matéria tem, além de **Questões**, a seção **Estudar**: busca de vídeo-aulas no YouTube e de PDFs/resumos no Google pelo tema do dia, e link da lei seca no Planalto quando a tarefa cita um código ou lei (ou pela matéria: CPP, CPC, CP, CC, CF). Nos dias de reforço, o tema é o assunto mais fraco do momento. Com login, o app gera sozinho, em segundo plano e numa só chamada, os roteiros dos próximos 7 dias (ao entrar, ao trocar de plano e ao gerar o cronograma), ficando sempre uma semana adiantado; o botão **Gerar/Refazer roteiro com IA** faz um dia avulso. A Edge Function `roteiro` (até 7 tarefas por chamada) devolve resumo, o que ler (lei e artigos), pontos que mais caem, pegadinhas, autoteste e termos de busca de vídeo; a IA não gera links. O roteiro fica salvo na tarefa e sincroniza; se o cronograma for refeito e o texto da tarefa mudar, ele deixa de aparecer.
+Cada dia com matéria tem, além de **Questões**, a seção **Estudar**: busca de vídeo-aulas no YouTube e de PDFs/resumos no Google pelo tema do dia, e link da lei seca no Planalto quando a tarefa cita um código ou lei (ou pela matéria: CPP, CPC, CP, CC, CF). Nos dias de reforço, o tema é o assunto mais fraco do momento. Com login, o app gera sozinho, em segundo plano e em lotes de 7, os roteiros que faltam: no plano montado pela IA, todas as sessões até a prova; nos demais, os próximos 7 dias (ao entrar, ao trocar de plano e ao gerar o cronograma). Dias de reforço só ganham roteiro a 7 dias, pois o tema depende do desempenho; o botão **Gerar/Refazer roteiro com IA** faz um dia avulso. A Edge Function `roteiro` (até 7 tarefas por chamada) devolve resumo, o que ler (lei e artigos), pontos que mais caem, pegadinhas, autoteste e termos de busca de vídeo; a IA não gera links. O roteiro fica salvo na tarefa e sincroniza; se o cronograma for refeito e o texto da tarefa mudar, ele deixa de aparecer.
 
 ## Publicação das funções de IA
 

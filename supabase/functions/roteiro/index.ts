@@ -29,16 +29,18 @@ const SCHEMA = {
 };
 
 const clip = (v: unknown, n: number) => String(v ?? '').trim().slice(0, n);
-type Task = { id: string; subject: string; text: string };
+type Task = { id: string; subject: string; text: string; level: string };
 
-function prompt(tasks: Task[], cargo: string, banca: string) {
+function prompt(tasks: Task[], cargo: string, banca: string, profile: string) {
   return `Você é professor de cursinho para concursos públicos brasileiros.
 Monte um roteiro de estudo para cada tarefa abaixo (cada uma é uma sessão de cerca de 2 horas).
 Concurso: ${cargo || 'não informado'}${banca ? `, banca ${banca}` : ''}.
-Tarefas (id | matéria | tarefa do dia):
-${tasks.map((t) => `${t.id} | ${t.subject} | ${t.text}`).join('\n')}
+Sobre o candidato: ${profile || 'não informado'}.
+Tarefas (id | matéria | nível do candidato na matéria | tarefa do dia):
+${tasks.map((t) => `${t.id} | ${t.subject} | ${t.level || 'não informado'} | ${t.text}`).join('\n')}
 Regras:
 - Um item em guides por tarefa, com o mesmo id.
+- Ajuste a profundidade ao nível: iniciante começa pelos conceitos; avançado vai direto aos detalhes e exceções.
 - Foque no que a banca costuma cobrar; seja objetivo, frases curtas.
 - leitura: até 6 itens, citando lei e artigos exatos quando houver (lei seca primeiro).
 - pontos: até 8 itens. pegadinhas: até 5. perguntas: 5 perguntas com resposta após " — ".
@@ -55,11 +57,11 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const tasks: Task[] = (Array.isArray(body.tasks) ? body.tasks : []).slice(0, MAX_TASKS)
-      .map((t: Record<string, unknown>) => ({ id: clip(t?.id, 60), subject: clip(t?.subject, 120), text: clip(t?.text, 300) }))
+      .map((t: Record<string, unknown>) => ({ id: clip(t?.id, 60), subject: clip(t?.subject, 120), text: clip(t?.text, 300), level: clip(t?.level, 40) }))
       .filter((t: Task) => t.id && t.subject && t.text);
     if (!tasks.length) return json(400, { error: 'Informe as tarefas (matéria e texto).' });
 
-    const out = await generate([{ text: prompt(tasks, clip(body.cargo, 120), clip(body.banca, 80)) }], SCHEMA, 0.3);
+    const out = await generate([{ text: prompt(tasks, clip(body.cargo, 120), clip(body.banca, 80), clip(body.profile, 1000)) }], SCHEMA, 0.3);
     if (out.error) return out.error;
     const ids = new Set(tasks.map((t) => t.id));
     const guides = (Array.isArray(out.data?.guides) ? out.data.guides : []).filter((g: { id?: string }) => ids.has(String(g?.id)));

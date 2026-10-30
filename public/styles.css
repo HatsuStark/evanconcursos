@@ -71,7 +71,7 @@ progress{width:100%;height:9px;accent-color:var(--accent)}
 :root.dark .badge.ok{color:#7fdcbc;background:#183a31}:root.dark .badge.warning{color:#f0b877;background:#3d2e1b}:root.dark .badge.bad{color:#f19b94;background:#41201f}
 .focus-item.due{border-color:#d08a3a}
 .done{text-decoration:line-through;color:var(--muted)}
-.hidden,.view[hidden]{display:none!important}
+.hidden,[hidden]{display:none!important}
 .disc-item{padding:15px;border:1px solid var(--line);border-radius:12px;margin:10px 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .disc-item small{color:var(--muted)}
 .disc-item button{margin-top:9px}
@@ -116,3 +116,10 @@ details summary{cursor:pointer;font-weight:600;margin-top:16px;font-size:14px}
 .guide ul{margin:0;padding-left:20px;display:grid;gap:3px}
 .guide details summary{margin:0;font-weight:400}
 .guide details p{padding:4px 0 2px 16px}
+.gensubjects{display:grid;gap:10px}
+.gensubject{border:1px solid var(--line);border-radius:12px;padding:10px 14px;display:grid;gap:6px}
+.gensubject-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.gensubjects .gensubject details{border:0;padding:0}
+.gensubjects .gensubject summary{font-weight:400;font-size:13px;color:var(--muted)}
+.gensubject details>*+*{margin-top:8px}
+#genProfile{width:100%;min-height:90px}

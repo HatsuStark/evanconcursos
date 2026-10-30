@@ -56,18 +56,23 @@
     <p class="muted sectionintro">As semanas do seu plano, com conteúdos, questões e revisões.</p>
     <section class="panel">
       <details id="genDetails">
-        <summary>Gerar cronograma automaticamente</summary>
-        <p class="note">Informe seu tempo e, para cada matéria, o peso no edital, seu nível e o conteúdo programático (cole do edital: um tópico por linha, separados por ";" ou numerados). O gerador distribui teoria, consolidação com questões e reta final com simulados até a data da prova. Data da prova e matérias vêm do plano (Conta e planos).</p>
-        <h3>Horas de estudo por dia</h3>
+        <summary>Montar cronograma</summary>
+        <p class="note">Responda as perguntas abaixo. Com <strong>Montar plano com IA</strong>, a IA define a estratégia e a prioridade das matérias, divide o conteúdo do edital em sessões de estudo no seu nível e prepara o roteiro de cada dia; o calendário (teoria, consolidação com questões e reta final com simulados até a prova) é montado pelo app. Data da prova e matérias vêm do plano (Conta e planos).</p>
+        <h3>Quantas horas você pode estudar em cada dia?</h3>
         <div class="fields genhours" id="genHours"></div>
         <label class="check"><input type="checkbox" id="genReview"> Reservar o último dia de estudo de cada semana para revisão e caderno de erros</label>
-        <h3>Matérias</h3>
+        <h3>Qual o seu nível em cada matéria?</h3>
+        <p class="note">Abra a matéria para ajustar o peso e o conteúdo programático (vem do edital).</p>
         <div id="genSubjects" class="gensubjects"></div>
-        <div class="actions"><button id="genRun">Gerar cronograma</button></div>
+        <h3>Conte um pouco sobre você</h3>
+        <textarea id="genProfile" placeholder="Ex.: trabalho 8h por dia; sou formado em Direito; já estudei para o TJ em 2023; tenho dificuldade em Português e Matemática; nunca fiz prova da VUNESP."></textarea>
+        <div id="genStrategy"></div>
+        <div class="actions"><button id="genAi">Montar plano com IA</button><button class="secondary" id="genRun">Gerar sem IA</button></div>
         <p id="genStatus" class="note" aria-live="polite"></p>
       </details>
     </section>
     <section class="panel">
+      <p id="guideProgress" class="note" aria-live="polite" hidden></p>
       <div class="fields"><label for="week">Semana</label><select id="week"></select><button class="secondary" id="today">Semana atual</button></div>
       <h3 id="focus"></h3>
       <div id="daysList" class="days"></div>

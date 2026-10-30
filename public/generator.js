@@ -27,10 +27,14 @@ function normalizeConfig(raw,plan){
   const subjects={};
   for(const {name} of plan.subjects){
     const s=c.subjects?.[name]||{},w=Number(s.weight),l=Number(s.level);
+    const q=Number(s.questions);
     subjects[name]={weight:Number.isInteger(w)&&w>=1&&w<=5?w:base.subjects[name].weight,level:Number.isInteger(l)&&l>=0&&l<=3?l:1,
-      topics:(Array.isArray(s.topics)?s.topics:[]).map(t=>String(t).trim().slice(0,160)).filter(Boolean).slice(0,200)};
+      topics:(Array.isArray(s.topics)?s.topics:[]).map(t=>String(t).trim().slice(0,160)).filter(Boolean).slice(0,200),
+      questions:Number.isInteger(q)&&q>=0&&q<=300?q:0,focus:String(s.focus||'').slice(0,300)};
   }
-  return {hours,weeklyReview:c.weeklyReview!==false,subjects};
+  // profile: o candidato em texto livre; ai/strategy: o plano foi arquitetado pela IA (estratégia dela).
+  const strategy=(Array.isArray(c.strategy)?c.strategy:[]).map(t=>String(t).trim().slice(0,300)).filter(Boolean).slice(0,8);
+  return {hours,weeklyReview:c.weeklyReview!==false,profile:String(c.profile||'').slice(0,1000),ai:c.ai===true,strategy,subjects};
 }
 
 // Distribui `total` vagas proporcionalmente aos pesos (maiores restos), com mínimo de 1 por item.

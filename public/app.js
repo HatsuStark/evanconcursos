@@ -256,13 +256,16 @@ const guideFor=info=>{const g=state.guides[info.id];return g&&g.for===info.text?
 const weakKw=info=>info.keyword===WEAK_MARK?weakestKeyword(info.subject):'';
 // Pedido de roteiros (até 7 tarefas por chamada). Pendências e erros ficam em memória para a tela mostrar.
 const guidesPending=new Set(),guideErrors=new Map();
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
 async function requestGuides(infos){
-  const p=activePlan();
+  const p=activePlan(),cfg=normalizeConfig(p.config,p);
   infos.forEach(i=>{guidesPending.add(i.id);guideErrors.delete(i.id)});render();
   try{
     if(!window.cloudInvoke)throw Error('Roteiro com IA indisponível: a conexão com o Supabase não carregou.');
-    const tasks=infos.map(i=>{const kw=weakKw(i);return {id:i.id,subject:i.subject,text:i.text+(kw?` (assunto mais fraco: ${kw})`:'')}});
-    const res=await window.cloudInvoke('roteiro',{tasks,cargo:p.cargo,banca:p.banca});
+    const tasks=infos.map(i=>{const kw=weakKw(i),c=cfg.subjects[i.subject];return {id:i.id,subject:i.subject,level:c?LEVELS[c.level]:'',text:i.text+(kw?` (assunto mais fraco: ${kw})`:'')}});
+    const body={tasks,cargo:p.cargo,banca:p.banca,profile:cfg.profile};
+    // Limite de uso do Gemini (429): espera e tenta mais uma vez.
+    const res=await window.cloudInvoke('roteiro',body).catch(async e=>{if(!/\(429\)/.test(e.message))throw e;await wait(30000);return window.cloudInvoke('roteiro',body)});
     let saved=0;
     for(const i of infos){
       const g=cleanGuide({...(res.guides||[]).find(x=>x&&x.id===i.id),for:i.text,model:res.model,ts:Date.now()});
@@ -272,19 +275,34 @@ async function requestGuides(infos){
   }catch(e){infos.forEach(i=>guideErrors.set(i.id,e.message))}
   finally{infos.forEach(i=>guidesPending.delete(i.id));render()}
 }
-// Roteiros automáticos: com login, gera em segundo plano os roteiros dos próximos 7 dias numa só chamada.
-// Roda ao entrar/sincronizar, ao trocar de plano e ao gerar o cronograma; assim fica sempre uma semana adiantado.
-// Tarefas que falharam só são tentadas de novo no próximo carregamento (ou pelo botão).
-const AUTO_GUIDE_DAYS=7;
+// Roteiros automáticos: com login, gera em segundo plano, em lotes de 7 tarefas, os roteiros que faltam.
+// Plano montado pela IA: todas as sessões de hoje até a prova. Demais planos: só os próximos 7 dias.
+// Dias de reforço ("pontos fracos") só entram quando estão a até 7 dias, porque o tema depende do desempenho.
+// Roda ao entrar/sincronizar, ao trocar de plano e ao gerar o cronograma; o que falhar é tentado de novo
+// no próximo carregamento (ou pelo botão do dia).
+const AUTO_GUIDE_DAYS=7,GUIDE_BATCH=7;
 let autoRunning=false;
+function guideProgress(text){const el=$('guideProgress');el.hidden=!text;el.textContent=text}
 async function autoGuides(){
   const p=activePlan(),today=todayInfo(p);
   if(autoRunning||!window.cloudReady?.()||!today||today.after)return;
-  const start=today.week*7+today.day,end=Math.min(planTotal(p),start+AUTO_GUIDE_DAYS),infos=[];
-  for(let i=start;i<end;i++){const info=taskInfo(`${p.id}:${Math.floor(i/7)}-${i%7}`);if(info.subject&&!guideFor(info)&&!guideErrors.has(info.id))infos.push(info)}
+  const start=today.week*7+today.day,near=start+AUTO_GUIDE_DAYS,end=normalizeConfig(p.config,p).ai?planTotal(p):Math.min(planTotal(p),near),infos=[];
+  for(let i=start;i<end;i++){
+    const info=taskInfo(`${p.id}:${Math.floor(i/7)}-${i%7}`);
+    if(info.subject&&!guideFor(info)&&!guideErrors.has(info.id)&&(i<near||info.keyword!==WEAK_MARK))infos.push(info);
+  }
   if(!infos.length)return;
   autoRunning=true;
-  try{await requestGuides(infos)}finally{autoRunning=false}
+  const batches=[];for(let i=0;i<infos.length;i+=GUIDE_BATCH)batches.push(infos.slice(i,i+GUIDE_BATCH));
+  let done=0;
+  const show=()=>guideProgress(infos.length>GUIDE_BATCH?`Gerando roteiros com IA: ${done} de ${infos.length} dias prontos...`:'');
+  show();
+  try{await pool(batches,2,async b=>{await requestGuides(b);done+=b.filter(i=>guideFor(i)).length;show()})}
+  finally{
+    autoRunning=false;
+    const failed=infos.filter(i=>!guideFor(i)).length;
+    guideProgress(infos.length>GUIDE_BATCH?`Roteiros prontos: ${infos.length-failed} de ${infos.length}.`+(failed?' Os que faltaram serão tentados de novo na próxima vez que você abrir o app.':''):'');
+  }
 }
 function studyBlock(info){
   const box=document.createElement('div');box.className='practice';
@@ -324,7 +342,7 @@ function setupPlanControls(){
 function renderWeek(){
   const p=activePlan(),list=$('daysList');
   week.parentElement.hidden=!p.weeks.length;
-  if(!p.weeks.length){$('focus').textContent='';list.replaceChildren(Object.assign(document.createElement('p'),{className:'muted',textContent:'Este plano ainda não tem cronograma. Preencha o gerador acima e clique em "Gerar cronograma", ou importe um plano pronto em Conta e planos.'}));return}
+  if(!p.weeks.length){$('focus').textContent='';list.replaceChildren(Object.assign(document.createElement('p'),{className:'muted',textContent:'Este plano ainda não tem cronograma. Responda as perguntas acima e clique em "Montar plano com IA" (ou "Gerar sem IA"), ou importe um plano pronto em Conta e planos.'}));return}
   const n=Number(week.value);
   $('focus').textContent=p.weeks[n].title;
   const today=todayInfo(p)?.id;
@@ -458,21 +476,75 @@ function renderGenerator(){
     l.append(d.slice(0,3),inp);return l;
   }));
   $('genReview').checked=cfg.weeklyReview;
+  // Cada matéria: nível sempre visível (é a pergunta principal); peso e conteúdo ficam recolhidos.
   $('genSubjects').replaceChildren(...p.subjects.map(({name})=>{
-    const s=cfg.subjects[name],det=document.createElement('details'),sum=document.createElement('summary');
-    det.dataset.subject=name;
-    const describe=()=>{sum.textContent=`${name} · peso ${weight.value} · ${LEVELS[level.value]} · ${splitTopics(topics.value).length} tópico(s)`};
+    const s=cfg.subjects[name],box=document.createElement('div'),head=document.createElement('div');
+    box.className='gensubject';box.dataset.subject=name;head.className='gensubject-head';
+    const det=document.createElement('details'),sum=document.createElement('summary');
+    const describe=()=>{sum.textContent=`Peso ${weight.value} · ${splitTopics(topics.value).length} tópico(s)${s.questions?` · ${s.questions} questões na prova`:''}`};
     const select=(opts,val)=>{const el=document.createElement('select');opts.forEach(([v,t])=>el.add(new Option(t,v)));el.value=String(val);el.onchange=describe;return el};
     const weight=select([1,2,3,4,5].map(n=>[n,`Peso ${n}${n===1?' (pouco cobrada)':n===5?' (muito cobrada)':''}`]),s.weight);weight.className='w';
-    const level=select(LEVELS.map((t,i)=>[i,'Meu nível: '+t]),s.level);level.className='l';
+    const level=select(LEVELS.map((t,i)=>[i,t]),s.level);level.className='l';level.setAttribute('aria-label','Seu nível em '+name);
     const topics=document.createElement('textarea');topics.className='t';topics.placeholder='Conteúdo programático desta matéria (cole do edital)';topics.value=s.topics.join('\n');topics.oninput=describe;
-    const row=document.createElement('div');row.className='fields';row.append(weight,level);
-    det.append(sum,row,topics);describe();return det;
+    head.append(Object.assign(document.createElement('strong'),{textContent:name}),level);
+    det.append(sum,weight,topics);describe();box.append(head);
+    if(s.focus)box.append(Object.assign(document.createElement('p'),{className:'note',textContent:'Foco sugerido pela IA: '+s.focus}));
+    box.append(det);return box;
   }));
+  $('genProfile').value=cfg.profile;
+  const strat=$('genStrategy');strat.replaceChildren();
+  if(cfg.strategy.length){
+    const ul=document.createElement('ul');ul.append(...cfg.strategy.map(t=>Object.assign(document.createElement('li'),{textContent:t})));
+    strat.append(Object.assign(document.createElement('h3'),{textContent:'Estratégia da IA para você'}),ul);
+  }
 }
+// Respostas do formulário sobre a configuração salva (mantém questões, foco e estratégia da IA).
 function readGeneratorForm(){
-  return {hours:[...$('genHours').querySelectorAll('input')].map(i=>Number(i.value)||0),weeklyReview:$('genReview').checked,
-    subjects:Object.fromEntries([...$('genSubjects').children].map(d=>[d.dataset.subject,{weight:Number(d.querySelector('.w').value),level:Number(d.querySelector('.l').value),topics:splitTopics(d.querySelector('.t').value)}]))};
+  const p=activePlan(),base=normalizeConfig(p.config,p);
+  return {...base,hours:[...$('genHours').querySelectorAll('input')].map(i=>Number(i.value)||0),weeklyReview:$('genReview').checked,profile:$('genProfile').value.trim(),
+    subjects:Object.fromEntries([...$('genSubjects').children].map(d=>[d.dataset.subject,{...base.subjects[d.dataset.subject],weight:Number(d.querySelector('.w').value),level:Number(d.querySelector('.l').value),topics:splitTopics(d.querySelector('.t').value)}]))};
+}
+// Plano com IA: (1) estratégia e prioridade das matérias pelas respostas; (2) a IA divide cada matéria em
+// exatamente as sessões que o gerador reservou para ela; (3) o gerador monta o calendário; (4) os roteiros
+// de todas as sessões são gerados em lotes (autoGuides). A IA decide conteúdo e prioridade; datas, horas,
+// revisões e simulados continuam determinísticos.
+async function pool(items,n,fn){const queue=[...items];await Promise.all(Array.from({length:Math.min(n,queue.length)},async()=>{while(queue.length)await fn(queue.shift())}))}
+async function buildWithAI(){
+  const p=activePlan(),status=t=>{$('genStatus').textContent=t};
+  if(!window.cloudReady?.())return status('Entre na sua conta (Conta e planos) para montar o plano com IA.');
+  const cfg=normalizeConfig(readGeneratorForm(),p);
+  let dry;try{dry=generateWeeks(p,cfg)}catch(err){return status(err.message)}
+  const done=Object.entries(state.tasks).filter(([k,v])=>v&&k.startsWith(p.id+':')).length;
+  if(p.weeks.length&&!confirm(`O cronograma atual será substituído${done?` e as ${done} tarefa(s) feitas serão desmarcadas`:''}. Seus registros de questões continuam valendo. Continuar?`))return;
+  const buttons=[$('genAi'),$('genRun')];buttons.forEach(b=>b.disabled=true);
+  try{
+    status('1/4 · A IA está definindo a estratégia e a prioridade de cada matéria...');
+    const est=await window.cloudInvoke('plano',{step:'estrategia',cargo:p.cargo,banca:p.banca,examDate:p.examDate,weeks:dry.summary.weeks,hours:dry.summary.hours,profile:cfg.profile,notes:p.notes,
+      subjects:p.subjects.map(s=>{const c=cfg.subjects[s.name];return {name:s.name,core:s.core,questions:c.questions,weight:c.weight,level:LEVELS[c.level],topics:c.topics.length}})});
+    for(const m of Array.isArray(est.materias)?est.materias:[]){
+      const c=cfg.subjects[m?.name],w=Math.round(Number(m?.weight));
+      if(c){if(w>=1&&w<=5)c.weight=w;c.focus=String(m.foco||'').slice(0,300)}
+    }
+    cfg.strategy=(Array.isArray(est.estrategia)?est.estrategia:[]).map(t=>String(t).slice(0,300)).slice(0,8);
+    const counts=generateWeeks(p,cfg).summary.perSubject;
+    let ready=0,failed=[];
+    status(`2/4 · A IA está dividindo as matérias em sessões de estudo (0 de ${counts.length})...`);
+    await pool(counts,2,async({name,days})=>{
+      const c=cfg.subjects[name];
+      try{
+        const res=await window.cloudInvoke('plano',{step:'materia',cargo:p.cargo,banca:p.banca,profile:cfg.profile,subject:name,level:LEVELS[c.level],questions:c.questions,focus:c.focus,n:days,topics:c.topics});
+        const titles=(Array.isArray(res.sessoes)?res.sessoes:[]).map(s=>String(s?.titulo||'').trim().slice(0,160)).filter(Boolean);
+        if(titles.length)c.topics=titles;else failed.push(name);
+      }catch{failed.push(name)} // mantém os tópicos do edital
+      status(`2/4 · A IA está dividindo as matérias em sessões de estudo (${++ready} de ${counts.length})...`);
+    });
+    status('3/4 · Montando o calendário...');
+    cfg.ai=true;
+    applyGenerated(p,generateWeeks(getPlan(p.id),cfg));
+    status('4/4 · Cronograma pronto. Os roteiros de cada dia estão sendo gerados (acompanhe acima da lista de dias).'+(failed.length?` Matérias com tópicos do edital (a IA falhou): ${failed.join(', ')}.`:''));
+    showView('cronograma');
+  }catch(err){status(err.message)}
+  finally{buttons.forEach(b=>b.disabled=false)}
 }
 // Refazer o cronograma muda o conteúdo de cada dia: zera marcações e metas do plano e desliga os
 // registros antigos das tarefas (eles seguem valendo por matéria e assunto, inclusive no reforço).
@@ -545,7 +617,7 @@ function draftToPlan(d){
   const plan=normalizePlan({id:uniquePlanId(name),name,cargo:d.cargo,banca:d.banca,examDate:d.examDate,startDate:ymd(new Date()),notes:d.notes,
     subjects:subjects.map(s=>({name:clip(s.name,60),core:!!s.core})),weeks:[]});
   plan.config={hours:normalizeConfig(null,plan).hours,weeklyReview:true,subjects:Object.fromEntries(subjects.map(s=>[clip(s.name,60),{
-    weight:Math.min(5,Math.max(1,Math.round(Number(s.weight)||2))),level:1,topics:(Array.isArray(s.topics)?s.topics:[]).map(t=>clip(t,160)).filter(Boolean)}]))};
+    weight:Math.min(5,Math.max(1,Math.round(Number(s.weight)||2))),level:1,questions:Math.max(0,Math.round(Number(s.questions)||0)),topics:(Array.isArray(s.topics)?s.topics:[]).map(t=>clip(t,160)).filter(Boolean)}]))};
   plan.questions=Object.fromEntries(subjects.map(s=>[clip(s.name,60),Number(s.questions)||0]));
   return plan;
 }
@@ -567,7 +639,7 @@ function renderEditalReview(){
   const actions=document.createElement('div');actions.className='actions';
   const create=Object.assign(document.createElement('button'),{textContent:'Criar plano'});
   const discard=Object.assign(document.createElement('button'),{className:'secondary',textContent:'Descartar'});
-  create.onclick=()=>{const {questions,...plan}=editalDraft;savePlan(plan);editalDraft=null;renderEditalReview();switchPlan(plan.id);editalStatus('Plano criado. Ajuste seu nível em cada matéria e as horas, e gere o cronograma.');showView('cronograma')};
+  create.onclick=()=>{const {questions,...plan}=editalDraft;savePlan(plan);editalDraft=null;renderEditalReview();switchPlan(plan.id);editalStatus('Plano criado. Responda as perguntas no Cronograma e clique em "Montar plano com IA".');$('genStatus').textContent='Plano criado a partir do edital. Responda as perguntas acima e clique em "Montar plano com IA".';showView('cronograma')};
   discard.onclick=()=>{editalDraft=null;renderEditalReview();editalStatus('')};
   actions.append(create,discard);
   wrap.append(head,meta,list);
@@ -589,9 +661,10 @@ $('editalRead').onclick=async()=>{
   finally{btn.disabled=false}
 };
 
+$('genAi').onclick=buildWithAI;
 $('genRun').onclick=()=>{
   const p=activePlan();let result;
-  try{result=generateWeeks(p,readGeneratorForm())}catch(err){$('genStatus').textContent=err.message;return}
+  try{result=generateWeeks(p,{...readGeneratorForm(),ai:false,strategy:[]})}catch(err){$('genStatus').textContent=err.message;return}
   const s=result.summary,done=Object.entries(state.tasks).filter(([k,v])=>v&&k.startsWith(p.id+':')).length;
   const msg=`Cronograma de ${s.weeks} semanas, ${s.studyDays} dias de estudo (${s.hours}h):\n`+
     `• teoria: ${s.theory} dias\n• consolidação com questões: ${s.consol} dias\n• reta final (simulados e revisão): ${s.final} dias\n\n`+

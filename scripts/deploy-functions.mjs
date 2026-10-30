@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const CLI = 'supabase@2.120.0';
-const FUNCTIONS = ['edital', 'roteiro'];
+const FUNCTIONS = ['edital', 'plano', 'roteiro'];
 const root = new URL('..', import.meta.url);
 const env = Object.fromEntries(
   readFileSync(new URL('.env', root), 'utf8')
