@@ -47,8 +47,33 @@ export function speechChunks(t: string): string[] {
   return chunks;
 }
 
+// Partes de uma seção para as vozes de IA: áudios de cerca de 1 minuto, gerados e pagos só quando ouvidos.
+const MAX_PART = 1000;
+export function speechParts(s: SpeechSection): string[] {
+  const parts: string[] = [];
+  for (const c of s.chunks) {
+    const last = parts[parts.length - 1];
+    if (last !== undefined && last.length + c.length + 1 <= MAX_PART) parts[parts.length - 1] = `${last} ${c}`;
+    else parts.push(c);
+  }
+  return parts;
+}
+
+// Vozes de IA fixas: cada voz a mais multiplica o custo, porque cada texto tem um áudio por voz.
+// Mudar um estilo pede nova TTS_PROMPT_VERSION (os áudios antigos deixam de ser reaproveitados).
+export const TTS_PROMPT_VERSION = 'tts-v1';
+export const AI_VOICES = [
+  { id: 'professor', label: 'Professor', voice: 'Charon', style: 'Em português do Brasil, como um professor experiente explicando com clareza e ritmo tranquilo.' },
+  { id: 'calma', label: 'Calma', voice: 'Achernar', style: 'Em português do Brasil, voz calma e suave, ritmo pausado, como numa leitura relaxante.' },
+  { id: 'animada', label: 'Animada', voice: 'Puck', style: 'Em português do Brasil, com energia e entusiasmo, como um professor animado de cursinho.' },
+  { id: 'locutora', label: 'Locutora', voice: 'Kore', style: 'Em português do Brasil, voz firme e direta, como uma locutora de rádio.' },
+] as const;
+export const aiVoiceById = (id: string) => AI_VOICES.find((v) => v.id === id);
+
 export function guideSpeech(g: SpeakableGuide): SpeechSection[] {
-  const section = (key: string, title: string, texts: string[]): SpeechSection => ({ key, title, chunks: [title, ...texts].flatMap(speechChunks) });
+  // Ponto depois do título: a voz faz a pausa antes do texto.
+  const heading = (t: string) => (/[.!?:]$/.test(t.trim()) ? t : `${t}.`);
+  const section = (key: string, title: string, texts: string[]): SpeechSection => ({ key, title, chunks: [heading(title), ...texts].flatMap(speechChunks) });
   const list = (key: string, title: string, items: string[]) => (items.length ? [section(key, title, items)] : []);
   return [
     section('intro', g.titulo, [g.introducao]),

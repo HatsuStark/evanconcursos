@@ -1,6 +1,6 @@
 import { AlertTriangle, BookOpen, CheckCircle2, Headphones, Pause, Play, Printer, SkipBack, SkipForward, Sparkles, Square } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { guideSpeech } from '../../../shared/ai/speech.ts';
+import { AI_VOICES, guideSpeech } from '../../../shared/ai/speech.ts';
 import { supabase } from '../lib/supabase.ts';
 import { RATES, useGuideVoice, voiceSupported } from '../lib/voice.ts';
 
@@ -12,7 +12,7 @@ interface GuideContent {
   perguntas: { pergunta: string; resposta: string }[];
   depende_legislacao: boolean;
 }
-interface GuideRow { content: GuideContent; sources: string[]; unlisted_sources: string[]; unverified: string[]; model: string; created_at: string; depth: string }
+interface GuideRow { id: string; content: GuideContent; sources: string[]; unlisted_sources: string[]; unverified: string[]; model: string; created_at: string; depth: string }
 
 // Sem "gerar de novo" (economia de créditos): a apostila existente é sempre reaproveitada.
 async function fetchGuide(taskId: string, depth: string) {
@@ -43,7 +43,7 @@ export function GuidePanel({ taskId, hasSession }: { taskId: string; hasSession:
 
   const g = guide?.content;
   const speech = useMemo(() => (g ? guideSpeech(g) : []), [g]);
-  const voice = useGuideVoice(speech);
+  const voice = useGuideVoice(speech, guide?.id);
   // O bloco lido fica destacado e visível.
   const article = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -61,7 +61,7 @@ export function GuidePanel({ taskId, hasSession }: { taskId: string; hasSession:
         </div>
         {g && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {voiceSupported() && voice.status === 'idle' && <button className="btn ghost sm" onClick={voice.play}><Headphones size={15} /> Ouvir</button>}
+            {voice.status === 'idle' && <button className="btn ghost sm" onClick={voice.play}><Headphones size={15} /> Ouvir</button>}
             <button className="btn ghost sm" onClick={() => window.print()}><Printer size={15} /> Imprimir / PDF</button>
           </div>
         )}
@@ -129,12 +129,19 @@ export function GuidePanel({ taskId, hasSession }: { taskId: string; hasSession:
           <select className="select voice-select" aria-label="Velocidade" value={voice.rate} onChange={(e) => voice.setRate(Number(e.target.value))}>
             {RATES.map((r) => <option key={r} value={r}>{String(r).replace('.', ',')}x</option>)}
           </select>
-          {voice.voices.length > 1 && (
-            <select className="select voice-select" aria-label="Voz" value={voice.voice?.voiceURI ?? ''} onChange={(e) => voice.setVoice(e.target.value)}>
-              {voice.voices.map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>)}
-            </select>
-          )}
-          {!voice.voices.length && <span className="faint small">Sem voz em português instalada: a pronúncia pode sair errada. Instale uma nas configurações do sistema.</span>}
+          <select className="select voice-select" aria-label="Voz" value={voice.value} onChange={(e) => voice.setVoice(e.target.value)}>
+            <optgroup label="Vozes de IA">
+              {AI_VOICES.map((v) => <option key={v.id} value={`ai:${v.id}`}>{v.label}</option>)}
+            </optgroup>
+            {voiceSupported() && (
+              <optgroup label="Voz do navegador (grátis)">
+                {voice.voices.length ? voice.voices.map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>) : <option value="">Padrão do navegador</option>}
+              </optgroup>
+            )}
+          </select>
+          {voice.loading && <span className="faint small" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><span className="spinner" /> Preparando o áudio…</span>}
+          {!voice.isAi && voiceSupported() && !voice.voices.length && <span className="faint small">Sem voz em português no navegador: a pronúncia pode sair errada. Prefira uma voz de IA.</span>}
+          {voice.isAi && <span className="faint small">Voz gerada por IA.</span>}
           {voice.error && <span className="error small">{voice.error}</span>}
         </div>
       )}

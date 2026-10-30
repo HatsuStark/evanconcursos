@@ -1,0 +1,7 @@
+{
+  "imports": {
+    "wasm-media-encoders": "npm:wasm-media-encoders@0.7.0",
+    "zod": "npm:zod@4.6.7",
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.118.0"
+  }
+}

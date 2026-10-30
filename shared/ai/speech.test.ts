@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { guideSpeech, speechChunks, spoken } from './speech.ts';
+import { guideSpeech, speechChunks, speechParts, spoken } from './speech.ts';
 
 describe('leitura em voz alta', () => {
   it('fala abreviações e siglas por extenso', () => {
@@ -36,7 +36,15 @@ describe('leitura em voz alta', () => {
       legislacao: [], pontos_banca: ['Cai.'], pegadinhas: [], resumo: [], perguntas: [{ pergunta: 'O quê?', resposta: 'Isso.' }],
     });
     expect(s.map((x) => x.key)).toEqual(['intro', 's0', 'banca', 'perguntas']);
-    expect(s[1]!.chunks.join(' ')).toBe('Conceito Texto. Exemplo: Caso.');
+    expect(s[1]!.chunks.join(' ')).toBe('Conceito. Texto. Exemplo: Caso.');
     expect(s[3]!.chunks.join(' ')).toContain('Pergunta 1: O quê? Resposta: Isso.');
+  });
+  it('agrupa os trechos em partes de até 1000 caracteres sem perder texto', () => {
+    const text = Array.from({ length: 80 }, (_, i) => `Frase número ${i} sobre o tema, com detalhes.`).join(' ');
+    const [s] = guideSpeech({ titulo: 'T', introducao: text, secoes: [], legislacao: [], pontos_banca: [], pegadinhas: [], resumo: [], perguntas: [] });
+    const parts = speechParts(s!);
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts.every((p) => p.length <= 1000)).toBe(true);
+    expect(parts.join(' ')).toBe(s!.chunks.join(' '));
   });
 });
