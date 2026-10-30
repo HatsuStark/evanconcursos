@@ -85,10 +85,14 @@ A chave fica só no servidor (segredo `QUEST_API_KEY`) e o gabarito nunca vai ao
 
 ## Leitor por voz
 
-O botão **Ouvir** da apostila lê bloco a bloco com destaque na tela, escreve siglas e abreviações por extenso (`shared/ai/speech.ts`) e tem pausar, pular seção, velocidade e escolha de voz. A leitura para ao sair da aba Apostila. Há dois tipos de voz:
+O botão **Ouvir** da apostila lê bloco a bloco com destaque na tela, escreve siglas e abreviações por extenso (`shared/ai/speech.ts`) e tem pausar, pular seção, velocidade e escolha de voz. A leitura para ao sair da aba Apostila. Nenhuma voz em uso tem custo por leitura:
 
-- **Navegador** (Web Speech API): sem custo e sem enviar nada a servidores do app; a qualidade depende do aparelho.
-- **IA** (Gemini TTS, função `guide-voice`): quatro vozes fixas, cada uma com seu estilo de locução. O texto é dividido em trechos de cerca de 1 minuto, gerados só quando ouvidos, comprimidos em MP3 e salvos no bucket privado `guide-audio` para reaproveitar entre sessões e estudantes. Custo estimado por apostila completa e voz: cerca de US$ 0,09 no modelo Lite (dobra em 2027), registrado em `ai_usage` como `guide_voice`. O acesso segue `ALLOWED_EMAILS`; quando houver planos, a regra entra nessa função. `GEMINI_TTS_MODEL` troca o modelo (padrão `gemini-3.8-flash-lite-tts`).
+- **Faber** (padrão; Piper, `web/src/lib/piper.ts`): gerada no próprio aparelho, em worker. Baixa o modelo de 63 MB do Hugging Face uma vez (fica no OPFS do navegador) e carrega o runtime dos CDNs cdnjs e jsDelivr, em versões fixas. O texto não sai do aparelho e o áudio não é salvo.
+- **Navegador** (Web Speech API): sem download; a qualidade depende do aparelho.
+
+**Antes do uso comercial:** o pacote `@mintplex-labs/piper-tts-web` se declara MIT, mas o componente de pronúncia que ele carrega deriva do espeak-ng (GPL). Revisar as licenças do pacote, desse componente e da voz.
+
+**Vozes de IA, fora de uso:** a função `guide-voice`, a tabela `guide_audio` e o bucket `guide-audio` continuam no backend, sem chamadas do app, para um futuro plano pago (Gemini TTS, cerca de US$ 0,09 por apostila e voz no modelo Lite, com áudio salvo e reaproveitado). O acesso segue `ALLOWED_EMAILS`; `GEMINI_TTS_MODEL` troca o modelo.
 
 ## Modo foco
 

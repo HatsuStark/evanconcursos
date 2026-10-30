@@ -1,8 +1,9 @@
 import { AlertTriangle, BookOpen, CheckCircle2, Headphones, Pause, Play, Printer, SkipBack, SkipForward, Sparkles, Square } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AI_VOICES, guideSpeech } from '../../../shared/ai/speech.ts';
+import { guideSpeech } from '../../../shared/ai/speech.ts';
+import { localVoiceSupported } from '../lib/piper.ts';
 import { supabase } from '../lib/supabase.ts';
-import { RATES, useGuideVoice, voiceSupported } from '../lib/voice.ts';
+import { BROWSER_DEFAULT, FABER, RATES, useGuideVoice, voiceSupported } from '../lib/voice.ts';
 
 interface GuideContent {
   titulo: string; introducao: string;
@@ -12,7 +13,7 @@ interface GuideContent {
   perguntas: { pergunta: string; resposta: string }[];
   depende_legislacao: boolean;
 }
-interface GuideRow { id: string; content: GuideContent; sources: string[]; unlisted_sources: string[]; unverified: string[]; model: string; created_at: string; depth: string }
+interface GuideRow { content: GuideContent; sources: string[]; unlisted_sources: string[]; unverified: string[]; model: string; created_at: string; depth: string }
 
 // Sem "gerar de novo" (economia de créditos): a apostila existente é sempre reaproveitada.
 async function fetchGuide(taskId: string, depth: string) {
@@ -43,7 +44,7 @@ export function GuidePanel({ taskId, hasSession }: { taskId: string; hasSession:
 
   const g = guide?.content;
   const speech = useMemo(() => (g ? guideSpeech(g) : []), [g]);
-  const voice = useGuideVoice(speech, guide?.id);
+  const voice = useGuideVoice(speech);
   // O bloco lido fica destacado e visível.
   const article = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -130,18 +131,19 @@ export function GuidePanel({ taskId, hasSession }: { taskId: string; hasSession:
             {RATES.map((r) => <option key={r} value={r}>{String(r).replace('.', ',')}x</option>)}
           </select>
           <select className="select voice-select" aria-label="Voz" value={voice.value} onChange={(e) => voice.setVoice(e.target.value)}>
-            <optgroup label="Vozes de IA">
-              {AI_VOICES.map((v) => <option key={v.id} value={`ai:${v.id}`}>{v.label}</option>)}
-            </optgroup>
+            {localVoiceSupported() && <option value={FABER}>Faber</option>}
             {voiceSupported() && (
-              <optgroup label="Voz do navegador (grátis)">
-                {voice.voices.length ? voice.voices.map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>) : <option value="">Padrão do navegador</option>}
+              <optgroup label="Voz do navegador">
+                {voice.voices.length ? voice.voices.map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>) : <option value={BROWSER_DEFAULT}>Padrão do navegador</option>}
               </optgroup>
             )}
           </select>
-          {voice.loading && <span className="faint small" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><span className="spinner" /> Preparando o áudio…</span>}
-          {!voice.isAi && voiceSupported() && !voice.voices.length && <span className="faint small">Sem voz em português no navegador: a pronúncia pode sair errada. Prefira uma voz de IA.</span>}
-          {voice.isAi && <span className="faint small">Voz gerada por IA.</span>}
+          {voice.loading && (
+            <span className="faint small" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+              <span className="spinner" /> {voice.download != null ? `Baixando a voz, só na primeira vez (63 MB): ${Math.round(voice.download * 100)}%` : 'Preparando o áudio…'}
+            </span>
+          )}
+          {!voice.isFaber && voiceSupported() && !voice.voices.length && <span className="faint small">Sem voz em português no navegador: a pronúncia pode sair errada.</span>}
           {voice.error && <span className="error small">{voice.error}</span>}
         </div>
       )}
