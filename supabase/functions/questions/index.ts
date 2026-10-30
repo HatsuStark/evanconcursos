@@ -15,7 +15,7 @@ import {
 } from '../../../shared/qbank/map.ts';
 import { conceptKey, MNEMONIC_PROMPT_VERSION, MnemonicChoice, mnemonicJsonSchema, mnemonicPrompt, pickExisting } from '../../../shared/qbank/mnemonic.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-import { cacheQuestions, mapDeps, plain, publicQuestion, recordAnswer, upsertFlashcard, type PublicQuestion } from '../_shared/qbank.ts';
+import { cacheQuestions, mapDeps, plain, publicQuestion, recordAnswer, upsertFlashcard, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -190,7 +190,7 @@ Deno.serve(async (req) => {
       await admin.from('qbank_cursors').upsert({ owner_id: auth.user.id, scope, filter_key: f.key, after_id: after ?? null, exhausted, updated_at: new Date().toISOString() });
     }
     await log('qbank_fetch', 'ok');
-    return json(200, { questions: out.slice(0, count).map(publicQuestion), filter: { materia: filter.materia, assuntos: filter.assuntos, how: filter.how }, reason: out.length ? null : 'esgotado' });
+    return json(200, { questions: await withMnemo(admin, out.slice(0, count).map(publicQuestion)), filter: { materia: filter.materia, assuntos: filter.assuntos, how: filter.how }, reason: out.length ? null : 'esgotado' });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await log(body.action === 'explain' ? 'qbank_explain' : body.action === 'mnemonic' ? 'qbank_mnemonic' : 'qbank_fetch', 'error', message).catch(() => {});

@@ -7,6 +7,7 @@ import {
   answerQuestion, explainQuestion, loadNote, mnemonicFor, nextQuestions, optionsOf, saveNote,
   type Explanation, type Mnemonic, type Question,
 } from '../lib/questions.ts';
+import { mayHaveMnemonic } from '../../../shared/qbank/mnemonic.ts';
 import { ArticleChips } from './ArticlePeek.tsx';
 import { QuestionBody } from './QuestionBody.tsx';
 
@@ -121,7 +122,10 @@ export function QuestionsPanel({ source, goal = 0, answered = 0 }: { source: Sou
 
   const done = queue.filter((x) => states[x.qid]?.result);
   if (summary) return <BatchSummary queue={queue} states={states} onBack={() => setSummary(false)} />;
-  const tab: Tab = st.tab ?? 'anotacoes';
+  // Aba Mnemônico só quando faz sentido: já existe, ou a questão tem cara de conteúdo memorizável (regra
+  // gratuita). Se a IA avaliar que não cabe, some (e fica descartada para todos).
+  const showMnemo = st.mnemonic !== null && mayHaveMnemonic(q);
+  const tab: Tab = st.tab === 'mnemonico' && !showMnemo ? 'explicacao' : st.tab ?? 'anotacoes';
   return (
     <div className="grid" style={{ gap: 14 }}>
       {goal > 0 && answered >= goal && <div className="glass card goal-done"><CheckCircle2 size={18} /> Meta de {goal} questões atingida! Você pode concluir a tarefa ou continuar treinando.</div>}
@@ -160,12 +164,13 @@ export function QuestionsPanel({ source, goal = 0, answered = 0 }: { source: Sou
 
         <div className="q-tabs" role="tablist">
           <button role="tab" aria-selected={tab === 'explicacao'} className={'tab' + (tab === 'explicacao' ? ' on' : '')} disabled={!st.result} title={st.result ? '' : 'Responda primeiro'} onClick={() => patch({ tab: 'explicacao' })}><Lightbulb size={15} /> Explicação</button>
-          <button role="tab" aria-selected={tab === 'mnemonico'} className={'tab' + (tab === 'mnemonico' ? ' on' : '')} disabled={!st.result} title={st.result ? '' : 'Responda primeiro'} onClick={() => patch({ tab: 'mnemonico' })}><Brain size={15} /> Mnemônico</button>
+          {showMnemo && <button role="tab" aria-selected={tab === 'mnemonico'} className={'tab' + (tab === 'mnemonico' ? ' on' : '')} disabled={!st.result} title={st.result ? '' : 'Responda primeiro'} onClick={() => patch({ tab: 'mnemonico' })}><Brain size={15} /> Mnemônico</button>}
           <button role="tab" aria-selected={tab === 'anotacoes'} className={'tab' + (tab === 'anotacoes' ? ' on' : '')} onClick={() => patch({ tab: 'anotacoes' })}><NotebookPen size={15} /> Anotações</button>
         </div>
 
         {tab === 'explicacao' && st.result && <ExplanationView ex={st.explanation} busy={busy === 'explain'} onExplain={explain} />}
-        {tab === 'mnemonico' && st.result && <MnemonicView m={st.mnemonic} busy={busy === 'mnemonic'} onLoad={mnemonic} />}
+        {tab === 'mnemonico' && st.result && showMnemo && <MnemonicView m={st.mnemonic} busy={busy === 'mnemonic'} onLoad={mnemonic} />}
+        {st.mnemonic === null && tab === 'explicacao' && <p className="faint small" style={{ margin: 0 }}>Esta questão não pede memorização; o mnemônico foi dispensado.</p>}
         {tab === 'anotacoes' && <NoteBox qid={q.qid} />}
         {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
       </article>

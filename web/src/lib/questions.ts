@@ -7,6 +7,7 @@ export interface Question {
   textos: string[]; anexos: string[];
   prova: { banca: string; ano: number; orgao: string; cargo: string } | null;
   materia: string; assunto: string;
+  mnemo?: 'yes' | 'no' | 'maybe';   // mnemônico já existe, foi descartado ou ainda não avaliado
 }
 export interface Explanation { resumo: string; alternativas: { letra: string; comentario: string }[]; artigos: string[]; dica: string; fontes: string[]; geradoEm: string }
 export interface NextResult { questions: Question[]; filter?: { materia: string | null; assuntos: string[]; how: string }; reason: 'sem-materia' | 'sem-assunto' | 'esgotado' | null }

@@ -65,3 +65,12 @@ export async function recordAnswer(admin: SupabaseClient, a: AnswerInput) {
 export async function upsertFlashcard(admin: SupabaseClient, ownerId: string, kind: 'mnemonic' | 'question', ref: string, front: string, back: string) {
   await admin.from('flashcards').upsert({ owner_id: ownerId, kind, ref, front: front.slice(0, 2000), back: back.slice(0, 4000) }, { onConflict: 'owner_id,kind,ref', ignoreDuplicates: true });
 }
+
+// Situação do mnemônico de cada questão (uma consulta por lote): 'yes' já existe, 'no' a IA já disse que não
+// cabe, 'maybe' ainda não avaliada. O app só mostra a aba quando faz sentido (sem gastar IA para decidir).
+export async function withMnemo(admin: SupabaseClient, qs: PublicQuestion[]) {
+  if (!qs.length) return qs;
+  const { data } = await admin.from('qbank_questions').select('qid, mnemonic_checked, mnemonic_id').in('qid', qs.map((q) => q.qid));
+  const status = new Map((data ?? []).map((r) => [r.qid as string, r.mnemonic_id ? 'yes' : r.mnemonic_checked ? 'no' : 'maybe']));
+  return qs.map((q) => ({ ...q, mnemo: status.get(q.qid) ?? 'maybe' }));
+}

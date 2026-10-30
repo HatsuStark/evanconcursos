@@ -10,7 +10,7 @@ import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import { mapSubject, QMAP_PROMPT_VERSION } from '../../../shared/qbank/map.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-import { cacheQuestions, mapDeps, publicQuestion, recordAnswer, type PublicQuestion } from '../_shared/qbank.ts';
+import { cacheQuestions, mapDeps, publicQuestion, recordAnswer, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
 
 const str = (v: unknown, n = 160) => String(v ?? '').trim().slice(0, n);
 const hash = (s: string) => { let h = 0; for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) >>> 0; return h.toString(36); };
@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
       const seen = f.onlyNew === false ? new Set<string>() : await seenQids();
       const items = await fetchFresh('free', params, count, seen);
       await log('qbank_free', 'ok');
-      return json(200, { questions: items.map(publicQuestion), reason: items.length ? null : 'esgotado' });
+      return json(200, { questions: await withMnemo(admin, items.map(publicQuestion)), reason: items.length ? null : 'esgotado' });
     }
 
     if (body.action === 'review') {
@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
       const qids = (due ?? []).map((d) => d.qid);
       const { data: qs } = qids.length ? await admin.from('qbank_questions').select('qid, payload').in('qid', qids) : { data: [] };
       const byId = new Map((qs ?? []).map((q) => [q.qid, q.payload as PublicQuestion]));
-      return json(200, { questions: qids.map((id) => byId.get(id)).filter(Boolean), stages: Object.fromEntries((due ?? []).map((d) => [d.qid, { stage: d.stage, wrong: d.wrong_count }])) });
+      return json(200, { questions: await withMnemo(admin, qids.map((id) => byId.get(id)).filter((q): q is PublicQuestion => !!q)), stages: Object.fromEntries((due ?? []).map((d) => [d.qid, { stage: d.stage, wrong: d.wrong_count }])) });
     }
 
     if (body.action === 'simulado_create') {
