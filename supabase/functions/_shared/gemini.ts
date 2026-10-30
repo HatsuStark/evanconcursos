@@ -27,7 +27,7 @@ export async function authorize(req: Request): Promise<Response | null> {
 // Pede ao Gemini uma resposta JSON no formato `schema`. Devolve { data, model } ou uma resposta de erro.
 export async function generate(parts: unknown[], schema: unknown, temperature: number) {
   const apiKey = Deno.env.get('GEMINI_API_KEY');
-  const model = Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash';
+  const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash';
   if (!apiKey) return { error: json(500, { error: 'GEMINI_API_KEY não configurada no Supabase.' }) };
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST',
