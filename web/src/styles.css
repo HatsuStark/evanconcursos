@@ -410,6 +410,12 @@ a.task-title:hover { color: var(--cyan); }
 .q-mnemonic li b { color: var(--violet); margin-right: 6px; }
 .q-note { display: grid; gap: 6px; }
 .q-note .textarea { min-height: 120px; }
+.q-comments { display: grid; gap: 12px; }
+.q-comments .textarea { min-height: 80px; }
+.q-comment { display: grid; gap: 8px; padding: 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); }
+.q-comment-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.q-comment-body { margin: 0; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.q-comment-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 @media (max-width: 720px) { .q-actions .faint { display: none; } }
 
 /* ---------- prática: hub de questões, flashcards, simulados ---------- */

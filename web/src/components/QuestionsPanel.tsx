@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { BarChart3, BookOpenCheck, Brain, CheckCircle2, ChevronLeft, ChevronRight, Lightbulb, NotebookPen, RotateCcw, Scissors, Sparkles, XCircle } from 'lucide-react';
+import { BarChart3, BookOpenCheck, Brain, CheckCircle2, ChevronLeft, ChevronRight, Lightbulb, MessageCircle, NotebookPen, RotateCcw, Scissors, Sparkles, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { reviewDue, searchFree, type FreeFilters } from '../lib/practice.ts';
@@ -9,6 +9,7 @@ import {
 } from '../lib/questions.ts';
 import { mayHaveMnemonic } from '../../../shared/qbank/mnemonic.ts';
 import { ArticleChips } from './ArticlePeek.tsx';
+import { CommentsPanel } from './CommentsPanel.tsx';
 import { QuestionBody } from './QuestionBody.tsx';
 
 // De onde vêm as questões: tarefa do cronograma, busca livre ou revisão do caderno de erros.
@@ -21,7 +22,7 @@ const REASON: Record<string, string> = {
   revisao: 'Nada para revisar hoje. As questões que você errar voltam aqui em 1, 7 e 30 dias.',
 };
 
-type Tab = 'explicacao' | 'mnemonico' | 'anotacoes';
+type Tab = 'explicacao' | 'mnemonico' | 'anotacoes' | 'comentarios';
 interface QState {
   chosen: string | null; struck: string[];
   result: { correct: boolean; gabarito: string } | null;
@@ -166,12 +167,14 @@ export function QuestionsPanel({ source, goal = 0, answered = 0 }: { source: Sou
           <button role="tab" aria-selected={tab === 'explicacao'} className={'tab' + (tab === 'explicacao' ? ' on' : '')} disabled={!st.result} title={st.result ? '' : 'Responda primeiro'} onClick={() => patch({ tab: 'explicacao' })}><Lightbulb size={15} /> Explicação</button>
           {showMnemo && <button role="tab" aria-selected={tab === 'mnemonico'} className={'tab' + (tab === 'mnemonico' ? ' on' : '')} disabled={!st.result} title={st.result ? '' : 'Responda primeiro'} onClick={() => patch({ tab: 'mnemonico' })}><Brain size={15} /> Mnemônico</button>}
           <button role="tab" aria-selected={tab === 'anotacoes'} className={'tab' + (tab === 'anotacoes' ? ' on' : '')} onClick={() => patch({ tab: 'anotacoes' })}><NotebookPen size={15} /> Anotações</button>
+          <button role="tab" aria-selected={tab === 'comentarios'} className={'tab' + (tab === 'comentarios' ? ' on' : '')} disabled={!st.result} title={st.result ? '' : 'Responda primeiro'} onClick={() => patch({ tab: 'comentarios' })}><MessageCircle size={15} /> Comentários</button>
         </div>
 
         {tab === 'explicacao' && st.result && <ExplanationView ex={st.explanation} busy={busy === 'explain'} onExplain={explain} />}
         {tab === 'mnemonico' && st.result && showMnemo && <MnemonicView m={st.mnemonic} busy={busy === 'mnemonic'} onLoad={mnemonic} />}
         {st.mnemonic === null && tab === 'explicacao' && <p className="faint small" style={{ margin: 0 }}>Esta questão não pede memorização; o mnemônico foi dispensado.</p>}
         {tab === 'anotacoes' && <NoteBox qid={q.qid} planId={source.kind === 'task' ? source.planId : undefined} />}
+        {tab === 'comentarios' && st.result && <CommentsPanel qid={q.qid} />}
         {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
       </article>
       <p className="faint small" style={{ margin: 0 }}>Questões do banco Quest API{assuntos.length ? ` · assuntos desta sessão: ${assuntos.slice(0, 3).join(', ')}` : ''}.</p>

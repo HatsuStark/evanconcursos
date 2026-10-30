@@ -83,6 +83,10 @@ A chave fica só no servidor (segredo `QUEST_API_KEY`) e o gabarito nunca vai ao
 
 `scripts/e2e-questions.ts` testa a função ponta a ponta com um usuário temporário (exige incluir `e2e@evanconcursos.test` em `ALLOWED_EMAILS`).
 
+## Comentários
+
+Cada questão tem uma discussão entre estudantes, liberada só depois de responder (no simulado, depois da entrega); a regra fica no banco, em funções `comment_*` e `comments_list`, sem acesso direto às tabelas. Só texto, com apelido (o e-mail nunca aparece), votos de "útil" ordenando a lista e limite de 5 comentários por minuto. Três denúncias de pessoas diferentes escondem o comentário. Não há painel: para revisar, consulte `question_comments where hidden` e, se for o caso, faça `update ... set hidden = false` e apague as linhas de `comment_reports` (ou apague o comentário). **Antes de abrir o app ao público:** publicar termos de uso com regras de comentários e canal de denúncia, e confirmar nos termos da Quest API que a discussão pública é permitida.
+
 ## Excluir um concurso
 
 Na página **Concursos**, a lixeira de cada card apaga de vez o edital, os PDFs (edital e materiais), o cronograma, as tarefas, as tentativas e os simulados daquele concurso (`delete_notice`). Anotações, caderno de erros, flashcards e marcações de lei são por questão ou artigo: saem só se foram usados apenas nele. Fica o que também aparece em outro concurso, em questões livres ou em simulados personalizados, além dos catálogos compartilhados (apostilas, mnemônicos, questões, leis) e do registro de custo da IA. `scripts/e2e-delete-notice.ts` testa os buckets com login real.
