@@ -9,6 +9,7 @@ import { QuestionnairePage } from './pages/Questionnaire.tsx';
 import { ReadingPage } from './pages/Reading.tsx';
 import { ReviewPage } from './pages/Review.tsx';
 import { SchedulePage } from './pages/Schedule.tsx';
+import { StudyPage } from './pages/Study.tsx';
 
 function Soon({ title, stage }: { title: string; stage: string }) {
   return (
@@ -31,6 +32,7 @@ export function App() {
       <Route path="/concursos/:noticeId/conferencia" element={<ReviewPage />} />
       <Route path="/concursos/:noticeId/questionario" element={<QuestionnairePage />} />
       <Route path="/cronograma" element={<SchedulePage />} />
+      <Route path="/estudo/:taskId" element={<StudyPage />} />
       <Route path="/desempenho" element={<Soon title="Desempenho" stage="E5" />} />
       <Route path="/discursivas" element={<Soon title="Discursivas" stage="E5" />} />
       <Route path="*" element={<HomePage />} />

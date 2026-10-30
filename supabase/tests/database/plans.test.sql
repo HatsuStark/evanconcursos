@@ -66,6 +66,20 @@ select throws_ok(format($$select public.create_plan_version('20000000-0000-4000-
 select pg_temp.as_user('00000000-0000-4000-8000-0000000000a1');
 select ok((select done_at is not null from public.tasks where date = '2020-01-01'), 'update de B não afetou A');
 
+-- ---------- modo estudo: registros de questões e filtros (E4.1) ----------
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000a1');
+select lives_ok($$insert into public.question_logs (plan_id, task_id, subject_id, topic, correct, total)
+  select p.id, t.id, t.subject_id, 'dolo', 7, 10 from public.study_plans p join public.tasks t on t.plan_id = p.id where t.date = '2020-01-01'$$, 'A registra questões');
+select throws_ok($$insert into public.question_logs (plan_id, correct, total) select id, 11, 10 from public.study_plans$$, '23514', null, 'acertos > total é recusado');
+select lives_ok($$insert into public.question_filters (plan_id, url) select id, 'https://www.qconcursos.com/questoes-de-concursos/questoes?examining_board_ids%5B%5D=152' from public.study_plans$$, 'A salva filtro base');
+select throws_ok($$insert into public.question_filters (plan_id, url) select id, 'https://evil.example/x' from public.study_plans$$, '23514', null, 'só links de sites de questões');
+select lives_ok($$update public.tasks set time_spent_sec = 1800 where date = '2020-01-01'$$, 'A grava tempo estudado');
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000b1');
+select is((select count(*) from public.question_logs), 0::bigint, 'B não vê registros de A');
+select is((select count(*) from public.question_filters), 0::bigint, 'B não vê filtros de A');
+select throws_ok($$insert into public.question_logs (plan_id, correct, total) values ((select id from public.study_plans limit 1), 1, 1)$$, '23502', null, 'B não registra no plano de A (invisível)');
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000a1');
+
 -- Apagar o edital apaga o plano em cascata.
 select lives_ok($$delete from public.notices where id = '20000000-0000-4000-8000-000000000001'$$, 'apagar edital com cronograma');
 select is((select count(*) from public.tasks), 0::bigint, 'tarefas apagadas junto');

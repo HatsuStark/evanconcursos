@@ -85,7 +85,11 @@ Avaliação com a IA real (`node --experimental-strip-types evals/plan-run.ts [f
 | E1 | Banco: migrações, bucket privado de editais, RLS e testes de isolamento | feito |
 | E2 | Upload do edital → extração (`notice-extract`) → conferência; registro de custo da IA | feito |
 | E3 | Questionário → planejamento (`plan-design`, sessões ligadas aos tópicos) → cronograma versionado no banco | feito |
-| E4 | Tela "Hoje": assunto, tempo, roteiro, materiais e questões | |
+| E4.1 | Modo estudo: cronômetro, questões no QConcursos/TecConcursos em outra aba com filtro pronto e registro rápido na volta | feito |
+| E4.2 | Lei seca: textos oficiais (normas.leg.br, CC BY 4.0) no banco e leitor com os artigos da sessão | |
+| E4.3 | Apostila da IA (completa ou revisão curta) baseada só no edital e na lei seca, com fontes e reaproveitamento | |
+| E4.4 | Vídeos do YouTube integrados (Data API + player) | |
+| E4.5 | Biblioteca pessoal: PDFs privados, leitor PDF.js e mapeamento de páginas para as sessões | |
 | E5 | Roteiros e materiais em segundo plano, desempenho, reforço e discursivas | |
 
 O app estático original está na tag `v0-legado`.

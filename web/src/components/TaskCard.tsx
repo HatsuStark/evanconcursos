@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { Check, Clock, Target } from 'lucide-react';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { KIND_LABEL, setTaskDone, type SubjectRow, type TaskRow } from '../lib/plans.ts';
 import { subjectColor, SubjectIcon } from './ui.tsx';
 
@@ -33,12 +34,13 @@ export function TaskCard({ task, subjects }: { task: TaskRow; subjects: SubjectR
           <span className="badge" style={{ color, borderColor: 'currentColor' }}>{KIND_LABEL[task.kind] ?? task.kind}</span>
           {subject && <span className="muted small">{subject.name}</span>}
         </div>
-        <div className="task-title">{task.title}</div>
+        <Link className="task-title" to={`/estudo/${task.id}`}>{task.title}</Link>
         <div className="task-meta">
           {task.minutes > 0 && <span className="chip"><Clock /> {fmtMinutes(task.minutes)}</span>}
           {task.goal_questions > 0 && <span className="chip"><Target /> {task.goal_questions} questões</span>}
         </div>
       </div>
+      {task.kind !== 'exam' && <Link className="btn sm study-btn" to={`/estudo/${task.id}`}>Estudar</Link>}
       {task.kind !== 'exam' && (
         <button className={'check-btn' + (done ? ' on' : '')} disabled={busy} onClick={toggle} aria-pressed={done} aria-label={done ? 'Marcar como não feita' : 'Marcar como feita'}>
           <Check size={18} />

@@ -270,3 +270,15 @@ a { color: var(--cyan); }
   .cal-chip.exam { height: 6px; }
   .month-nav strong { min-width: 110px; font-size: 14px; }
 }
+
+/* ---------- E4.1: modo estudo ---------- */
+.task-title { display: block; color: var(--text); text-decoration: none; }
+a.task-title:hover { color: var(--cyan); }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 26px 0 16px; padding: 5px; border-radius: 16px; background: rgba(8, 12, 24, .5); border: 1px solid var(--line); }
+.tab { display: inline-flex; align-items: center; gap: 7px; border: 0; background: none; color: var(--muted); padding: 9px 14px; border-radius: 12px; cursor: pointer; font-weight: 600; font-size: 14px; }
+.tab.on { background: var(--surface-3); color: var(--text); box-shadow: var(--glow-violet); }
+.timer { display: grid; gap: 10px; }
+.timer strong { font-size: 40px; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.register { display: grid; gap: 12px; }
+.pulse-border { border-color: rgba(42, 212, 232, .6); box-shadow: var(--glow-cyan); }
+@media (max-width: 720px) { .study-btn { display: none; } .timer strong { font-size: 32px; } }
