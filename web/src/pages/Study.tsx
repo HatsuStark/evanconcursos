@@ -179,7 +179,7 @@ function StudyView({ d }: { d: StudyData }) {
             : tab === 'questoes' ? <QuestionsPanel source={{ kind: 'task', taskId: d.task.id, planId: d.task.plan_id }} goal={d.task.goal_questions} answered={mine.length} />
             : tab === 'lei' ? <LawReader refs={lawRefs} />
             : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={hasSession} initialDepth={params.has('revisao') ? 'revisao' : 'completa'} />
-            : <SessionMaterials sessionId={d.task.session_id} />}
+            : <SessionMaterials sessionId={d.task.session_id} minutes={d.task.kind === 'theory' ? d.task.minutes : 0} />}
         </>
       )}
     </Shell>

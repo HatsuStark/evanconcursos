@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { FileUp, Lock, RefreshCw, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { MaterialRanges } from '../components/MaterialRanges.tsx';
 import { PdfViewer } from '../components/PdfViewer.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { deleteMaterial, remapMaterial, signedUrl, uploadMaterial, useMaterials, type Material } from '../lib/materials.ts';
@@ -19,8 +20,9 @@ export function MaterialsPage() {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [viewing, setViewing] = useState<{ m: Material; url: string } | null>(null);
-  const refresh = () => qc.invalidateQueries({ queryKey: ['materials'] });
+  const [viewing, setViewing] = useState<{ m: Material; url: string; key: string; label: string; range?: [number, number] } | null>(null);
+  const [listing, setListing] = useState<string | null>(null);
+  const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: ['materials'] }), qc.invalidateQueries({ queryKey: ['material-pages'] })]);
 
   async function pick(file: File | undefined) {
     if (!file || !planId) return;
@@ -49,12 +51,14 @@ export function MaterialsPage() {
                 <div className="muted small">{m.pages ? `${m.pages} páginas · ` : ''}{(m.size_bytes / 1024 / 1024).toFixed(1)} MB{m.status_detail ? ` · ${m.status_detail}` : ''}</div>
               </div>
               <span className={'badge ' + STATUS[m.status].cls}>{STATUS[m.status].label}</span>
-              <button className="btn ghost sm" onClick={async () => setViewing({ m, url: await signedUrl(m.storage_path) })}>Abrir</button>
+              <button className="btn ghost sm" aria-expanded={listing === m.id} onClick={() => setListing(listing === m.id ? null : m.id)}>Trechos</button>
+              <button className="btn ghost sm" onClick={() => act(async () => setViewing({ m, url: await signedUrl(m.storage_path), key: m.id, label: m.title }))}>Abrir</button>
               {m.status !== 'mapping' && <button className="icon-btn" title="Mapear de novo" aria-label="Mapear de novo" onClick={() => act(() => remapMaterial(m.id))}><RefreshCw size={16} /></button>}
               <button className="icon-btn" title="Apagar" aria-label={`Apagar ${m.title}`} onClick={() => confirm(`Apagar "${m.title}"?`) && act(() => deleteMaterial(m))}><Trash2 size={16} /></button>
+              {listing === m.id && <MaterialRanges material={m} onOpen={(p) => act(async () => setViewing({ m, url: await signedUrl(m.storage_path), key: p.id, label: `${m.title} · ${p.session?.title ?? 'trecho'}`, range: [p.page_from, p.page_to] }))} />}
             </div>
           ))}
-          {viewing && <div className="glass card"><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}><strong>{viewing.m.title}</strong><button className="btn ghost sm" onClick={() => setViewing(null)}>Fechar</button></div><PdfViewer url={viewing.url} storageKey={viewing.m.id} /></div>}
+          {viewing && <div className="glass card"><div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 10 }}><strong>{viewing.label}</strong><button className="btn ghost sm" onClick={() => setViewing(null)}>Fechar</button></div><PdfViewer key={`${viewing.key}:${viewing.range?.join('-') ?? ''}`} url={viewing.url} range={viewing.range} storageKey={viewing.key} materialId={viewing.m.id} /></div>}
         </div>
       )}
     </Shell>

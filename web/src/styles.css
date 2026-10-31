@@ -381,16 +381,49 @@ a.task-title:hover { color: var(--cyan); }
 
 /* ---------- E4.5: materiais e leitor de PDF ---------- */
 .material-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.pdf { display: grid; gap: 10px; }
+.material-ranges { display: grid; gap: 10px; width: 100%; list-style: none; margin: 4px 0 0; padding: 10px 0 0; border-top: 1px solid var(--surface-3); }
+.material-range { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pdf { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .pdf-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pdf-bar .icon-btn { width: 36px; height: 36px; }
 .pdf-page { width: 70px; display: inline-block; padding: 6px 8px; margin: 0 4px; text-align: center; }
 .pdf-canvas { position: relative; overflow: auto; height: 80vh; border-radius: 12px; background: #2a2f3d; scrollbar-gutter: stable; outline-offset: 2px; }
 .pdf-canvas > .spinner { margin: 40px auto; }
 .pdf-pages { box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 12px; width: max-content; min-width: 100%; }
-.pdf-sheet { flex: none; background: #fff; box-shadow: 0 2px 10px rgb(0 0 0 / 35%); }
+.pdf-sheet { flex: none; position: relative; background: #fff; box-shadow: 0 2px 10px rgb(0 0 0 / 35%); }
+.pdf-art, .pdf-marks, .pdf-words { position: absolute; inset: 0; }
 .pdf-sheet canvas { display: block; width: 100%; height: 100%; }
+.pdf-marks { pointer-events: none; mix-blend-mode: multiply; }
+.pdf-mark { position: absolute; border-radius: 2px; }
+.pdf-mark.yellow { background: #ffe45c; }
+.pdf-mark.green { background: #a8eb9b; }
+.pdf-mark.pink { background: #ffb3d1; }
 .pdf-range { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* Camada de texto do PDF.js: invisível, alinhada ao desenho, só para selecionar. */
+.textLayer { --scale-round-x: 1px; --scale-round-y: 1px; --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size)); color-scheme: only light; position: absolute; inset: 0; overflow: clip; text-align: initial; line-height: 1; letter-spacing: normal; word-spacing: normal; text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; caret-color: CanvasText; }
+.textLayer span, .textLayer br { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; user-select: text; }
+.textLayer > :not(.markedContent), .textLayer .markedContent span:not(.markedContent) { z-index: 1; --font-height: 0; font-size: calc(var(--text-scale-factor) * var(--font-height)); --scale-x: 1; --rotate: 0deg; transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv)); }
+.textLayer .markedContent { display: contents; }
+.textLayer span[role="img"] { user-select: none; cursor: default; }
+.textLayer ::selection { background: rgb(0 90 255 / 28%); color: transparent; }
+.textLayer br::selection { background: transparent; }
+.textLayer .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default; user-select: none; }
+.textLayer.selecting .endOfContent { top: 0; }
+.pdf { position: relative; }
+.pdf-select-bar { position: absolute; z-index: 5; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 10px; background: #171b26; border: 1px solid #3a4152; box-shadow: 0 4px 16px rgb(0 0 0 / 45%); white-space: nowrap; }
+.pdf-swatch { width: 22px; height: 22px; padding: 0; flex: none; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+.pdf-swatch[aria-pressed="true"] { border-color: var(--cyan); }
+.pdf-swatch.yellow { background: #ffe45c; }
+.pdf-swatch.green { background: #a8eb9b; }
+.pdf-swatch.pink { background: #ffb3d1; }
+.pdf-notes { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; max-height: 32vh; overflow: auto; list-style: none; margin: 0; padding: 0; }
+.pdf-note { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 8px 10px; border-radius: 10px; background: var(--surface-3); border-left: 4px solid; }
+.pdf-note.yellow { border-color: #ffe45c; }
+.pdf-note.green { border-color: #a8eb9b; }
+.pdf-note.pink { border-color: #ffb3d1; }
+.pdf-note-head { display: flex; align-items: center; gap: 6px; }
+.pdf-note-head > .btn { flex: none; white-space: nowrap; }
+.pdf-note-quote { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
 /* ---------- questões: navegação, tachado, abas, mnemônico ---------- */
 .q-nav { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 16px; }

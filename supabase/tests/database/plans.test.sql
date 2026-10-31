@@ -101,12 +101,29 @@ select pg_temp.as_user('00000000-0000-4000-8000-0000000000a1');
 select lives_ok($$update public.material_maps set page_from = 5, page_to = 20$$, 'A corrige as páginas do trecho');
 select throws_ok($$update public.material_maps set page_to = 1$$, '23514', null, 'página final antes da inicial é recusada');
 select throws_ok($$update public.material_maps set session_id = session_id$$, '42501', null, 'A não troca a sessão do trecho');
-select throws_ok($$delete from public.material_maps$$, '42501', null, 'A não apaga o trecho');
+select is((select manual from public.material_maps), true, 'trecho corrigido fica marcado como manual');
+select lives_ok($$insert into public.material_maps (material_id, session_id, page_from, page_to, manual)
+  select m.id, (select id from public.study_sessions limit 1), 56, 60, true from public.materials m$$, 'A acrescenta um trecho');
+select throws_ok($$insert into public.material_maps (material_id, session_id, page_from, page_to, manual)
+  select m.id, (select id from public.study_sessions limit 1), 1, 2, false from public.materials m$$, '42501', null, 'trecho do estudante é sempre manual');
+select lives_ok($$delete from public.material_maps where page_from = 56$$, 'A apaga um trecho');
+select lives_ok($$insert into public.material_notes (material_id, page, rects, quote, color)
+  select id, 36, '[[0.1,0.2,0.5,0.02]]', 'cinco anos', 'green' from public.materials$$, 'A marca um texto');
+select lives_ok($$update public.material_notes set note = 'cai em prova', color = 'pink'$$, 'A anota na marcação');
+select throws_ok($$update public.material_notes set page = 1$$, '42501', null, 'marcação não muda de página');
+select throws_ok($$insert into public.material_notes (material_id, page, rects) select id, 1, '{}' from public.materials$$, '23514', null, 'posições precisam ser uma lista');
 select pg_temp.as_user('00000000-0000-4000-8000-0000000000b1');
 update public.material_maps set page_from = 1, page_to = 2;
+delete from public.material_maps;
 select is((select count(*) from public.material_maps), 0::bigint, 'B não vê trechos de A');
+select is((select count(*) from public.material_notes), 0::bigint, 'B não vê marcações de A');
+select throws_ok($$insert into public.material_notes (owner_id, material_id, page, rects) values ('00000000-0000-4000-8000-0000000000a1', gen_random_uuid(), 1, '[[0,0,1,1]]')$$, '42501', null, 'B não marca em nome de A');
+select throws_ok(format($$insert into public.material_notes (material_id, page, rects) values (%L, 1, '[[0,0,1,1]]')$$, (select id from public.materials where sha256 = repeat('b', 64) limit 1)), '23502', null, 'B não marca no material de A (invisível)');
+update public.material_notes set note = 'invadiu';
+delete from public.material_notes;
 select pg_temp.as_user('00000000-0000-4000-8000-0000000000a1');
 select is((select page_from from public.material_maps), 5, 'update de B não afetou o trecho de A');
+select is((select note from public.material_notes), 'cai em prova', 'B não altera nem apaga a marcação de A');
 select pg_temp.as_user('00000000-0000-4000-8000-0000000000b1');
 select is((select count(*) from public.materials), 0::bigint, 'B não vê materiais de A');
 select is((select count(*) from storage.objects where bucket_id = 'materiais'), 0::bigint, 'B não vê PDFs de A');
@@ -116,6 +133,7 @@ select pg_temp.as_user('00000000-0000-4000-8000-0000000000a1');
 -- Apagar o edital apaga o plano em cascata.
 select lives_ok($$delete from public.notices where id = '20000000-0000-4000-8000-000000000001'$$, 'apagar edital com cronograma');
 select is((select count(*) from public.tasks), 0::bigint, 'tarefas apagadas junto');
+select is((select count(*) from public.material_notes), 0::bigint, 'marcações apagadas junto');
 
 select * from finish();
 rollback;

@@ -197,7 +197,11 @@ Página **Questões**: resolver questões livres com filtros (matéria, assunto,
 
 O leitor (`web/src/components/PdfViewer.tsx`) rola as páginas em sequência e desenha só as próximas da área visível. O canvas é múltiplo exato dos pixels da tela, para o texto não borrar. Zoom vai de 50% a 250% e fica salvo; a última página lida fica salva por apostila ou trecho.
 
-Na aba **Meus PDFs** do modo estudo, cada apostila aparece como "Ler das páginas X a Y" e o leitor só mostra e navega por esse trecho. O estudante corrige as páginas no lápis; criar e apagar trechos continua com o backend. Remapear a apostila apaga e recria os trechos, inclusive os corrigidos à mão. A restrição é da tela: o navegador baixa o PDF inteiro, e a apostila completa segue em **Materiais**.
+Selecionar um texto abre uma barra para marcar em três cores, anotar ou copiar (`material_notes`). As marcações valem para a apostila inteira, em qualquer trecho, e guardam a posição em frações da página, então acompanham o zoom. PDF escaneado não tem texto para selecionar.
+
+Na aba **Meus PDFs** do modo estudo, cada apostila aparece como "Ler das páginas X a Y" e o leitor só mostra e navega por esse trecho. O estudante corrige, acrescenta e apaga trechos, e também confere todos os trechos de uma apostila em **Meus materiais**. "Mapear de novo" mantém os trechos corrigidos ou acrescentados (`manual`) e só refaz as outras sessões. A restrição é da tela: o navegador baixa o PDF inteiro, e a apostila completa segue em **Meus materiais**.
+
+Para gastar pouco, a IA não recebe a apostila inteira: recebe o sumário, o começo de cada página, os títulos e as linhas que citam termos das sessões, com raciocínio reduzido. Pode indicar até 3 trechos por sessão, porque uma sessão como "Estabilidade e Petição" costuma juntar assuntos de partes diferentes da apostila. Trecho cuja leitura estimada (1,5 min por página) passa do tempo da tarefa de teoria ganha um aviso.
 
 ## Etapas
 

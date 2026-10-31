@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import pg from 'pg';
 import { extractText } from 'unpdf';
 import { costUsd, generateJson } from '../shared/ai/gemini.ts';
-import { hasText, MaterialMap, materialJsonSchema, materialPrompt, pageIndex, validateMap } from '../shared/ai/material.ts';
+import { hasText, MATERIAL_THINKING, MaterialMap, materialJsonSchema, materialPrompt, pageIndex, validateMap } from '../shared/ai/material.ts';
 
 const root = new URL('..', import.meta.url);
 const env = Object.fromEntries(readFileSync(new URL('.env', root), 'utf8').split(/\r?\n/).filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).trim()]));
@@ -15,10 +15,11 @@ await db.end();
 const { totalPages, text } = await extractText(new Uint8Array(readFileSync(process.argv[2]!)), { mergePages: false });
 console.log(`${totalPages} páginas · tem texto: ${hasText(text as string[])}`);
 const coded = sessions.map((s, i) => ({ code: `S${i + 1}`, subject: s.subject, title: s.title }));
-const r = await generateJson({ apiKey: env.GEMINI_API_KEY!, model: env.GEMINI_MODEL || 'gemini-3.8-flash', schema: MaterialMap, jsonSchema: materialJsonSchema(), temperature: 0.1,
-  parts: [{ text: materialPrompt(coded, pageIndex(text as string[]), totalPages) }] });
+const r = await generateJson({ apiKey: env.GEMINI_API_KEY!, model: env.GEMINI_MODEL || 'gemini-3.8-flash', schema: MaterialMap, jsonSchema: materialJsonSchema(), temperature: 0.1, thinkingLevel: MATERIAL_THINKING,
+  parts: [{ text: materialPrompt(coded, pageIndex(text as string[], coded.map((c) => c.title)), totalPages) }] });
+console.log(`tokens: entrada ${r.usage.inputTokens} · raciocínio ${r.usage.thinkingTokens} · saída ${r.usage.outputTokens}`);
 const v = validateMap(r.data, new Set(coded.map((c) => c.code)), totalPages);
-console.log(`${v.length}/${coded.length} sessões mapeadas · ${Math.round(r.latencyMs / 1000)}s · US$ ${costUsd(r.usage, { inputPerMtokUsd: 0.75, outputPerMtokUsd: 3.75 }).toFixed(4)}`);
+console.log(`${new Set(v.map((m) => m.code)).size}/${coded.length} sessões mapeadas em ${v.length} trechos ·${Math.round(r.latencyMs / 1000)}s · US$ ${costUsd(r.usage, { inputPerMtokUsd: 0.75, outputPerMtokUsd: 3.75 }).toFixed(4)}`);
 for (const m of v) {
   const c = coded.find((x) => x.code === m.code)!;
   console.log(`  ${c.subject} · ${c.title.slice(0, 60)} → p. ${m.from}–${m.to}: "${(text as string[])[m.from - 1]!.replace(/\s+/g, ' ').slice(0, 90)}"`);

@@ -3,7 +3,7 @@
 // (mapping → mapped | failed) e material_maps. Ler o PDF e chamar a IA leva de 20 s a 2 min.
 import { extractText } from 'unpdf';
 import { generateJson, GeminiError, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { hasText, MATERIAL_PROMPT_VERSION, MaterialMap, materialJsonSchema, materialPrompt, pageIndex, validateMap } from '../../../shared/ai/material.ts';
+import { hasText, MATERIAL_PROMPT_VERSION, MATERIAL_THINKING, MaterialMap, materialJsonSchema, materialPrompt, pageIndex, validateMap } from '../../../shared/ai/material.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
@@ -40,18 +40,23 @@ async function run(admin: ReturnType<typeof adminClient>, ownerId: string, mater
     await admin.from('materials').update({ pages: totalPages }).eq('id', material.id);
     if (!hasText(pages)) throw new Error('O PDF parece escaneado (só imagem): não há texto para mapear.');
     const coded = sessions.map((s, i) => ({ code: `S${i + 1}`, id: s.id, subject: s.notice_subjects?.name ?? '', title: s.title }));
-    const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: MaterialMap, jsonSchema: materialJsonSchema(), temperature: 0.1,
-      parts: [{ text: materialPrompt(coded, pageIndex(pages), totalPages) }] });
+    const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: MaterialMap, jsonSchema: materialJsonSchema(), temperature: 0.1, thinkingLevel: MATERIAL_THINKING,
+      parts: [{ text: materialPrompt(coded, pageIndex(pages, coded.map((c) => c.title)), totalPages) }] });
     usage = r.usage;
     const valid = validateMap(r.data, new Set(coded.map((c) => c.code)), totalPages);
-    await admin.from('material_maps').delete().eq('material_id', material.id);
-    if (valid.length) {
-      const { error: insErr } = await admin.from('material_maps').insert(valid.map((v) => ({
-        owner_id: ownerId, material_id: material.id, session_id: coded.find((c) => c.code === v.code)!.id, page_from: v.from, page_to: v.to,
+    // O que o estudante corrigiu ou acrescentou fica; a IA só preenche as outras sessões.
+    await admin.from('material_maps').delete().eq('material_id', material.id).eq('manual', false);
+    const { data: kept } = await admin.from('material_maps').select('session_id').eq('material_id', material.id);
+    const manual = new Set((kept ?? []).map((k) => k.session_id as string));
+    const fresh = valid.map((v) => ({ ...v, sessionId: coded.find((c) => c.code === v.code)!.id })).filter((v) => !manual.has(v.sessionId));
+    if (fresh.length) {
+      const { error: insErr } = await admin.from('material_maps').insert(fresh.map((v) => ({
+        owner_id: ownerId, material_id: material.id, session_id: v.sessionId, page_from: v.from, page_to: v.to,
       })));
       if (insErr) throw new Error(insErr.message);
     }
-    await admin.from('materials').update({ status: 'mapped', status_detail: `${valid.length} de ${coded.length} sessões encontradas na apostila` }).eq('id', material.id);
+    const covered = coded.filter((c) => manual.has(c.id) || fresh.some((v) => v.sessionId === c.id)).length;
+    await admin.from('materials').update({ status: 'mapped', status_detail: `${covered} de ${coded.length} sessões encontradas na apostila` }).eq('id', material.id);
     await logUsage(admin, { ownerId, operation: 'material_map', model, promptVersion: MATERIAL_PROMPT_VERSION, usage, latencyMs: Date.now() - started, status: 'ok' });
   } catch (err) {
     if (err instanceof GeminiError) usage = err.usage;

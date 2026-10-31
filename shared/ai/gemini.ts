@@ -22,7 +22,7 @@ export class GeminiError extends Error {
 type Part = { text: string } | { inline_data: { mime_type: string; data: string } };
 
 export async function generateJson<S extends z.ZodType>(opts: {
-  apiKey: string; model: string; parts: Part[]; schema: S; jsonSchema: unknown; temperature?: number; fetchImpl?: typeof fetch;
+  apiKey: string; model: string; parts: Part[]; schema: S; jsonSchema: unknown; temperature?: number; thinkingLevel?: 'low' | 'medium' | 'high'; fetchImpl?: typeof fetch;
 }): Promise<GeminiResult<z.infer<S>>> {
   const started = Date.now();
   const res = await (opts.fetchImpl ?? fetch)(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(opts.model)}:generateContent`, {
@@ -30,7 +30,7 @@ export async function generateJson<S extends z.ZodType>(opts: {
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': opts.apiKey },
     body: JSON.stringify({
       contents: [{ role: 'user', parts: opts.parts }],
-      generationConfig: { responseMimeType: 'application/json', responseJsonSchema: opts.jsonSchema, temperature: opts.temperature ?? 0.2 },
+      generationConfig: { responseMimeType: 'application/json', responseJsonSchema: opts.jsonSchema, temperature: opts.temperature ?? 0.2, ...(opts.thinkingLevel ? { thinkingConfig: { thinkingLevel: opts.thinkingLevel } } : {}) },
     }),
   });
   if (!res.ok) {

@@ -1,9 +1,13 @@
 // Biblioteca pessoal: PDFs do estudante (bucket privado), mapeamento de páginas pela IA e links temporários.
 import { useQuery } from '@tanstack/react-query';
+import type { MarkRect } from '../../../shared/domain/pdf-reading.ts';
 import { supabase } from './supabase.ts';
 
 export interface Material { id: string; title: string; storage_path: string; pages: number | null; status: 'uploaded' | 'mapping' | 'mapped' | 'failed'; status_detail: string; size_bytes: number; created_at: string }
-export interface SessionPages { id: string; page_from: number; page_to: number; material: { id: string; title: string; storage_path: string; pages: number | null } }
+export interface SessionPages { id: string; page_from: number; page_to: number; manual: boolean; material: { id: string; title: string; storage_path: string; pages: number | null } }
+export interface MaterialPages { id: string; page_from: number; page_to: number; manual: boolean; session: { title: string; subject: { name: string } | null } | null }
+export type NoteColor = 'yellow' | 'green' | 'pink';
+export interface MaterialNote { id: string; page: number; rects: MarkRect[]; quote: string; note: string; color: NoteColor }
 export const MAX_MATERIAL_BYTES = 50 * 1024 * 1024;
 
 export const useMaterials = (planId: string | undefined) => useQuery({
@@ -22,15 +26,56 @@ export const useSessionPages = (sessionId: string | null) => useQuery({
   queryKey: ['session-pages', sessionId],
   enabled: !!sessionId,
   queryFn: async () => {
-    const { data, error } = await supabase.from('material_maps').select('id, page_from, page_to, material:materials(id, title, storage_path, pages)').eq('session_id', sessionId!);
+    const { data, error } = await supabase.from('material_maps').select('id, page_from, page_to, manual, material:materials(id, title, storage_path, pages)').eq('session_id', sessionId!).order('page_from');
     if (error) throw new Error(error.message);
     return data as unknown as SessionPages[];
   },
 });
 
-// O estudante corrige o trecho indicado pela IA. "Mapear de novo" recomeça do zero.
+// Todos os trechos de uma apostila, em ordem de página, para conferir o mapeamento de uma vez.
+export const useMaterialPages = (materialId: string | null) => useQuery({
+  queryKey: ['material-pages', materialId],
+  enabled: !!materialId,
+  queryFn: async () => {
+    const { data, error } = await supabase.from('material_maps').select('id, page_from, page_to, manual, session:study_sessions(title, subject:notice_subjects(name))').eq('material_id', materialId!).order('page_from');
+    if (error) throw new Error(error.message);
+    return data as unknown as MaterialPages[];
+  },
+});
+
+// O estudante corrige, acrescenta e apaga trechos. O que ele corrigiu ou acrescentou fica ao mapear de novo.
 export async function updateSessionPages(id: string, from: number, to: number) {
   const { error } = await supabase.from('material_maps').update({ page_from: from, page_to: to }).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+export async function addSessionPages(materialId: string, sessionId: string, from: number, to: number) {
+  const { error } = await supabase.from('material_maps').insert({ material_id: materialId, session_id: sessionId, page_from: from, page_to: to, manual: true });
+  if (error) throw new Error(error.message);
+}
+export async function deleteSessionPages(id: string) {
+  const { error } = await supabase.from('material_maps').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+export const useMaterialNotes = (materialId: string) => useQuery({
+  queryKey: ['material-notes', materialId],
+  queryFn: async () => {
+    const { data, error } = await supabase.from('material_notes').select('id, page, rects, quote, note, color').eq('material_id', materialId).order('page').order('created_at');
+    if (error) throw new Error(error.message);
+    return data as MaterialNote[];
+  },
+});
+export async function addMaterialNotes(materialId: string, parts: { page: number; rects: MarkRect[]; quote: string }[], color: NoteColor) {
+  const { data, error } = await supabase.from('material_notes').insert(parts.map((p) => ({ material_id: materialId, page: p.page, rects: p.rects, quote: p.quote.slice(0, 4000), color }))).select('id');
+  if (error) throw new Error(error.message);
+  return (data as { id: string }[])[0]!.id;
+}
+export async function updateMaterialNote(id: string, patch: Partial<Pick<MaterialNote, 'note' | 'color'>>) {
+  const { error } = await supabase.from('material_notes').update(patch).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+export async function deleteMaterialNote(id: string) {
+  const { error } = await supabase.from('material_notes').delete().eq('id', id);
   if (error) throw new Error(error.message);
 }
 
