@@ -172,7 +172,7 @@ function StudyView({ d }: { d: StudyData }) {
           {!focus && tabBar}
           {videosOpened && (
             <div hidden={tab !== 'videos'}>
-              <VideosPanel taskId={d.task.id} noticeId={d.noticeId} visible={tab === 'videos'} query={videoQuery({ subject: d.subject?.name ?? '', title: d.session?.title ?? d.task.title, topics: d.topics }).q} />
+              <VideosPanel taskId={d.task.id} noticeId={d.noticeId} visible={tab === 'videos'} query={videoQuery({ subject: d.subject?.name ?? '', title: d.session?.title ?? d.task.title, topics: d.topics, keyword: d.session?.keyword }).q} />
             </div>
           )}
           {tab === 'videos' ? null

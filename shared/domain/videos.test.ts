@@ -23,6 +23,19 @@ describe('videoQuery', () => {
     expect(videoQuery({ subject: 'Português', title: 'Estudo 1 de 3 (parte 1)', topics: ['1.2 Crase; regência'] }).q).toBe('Português Crase aula concurso');
     expect(videoQuery({ subject: 'Português', title: 'Estudo 1 de 3', topics: [] }).q).toBe('Português aula concurso');
   });
+  it('com palavra-chave da sessão, busca por ela e exige os termos dela também', () => {
+    const r = videoQuery({ subject: 'Direito Administrativo', title: 'Ingresso e Exercício: Conceito, provimento, posse (Lei 10.261/68)', topics: [], keyword: 'Estatuto SP provimento posse' });
+    expect(r.q).toBe('Estatuto SP provimento posse Lei 10.261 aula concurso');
+    expect(r.terms).toEqual(['ingresso', 'exercicio', 'estatuto', 'provimento', 'posse']);
+    expect(r.law).toBe('10.261');
+    expect(videoQuery({ subject: 'Direito Penal', title: 'Peculato', topics: [] }).law).toBe('');
+  });
+  it('acha o número da lei com ou sem ponto, e sem confundir com outro número', () => {
+    const rank = (description: string) => rankVideos([video({ id: 'outra', title: 'Peculato estatuto de outra cidade' }), video({ id: 'lei', title: 'Peculato', description })], ['peculato'], NOW, '10.261');
+    expect(rank('Lei 10261/68')[0]!.id).toBe('lei');
+    expect(rank('Lei 10.261/68')[0]!.id).toBe('lei');
+    expect(rank('Lei 110.2612')[0]!.id).toBe('outra');
+  });
   it('mesma busca, mesma chave, com ou sem acento', () => {
     expect(videoQuery({ subject: 'Administração', title: 'Licitação', topics: [] }).key).toBe(videoQuery({ subject: 'administracao', title: 'licitacao', topics: [] }).key);
   });
@@ -57,6 +70,15 @@ describe('rankVideos', () => {
       video({ id: 'variacao', title: 'Direito processual' }),
     ], ['peculato', 'processo'], NOW);
     expect(ids(r).sort()).toEqual(['descricao', 'variacao']);
+  });
+  it('descrição que cita só um dos vários termos não põe o vídeo no tema', () => {
+    const terms = ['ingresso', 'exercicio', 'estatuto', 'provimento', 'posse'];
+    const r = rankVideos([
+      video({ id: 'principios', title: 'Princípios da Administração Pública', description: 'Resumo com exercícios para concursos' }),
+      video({ id: 'titulo', title: 'Provimento e posse no serviço público' }),
+      video({ id: 'descricao', title: 'Servidores públicos', description: 'Estatuto: provimento, posse e exercício' }),
+    ], terms, NOW);
+    expect(ids(r).sort()).toEqual(['descricao', 'titulo']);
   });
   it('prefere tema no título, duração de aula e vídeo recente', () => {
     // Fora do tema, só para a lista ter o tamanho de uma busca real: a posição pesa pouco entre vizinhos.

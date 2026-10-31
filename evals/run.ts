@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { extractText } from 'unpdf';
 import { costUsd, generateJson, toBase64 } from '../shared/ai/gemini.ts';
-import { checkNotice, comparableText, NOTICE_PROMPT_VERSION, NoticeExtraction, noticeJsonSchema, noticePrompt, normalizeText, topicInText } from '../shared/ai/notice.ts';
+import { checkNotice, comparableText, extractWithRetry, NOTICE_PROMPT_VERSION, NOTICE_THINKING, NoticeExtraction, noticeJsonSchema, noticePrompt, normalizeText, topicInText } from '../shared/ai/notice.ts';
 
 // Limites de aprovação (ver README: "Qualidade da extração").
 export const THRESHOLDS = { fields: 1, subjectRecall: 1, subjectPrecision: 0.95, questionAccuracy: 1, hallucination: 0.02 };
@@ -68,10 +68,10 @@ for (const file of golds) {
   const { text } = await extractText(bytes.slice(), { mergePages: true });
   process.stdout.write(`${file.replace('.json', '')}: `);
   try {
-    const r = await generateJson({
-      apiKey: env.GEMINI_API_KEY!, model, schema: NoticeExtraction, jsonSchema: noticeJsonSchema(),
-      parts: [{ inline_data: { mime_type: 'application/pdf', data: toBase64(bytes) } }, { text: noticePrompt(gold.roleHint) }],
-    });
+    const r = await extractWithRetry(({ temperature, retry, timeoutMs }) => generateJson({
+      apiKey: env.GEMINI_API_KEY!, model, schema: NoticeExtraction, jsonSchema: noticeJsonSchema(), temperature, timeoutMs, thinkingLevel: NOTICE_THINKING,
+      parts: [{ inline_data: { mime_type: 'application/pdf', data: toBase64(bytes) } }, { text: noticePrompt(gold.roleHint, retry) }],
+    }));
     const cost = costUsd(r.usage, PRICE);
     totalCost += cost;
     const s = score(r.data, gold.expected, text);

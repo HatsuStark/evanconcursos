@@ -13,12 +13,12 @@ Deno.serve(async (req) => {
   const { data: task } = await auth.client.from('tasks').select('session_id, subject_id').eq('id', String(body.taskId ?? '')).maybeSingle();
   if (!task?.session_id || !task.subject_id) return json(400, { error: 'Os vídeos são buscados para tarefas de teoria (com sessão de conteúdo).' });
   const [{ data: session }, { data: subject }] = await Promise.all([
-    auth.client.from('study_sessions').select('title, topic_ids').eq('id', task.session_id).single(),
+    auth.client.from('study_sessions').select('title, keyword, topic_ids').eq('id', task.session_id).single(),
     auth.client.from('notice_subjects').select('name').eq('id', task.subject_id).single(),
   ]);
   const { data: tt } = session?.topic_ids?.length ? await auth.client.from('notice_topics').select('id, text').in('id', session.topic_ids) : { data: [] };
   const topics = (tt ?? []).sort((a, b) => session!.topic_ids.indexOf(a.id) - session!.topic_ids.indexOf(b.id)).map((t) => t.text);
-  const { q, key: queryKey, terms } = videoQuery({ subject: subject!.name, title: session!.title, topics });
+  const { q, key: queryKey, terms, law } = videoQuery({ subject: subject!.name, title: session!.title, topics, keyword: session!.keyword });
   const key = `${CACHE_VERSION}:${queryKey}`;
 
   const admin = adminClient();
@@ -29,7 +29,7 @@ Deno.serve(async (req) => {
   const apiKey = Deno.env.get('YOUTUBE_API_KEY');
   if (!apiKey) return json(200, { status: 'no_key', videos: [] });
   try {
-    const videos = await findVideos(apiKey, q, terms);
+    const videos = await findVideos(apiKey, q, terms, fetch, Date.now(), law);
     await admin.from('video_searches').upsert({ query_key: key, query: q, videos, fetched_at: new Date().toISOString() });
     await admin.from('video_searches').delete().lt('fetched_at', cutoff);
     return json(200, { status: 'ok', videos });

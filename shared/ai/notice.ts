@@ -47,7 +47,28 @@ export type NoticeExtraction = z.infer<typeof NoticeExtraction>;
 // JSON Schema para o `responseJsonSchema` do Gemini (gerado do mesmo schema que valida a resposta).
 export const noticeJsonSchema = () => z.toJSONSchema(NoticeExtraction, { target: 'draft-7' });
 
-export function noticePrompt(roleHint: string): string {
+// Margem até o limite da função (150 s em segundo plano): a falha precisa ser gravada antes de ela ser encerrada.
+export const NOTICE_DEADLINE_MS = 130_000;
+const RETRY_MIN_MS = 25_000;
+export const NOTICE_THINKING = 'low' as const;
+
+// O filtro RECITATION do Gemini recusa saída parecida demais com um texto conhecido, e a transcrição do edital às vezes
+// cai nele. É uma recusa instável: vale outra tentativa, com mais variação e itens quebrados, se ainda houver tempo.
+export async function extractWithRetry<T>(attempt: (o: { temperature: number; retry: boolean; timeoutMs: number }) => Promise<T>, now: () => number = Date.now): Promise<T> {
+  const deadline = now() + NOTICE_DEADLINE_MS;
+  try {
+    return await attempt({ temperature: 0.2, retry: false, timeoutMs: NOTICE_DEADLINE_MS });
+  } catch (err) {
+    const left = deadline - now();
+    if ((err as { finishReason?: string }).finishReason !== 'RECITATION' || left < RETRY_MIN_MS) throw friendlyRecitation(err);
+    return await attempt({ temperature: 0.7, retry: true, timeoutMs: left }).catch((e: unknown) => { throw friendlyRecitation(e); });
+  }
+}
+const friendlyRecitation = (err: unknown) => (err as { finishReason?: string }).finishReason === 'RECITATION'
+  ? new Error('A IA recusou transcrever este edital (filtro de texto reproduzido). Tente de novo; se repetir, avise o suporte.', { cause: err })
+  : err;
+
+export function noticePrompt(roleHint: string, retry = false): string {
   const role = roleHint.trim().slice(0, 160);
   return `Você é especialista em editais de concursos públicos brasileiros. Leia o edital em anexo e extraia os dados estruturados.
 Cargo: ${role ? `use o cargo "${role}" (ou o mais próximo dele)` : 'se houver um só cargo, use-o; se houver vários, use o primeiro e liste os demais em otherRoles'}.
@@ -61,7 +82,7 @@ Regras:
 - topics: transcreva fielmente cada item do conteúdo programático da disciplina, um item por entrada, na ordem do edital, mantendo leis e artigos citados. Não resuma, não junte disciplinas, não acrescente nada e não prefixe o item com o nome da disciplina. page = página do PDF onde o item aparece.
 - stages: as etapas do concurso (objetiva, discursiva, títulos, prática, física...).
 - notes: regras relevantes para o planejamento (nota mínima, critérios de eliminação, peso das provas, detalhes da discursiva), frases curtas.
-- Não invente: se uma informação não estiver no edital, deixe vazio ou 0.`;
+- Não invente: se uma informação não estiver no edital, deixe vazio ou 0.${retry ? '\n- Em topics, quebre itens longos em entradas menores, separadas nos pontos e vírgulas, e padronize a pontuação, sem mudar o sentido nem omitir leis e artigos.' : ''}`;
 }
 
 // ---------- verificações determinísticas ----------

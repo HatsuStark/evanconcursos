@@ -1,6 +1,6 @@
 // Lei seca: leis citadas pela sessão, artigos (texto oficial compartilhado) e marcações pessoais.
 import { useQuery } from '@tanstack/react-query';
-import { findLawRefs, inRanges, type LawRef } from '../../../shared/legal/refs.ts';
+import { citesUnlistedLaw, findLawRefs, inRanges, type LawRef } from '../../../shared/legal/refs.ts';
 import { lawByKey } from '../../../shared/legal/registry.ts';
 import { supabase } from './supabase.ts';
 
@@ -11,7 +11,7 @@ export interface Mark { id: string; article_id: string; color: string; note: str
 // Leis da sessão: as citadas no título (mais específicas); se não houver artigos ali, as dos tópicos do edital.
 export function sessionLawRefs(title: string, topics: string[], subject: string): LawRef[] {
   const fromTitle = findLawRefs(title, subject);
-  if (fromTitle.some((r) => r.ranges.length)) return fromTitle;
+  if (fromTitle.some((r) => r.ranges.length) || citesUnlistedLaw(title)) return fromTitle;
   const fromTopics = findLawRefs(topics.join('\n'), subject);
   return fromTopics.length ? fromTopics : fromTitle;
 }

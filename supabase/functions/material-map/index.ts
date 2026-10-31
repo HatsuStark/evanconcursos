@@ -1,12 +1,9 @@
 // Edge Function "material-map": mapeia as páginas de uma apostila do estudante para as sessões do cronograma.
-// POST {materialId} → 202; o processamento segue em segundo plano e atualiza materials.status
-// (mapping → mapped | failed) e material_maps. Ler o PDF e chamar a IA leva de 20 s a 2 min.
-import { extractText } from 'unpdf';
+// POST {materialId, pages} → atualiza materials.status (mapping → mapped | failed) e material_maps.
+// O navegador extrai o texto do PDF: extrair aqui estoura o limite de CPU da função em apostilas grandes.
 import { generateJson, GeminiError, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { hasText, MATERIAL_PROMPT_VERSION, MATERIAL_THINKING, MaterialMap, materialJsonSchema, materialPrompt, pageIndex, validateMap } from '../../../shared/ai/material.ts';
+import { hasText, MATERIAL_PROMPT_VERSION, MATERIAL_THINKING, MaterialMap, materialJsonSchema, materialPrompt, pageIndex, validateMap, validPages } from '../../../shared/ai/material.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-
-declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -14,9 +11,10 @@ Deno.serve(async (req) => {
   const auth = await requireUser(req);
   if (auth instanceof Response) return auth;
   const body = await req.json().catch(() => ({}));
-  const { data: material } = await auth.client.from('materials').select('id, plan_id, storage_path, status').eq('id', String(body.materialId ?? '')).maybeSingle();
+  const pages = validPages(body.pages);
+  if (!pages) return json(400, { error: 'O texto do PDF não chegou. Recarregue a página e tente de novo.' });
+  const { data: material } = await auth.client.from('materials').select('id, plan_id').eq('id', String(body.materialId ?? '')).maybeSingle();
   if (!material) return json(404, { error: 'Material não encontrado.' });
-  if (material.status === 'mapping') return json(409, { error: 'Este material já está sendo mapeado.' });
   // Sessões da versão ativa do plano (lidas como o usuário).
   const { data: plan } = await auth.client.from('study_plans').select('active_version_id').eq('id', material.plan_id).single();
   const { data: sessions } = await auth.client.from('study_sessions').select('id, title, notice_subjects(name)').eq('plan_version_id', plan?.active_version_id ?? '').order('subject_id').order('position');
@@ -24,19 +22,16 @@ Deno.serve(async (req) => {
 
   const admin = adminClient();
   await admin.from('materials').update({ status: 'mapping', status_detail: '' }).eq('id', material.id);
-  EdgeRuntime.waitUntil(run(admin, auth.user.id, material, sessions as unknown as { id: string; title: string; notice_subjects: { name: string } | null }[]));
-  return json(202, { ok: true });
+  await run(admin, auth.user.id, material, pages, sessions as unknown as { id: string; title: string; notice_subjects: { name: string } | null }[]);
+  return json(200, { ok: true });
 });
 
-async function run(admin: ReturnType<typeof adminClient>, ownerId: string, material: { id: string; storage_path: string },
+async function run(admin: ReturnType<typeof adminClient>, ownerId: string, material: { id: string }, pages: string[],
   sessions: { id: string; title: string; notice_subjects: { name: string } | null }[]) {
   const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash', started = Date.now();
   let usage: GeminiUsage | null = null;
   try {
-    const { data: blob, error } = await admin.storage.from('materiais').download(material.storage_path);
-    if (error || !blob) throw new Error('Não foi possível ler o PDF enviado.');
-    const { totalPages, text } = await extractText(new Uint8Array(await blob.arrayBuffer()), { mergePages: false });
-    const pages = text as string[];
+    const totalPages = pages.length;
     await admin.from('materials').update({ pages: totalPages }).eq('id', material.id);
     if (!hasText(pages)) throw new Error('O PDF parece escaneado (só imagem): não há texto para mapear.');
     const coded = sessions.map((s, i) => ({ code: `S${i + 1}`, id: s.id, subject: s.notice_subjects?.name ?? '', title: s.title }));

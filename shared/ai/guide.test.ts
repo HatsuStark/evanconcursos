@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyBoardEvidence, boardSample, guideCacheKey, guidePrompt, lawKeys, pickSimilarGuide, topicKeys, verifyGuide, type BoardQuestion, type Guide } from './guide.ts';
+import { applyBoardEvidence, boardSample, guideCacheKey, guidePrompt, lawKeys, pickSimilarGuide, topicKeys, unlistedLaws, verifyGuide, type BoardQuestion, type Guide } from './guide.ts';
 
 const law = [{ ref: 'CP, art. 312', text: 'x'.repeat(100) }, { ref: 'CP, art. 313', text: 'y'.repeat(80) }];
 const base = { depth: 'completa' as const, subject: 'Direito Penal', banca: 'VUNESP', topics: ['Peculato', 'Concussão'], law };
@@ -54,6 +54,20 @@ describe('reaproveitamento de apostilas', () => {
     ];
     expect(pickSimilarGuide(t, cands)).toBe(1);
     expect(pickSimilarGuide(t, [cands[0]!, cands[2]!])).toBe(-1);
+  });
+  it('sessões de temas diferentes no mesmo tópico do edital não dividem apostila', () => {
+    const topics = ['Estatuto SP e Lei de Improbidade'], sources = ['Lei 8.429/92, art. 9'];
+    const ingresso = 'Ingresso e Exercício: Conceito, provimento, posse e exercício (Lei 10.261/68, arts. 1º a 14)';
+    const improbidade = 'Improbidade Administrativa: Enriquecimento ilícito e declaração de bens (Lei 8.429/92, arts. 9º e 13)';
+    expect(guideCacheKey({ ...base, topics, title: ingresso })).not.toBe(guideCacheKey({ ...base, topics, title: improbidade }));
+    const keys = { topics: topicKeys(topics), law: sources }, stored = { title: improbidade, topic_keys: topicKeys(topics), sources };
+    expect(pickSimilarGuide({ ...keys, title: ingresso }, [stored])).toBe(-1);
+    expect(pickSimilarGuide({ ...keys, title: 'Improbidade Administrativa: enriquecimento ilícito e bens' }, [stored])).toBe(0);
+  });
+  it('"provimento" como forma de ingresso não é norma; com número, é', () => {
+    expect(unlistedLaws('Provimento e Vacância: posse e provimento')).toEqual([]);
+    expect(unlistedLaws('Provimento CG 50/89')).toEqual(['Provimento CG 50/89']);
+    expect(unlistedLaws('Estatuto (Lei 10.261/68)')).toEqual(['Lei 10.261/68']);
   });
   it('sem lei, só reaproveita com tópicos quase iguais', () => {
     const t = { topics: topicKeys(['Crase', 'Regência verbal']), law: [] };

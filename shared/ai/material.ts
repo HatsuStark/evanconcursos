@@ -58,6 +58,11 @@ export function pageIndex(pages: string[], sessionTitles: string[] = []): string
     return `p.${i + 1}: ${isToc(kept) ? kept.join(' ').slice(0, TOC_CHARS) : pageExcerpt(kept, per, terms)}`;
   }).join('\n');
 }
+// O texto das páginas vem do navegador: aceita só o formato esperado, com limite por página e no total.
+export function validPages(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 3000 || !value.every((p) => typeof p === 'string')) return null;
+  return (value as string[]).map((p) => p.slice(0, 6000));
+}
 // Páginas com texto: se quase nenhuma tem, é PDF escaneado (só imagem).
 export const hasText = (pages: string[]) => pages.filter((t) => t.replace(/\s/g, '').length > 40).length >= Math.max(1, pages.length * 0.3);
 

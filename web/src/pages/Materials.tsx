@@ -22,6 +22,7 @@ export function MaterialsPage() {
   const [error, setError] = useState('');
   const [viewing, setViewing] = useState<{ m: Material; url: string; key: string; label: string; range?: [number, number] } | null>(null);
   const [listing, setListing] = useState<string | null>(null);
+  const [remapping, setRemapping] = useState<string | null>(null);
   const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: ['materials'] }), qc.invalidateQueries({ queryKey: ['material-pages'] })]);
 
   async function pick(file: File | undefined) {
@@ -30,6 +31,7 @@ export function MaterialsPage() {
     try { await uploadMaterial(file, planId); await refresh(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); if (input.current) input.current.value = ''; }
   }
   async function act(fn: () => Promise<unknown>) { setError(''); try { await fn(); await refresh(); } catch (e) { setError((e as Error).message); } }
+  async function remap(m: Material) { setRemapping(m.id); await act(() => remapMaterial(m)); setRemapping(null); }
 
   return (
     <Shell title="Meus materiais" subtitle="Envie suas apostilas em PDF. A IA indica em que páginas está cada sessão do cronograma.">
@@ -38,7 +40,7 @@ export function MaterialsPage() {
           <div className="dropzone" role="button" tabIndex={0} onClick={() => input.current?.click()} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && input.current?.click()}
             onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void pick(e.dataTransfer.files[0]); }}>
             <FileUp />
-            <strong>{busy ? 'Enviando…' : 'Arraste a apostila (PDF) ou clique para escolher'}</strong>
+            <strong>{busy ? 'Enviando e mapeando…' : 'Arraste a apostila (PDF) ou clique para escolher'}</strong>
             <span className="muted small">Até 50 MB · PDFs escaneados (só imagem) não podem ser mapeados</span>
             <input ref={input} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => pick(e.target.files?.[0])} />
           </div>
@@ -50,10 +52,10 @@ export function MaterialsPage() {
                 <strong>{m.title}</strong>
                 <div className="muted small">{m.pages ? `${m.pages} páginas · ` : ''}{(m.size_bytes / 1024 / 1024).toFixed(1)} MB{m.status_detail ? ` · ${m.status_detail}` : ''}</div>
               </div>
-              <span className={'badge ' + STATUS[m.status].cls}>{STATUS[m.status].label}</span>
-              <button className="btn ghost sm" aria-expanded={listing === m.id} onClick={() => setListing(listing === m.id ? null : m.id)}>Trechos</button>
+              <span className={'badge ' + STATUS[remapping === m.id ? 'mapping' : m.status].cls}>{STATUS[remapping === m.id ? 'mapping' : m.status].label}</span>
+              <button className="btn ghost sm" aria-expanded={listing === m.id} onClick={() => setListing(listing === m.id ? null : m.id)}>No cronograma</button>
               <button className="btn ghost sm" onClick={() => act(async () => setViewing({ m, url: await signedUrl(m.storage_path), key: m.id, label: m.title }))}>Abrir</button>
-              {m.status !== 'mapping' && <button className="icon-btn" title="Mapear de novo" aria-label="Mapear de novo" onClick={() => act(() => remapMaterial(m.id))}><RefreshCw size={16} /></button>}
+              {remapping !== m.id && <button className="icon-btn" title="Mapear de novo" aria-label="Mapear de novo" onClick={() => remap(m)}><RefreshCw size={16} /></button>}
               <button className="icon-btn" title="Apagar" aria-label={`Apagar ${m.title}`} onClick={() => confirm(`Apagar "${m.title}"?`) && act(() => deleteMaterial(m))}><Trash2 size={16} /></button>
               {listing === m.id && <MaterialRanges material={m} onOpen={(p) => act(async () => setViewing({ m, url: await signedUrl(m.storage_path), key: p.id, label: `${m.title} · ${p.session?.title ?? 'trecho'}`, range: [p.page_from, p.page_to] }))} />}
             </div>

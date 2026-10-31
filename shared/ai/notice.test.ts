@@ -1,5 +1,42 @@
-import { describe, expect, it } from 'vitest';
-import { checkNotice, comparableText, NoticeExtraction, noticeJsonSchema, subjectWeights, topicInText } from './notice.ts';
+import { describe, expect, it, vi } from 'vitest';
+import { checkNotice, comparableText, extractWithRetry, NOTICE_DEADLINE_MS, noticePrompt, NoticeExtraction, noticeJsonSchema, subjectWeights, topicInText } from './notice.ts';
+
+describe('extractWithRetry', () => {
+  const recitation = Object.assign(new Error('O Gemini não devolveu conteúdo (RECITATION).'), { finishReason: 'RECITATION' });
+  it('sem recusa, uma tentativa só', async () => {
+    const attempt = vi.fn().mockResolvedValue('ok');
+    expect(await extractWithRetry(attempt)).toBe('ok');
+    expect(attempt).toHaveBeenCalledTimes(1);
+    expect(attempt.mock.calls[0]![0]).toMatchObject({ retry: false, timeoutMs: NOTICE_DEADLINE_MS });
+  });
+  it('recusa RECITATION tenta de novo com mais variação, só no tempo que sobra', async () => {
+    let t = 0;
+    const attempt = vi.fn().mockImplementationOnce(async () => { t = 40_000; throw recitation; }).mockResolvedValueOnce('ok');
+    expect(await extractWithRetry(attempt, () => t)).toBe('ok');
+    expect(attempt.mock.calls[1]![0]).toEqual({ temperature: 0.7, retry: true, timeoutMs: NOTICE_DEADLINE_MS - 40_000 });
+  });
+  it('sem tempo para outra tentativa, falha com mensagem clara e guarda a causa', async () => {
+    let t = 0;
+    const attempt = vi.fn().mockImplementation(async () => { t = NOTICE_DEADLINE_MS - 1000; throw recitation; });
+    const e = await extractWithRetry(attempt, () => t).catch((x: Error) => x) as Error;
+    expect(attempt).toHaveBeenCalledTimes(1);
+    expect(e.message).toContain('recusou transcrever');
+    expect(e.cause).toBe(recitation);
+  });
+  it('duas recusas: falha com a mesma mensagem clara', async () => {
+    const e = await extractWithRetry(vi.fn().mockRejectedValue(recitation)).catch((x: Error) => x) as Error;
+    expect(e.message).toContain('recusou transcrever');
+  });
+  it('outro erro não gasta nova tentativa', async () => {
+    const boom = new Error('rede'), attempt = vi.fn().mockRejectedValue(boom);
+    await expect(extractWithRetry(attempt)).rejects.toBe(boom);
+    expect(attempt).toHaveBeenCalledTimes(1);
+  });
+  it('só a nova tentativa pede para quebrar os itens', () => {
+    expect(noticePrompt('')).not.toContain('quebre itens longos');
+    expect(noticePrompt('', true)).toContain('quebre itens longos');
+  });
+});
 
 const PDF = `ANEXO VI CONTEÚDO PROGRAMÁTICO
 BLOCO I: Língua Portuguesa (16) questões: 1. Análise, compreensão e interpretação de diversos tipos de textos verbais,

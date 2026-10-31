@@ -11,27 +11,33 @@ export class GeminiError extends Error {
   readonly status: number;
   readonly usage: GeminiUsage | null;
   readonly raw: unknown;
-  constructor(message: string, status: number, usage: GeminiUsage | null = null, raw: unknown = null) {
+  readonly finishReason: string;
+  constructor(message: string, status: number, usage: GeminiUsage | null = null, raw: unknown = null, finishReason = '') {
     super(message);
     this.status = status;
     this.usage = usage;
     this.raw = raw;
+    this.finishReason = finishReason;
   }
 }
 
 type Part = { text: string } | { inline_data: { mime_type: string; data: string } };
 
 export async function generateJson<S extends z.ZodType>(opts: {
-  apiKey: string; model: string; parts: Part[]; schema: S; jsonSchema: unknown; temperature?: number; thinkingLevel?: 'low' | 'medium' | 'high'; fetchImpl?: typeof fetch;
+  apiKey: string; model: string; parts: Part[]; schema: S; jsonSchema: unknown; temperature?: number; thinkingLevel?: 'low' | 'medium' | 'high'; timeoutMs?: number; fetchImpl?: typeof fetch;
 }): Promise<GeminiResult<z.infer<S>>> {
   const started = Date.now();
   const res = await (opts.fetchImpl ?? fetch)(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(opts.model)}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': opts.apiKey },
+    ...(opts.timeoutMs ? { signal: AbortSignal.timeout(opts.timeoutMs) } : {}),
     body: JSON.stringify({
       contents: [{ role: 'user', parts: opts.parts }],
       generationConfig: { responseMimeType: 'application/json', responseJsonSchema: opts.jsonSchema, temperature: opts.temperature ?? 0.2, ...(opts.thinkingLevel ? { thinkingConfig: { thinkingLevel: opts.thinkingLevel } } : {}) },
     }),
+  }).catch((e: Error) => {
+    if (e.name === 'TimeoutError') throw new GeminiError('A IA demorou mais que o limite para responder.', 504);
+    throw e;
   });
   if (!res.ok) {
     const detail = (await res.text()).slice(0, 500);
@@ -47,7 +53,8 @@ export async function generateJson<S extends z.ZodType>(opts: {
     thinkingTokens: out.usageMetadata?.thoughtsTokenCount ?? 0,
   };
   const text = out.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
-  if (!text) throw new GeminiError(`O Gemini não devolveu conteúdo (${out.candidates?.[0]?.finishReason ?? 'sem motivo'}).`, 502, usage, out);
+  const finishReason = out.candidates?.[0]?.finishReason ?? '';
+  if (!text) throw new GeminiError(`O Gemini não devolveu conteúdo (${finishReason || 'sem motivo'}).`, 502, usage, out, finishReason);
   let raw: unknown;
   try { raw = JSON.parse(text); } catch { throw new GeminiError('A resposta do Gemini não é JSON válido.', 502, usage, text.slice(0, 2000)); }
   const parsed = opts.schema.safeParse(raw);

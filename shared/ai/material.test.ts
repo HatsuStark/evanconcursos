@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { hasText, pageIndex, validateMap } from './material.ts';
+import { hasText, pageIndex, validateMap, validPages } from './material.ts';
 
 describe('mapeamento de apostila', () => {
+  it('aceita do navegador só uma lista de páginas de texto, com limites', () => {
+    expect(validPages(['a', 'b'])).toEqual(['a', 'b']);
+    expect(validPages(['x'.repeat(9000)])![0]).toHaveLength(6000);
+    for (const bad of [undefined, 'texto', [], [1], Array(3001).fill('a')]) expect(validPages(bad)).toBeNull();
+  });
   it('índice compacto por página, cabendo no limite mesmo com muitas páginas', () => {
     expect(pageIndex(['Capítulo 1   Inquérito\npolicial', 'Ação penal'])).toBe('p.1: Capítulo 1 Inquérito policial\np.2: Ação penal');
     const big = pageIndex(Array.from({ length: 1000 }, () => 'x'.repeat(1000)));

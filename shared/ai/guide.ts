@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { findLawRefs, inRanges, type LawRef } from '../legal/refs.ts';
 import { lawByKey } from '../legal/registry.ts';
 
-export const GUIDE_PROMPT_VERSION = 'guide-v2';
+export const GUIDE_PROMPT_VERSION = 'guide-v3';
 export type GuideDepth = 'completa' | 'revisao';
 
 export const Guide = z.object({
@@ -60,6 +60,7 @@ Conteúdo do edital coberto: ${p.topics.join(' | ') || '—'}
 ${p.law.length ? `Trechos oficiais da lei (lei seca, única fonte legal permitida):\n${p.law.map((l) => `[${l.ref}] ${l.text}`).join('\n\n')}` : 'Nenhum trecho de lei foi fornecido para este tema.'}
 ${board.length ? `Questões reais da banca ${p.banca} sobre o tema (amostra, não o total):\n${board.map((q, i) => `Q${i + 1} (${[q.assunto, q.ano].filter(Boolean).join(', ')}): ${q.enunciado.slice(0, BOARD_TEXT_MAX)}${q.alternativas.length ? `\n${q.alternativas.map((a) => a.slice(0, BOARD_OPTION_MAX)).join(' | ')}` : ''}`).join('\n\n')}` : 'Nenhuma questão real da banca foi fornecida.'}
 Regras obrigatórias:
+- Escreva só sobre o "Tema da sessão", e dê à apostila um título sobre ele. O conteúdo do edital pode listar assuntos e leis de outras sessões: ignore o que não pertence ao tema. Trecho de lei que não trate do tema também fica de fora.
 - Cite artigos SOMENTE dos trechos fornecidos, no formato do colchete (ex.: "CP, art. 312"). Se não houver trecho, não cite números de artigos.
 - Não cite jurisprudência, súmulas, autores ou posições doutrinárias. Não invente leis, prazos ou números.
 - Siga o texto da lei fornecido; ele é a versão vigente.
@@ -99,14 +100,16 @@ export function verifyGuide(g: Guide, provided: ProvidedArticle[], subject = '')
 }
 
 // Chave de reaproveitamento: mesmo tema, mesmas fontes, mesma profundidade e versão do prompt.
-// O título da sessão (escrito pela IA, muda a cada cronograma) fica de fora: o que define a apostila é o
-// conteúdo — matéria, tópicos do edital e artigos de lei —, além de banca e profundidade.
+// O título da sessão entra porque um tópico do edital pode cobrir várias sessões com temas diferentes. Como a IA
+// escreve títulos diferentes a cada cronograma, o reaproveitamento entre planos fica com pickSimilarGuide.
 const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 export const topicKeys = (topics: string[]) => [...new Set(topics.map(norm).filter(Boolean))].sort();
+// Palavras do título que indicam o tema, sem artigos entre parênteses.
+export const titleKeys = (title: string) => [...new Set(norm(title.replace(/\([^)]*\)/g, ' ')).split(' ').filter((w) => w.length > 3))].sort();
 export const lawKeys = (law: GuideSource[]) => [...new Set(law.map((l) => l.ref))].sort();
 
-export function guideCacheKey(p: { depth: GuideDepth; subject: string; topics: string[]; law: GuideSource[]; banca: string }) {
-  const s = JSON.stringify([GUIDE_PROMPT_VERSION, p.depth, norm(p.banca), norm(p.subject), topicKeys(p.topics), p.law.map((l) => l.ref + '|' + l.text.length).sort()]);
+export function guideCacheKey(p: { depth: GuideDepth; subject: string; title?: string; topics: string[]; law: GuideSource[]; banca: string }) {
+  const s = JSON.stringify([GUIDE_PROMPT_VERSION, p.depth, norm(p.banca), norm(p.subject), titleKeys(p.title ?? ''), topicKeys(p.topics), p.law.map((l) => l.ref + '|' + l.text.length).sort()]);
   let h1 = 0x811c9dc5, h2 = 0;
   for (let i = 0; i < s.length; i++) { h1 = Math.imul(h1 ^ s.charCodeAt(i), 16777619) >>> 0; h2 = (h2 * 31 + s.charCodeAt(i)) >>> 0; }
   return `${h1.toString(16)}${h2.toString(16)}`;
@@ -120,12 +123,13 @@ const jaccard = (a: string[], b: string[]) => {
 };
 // Apostila já existente que serve para este tema: mesmos artigos (≥ 80%) e tópicos parecidos (≥ 50%);
 // sem lei, os tópicos precisam coincidir (≥ 80%). Devolve o índice da melhor ou -1.
-export function pickSimilarGuide(target: { topics: string[]; law: string[] }, candidates: { topic_keys: string[]; sources: string[] }[]) {
+export function pickSimilarGuide(target: { title?: string; topics: string[]; law: string[] }, candidates: { title?: string; topic_keys: string[]; sources: string[] }[]) {
   let best = -1, bestScore = 0;
+  const title = titleKeys(target.title ?? '');
   candidates.forEach((c, i) => {
-    const t = jaccard(target.topics, c.topic_keys), l = jaccard(target.law, c.sources);
-    const ok = target.law.length ? l >= 0.8 && t >= 0.5 : !c.sources.length && t >= 0.8;
-    const score = l * 2 + t;
+    const t = jaccard(target.topics, c.topic_keys), l = jaccard(target.law, c.sources), n = jaccard(title, titleKeys(c.title ?? ''));
+    const ok = n >= 0.5 && (target.law.length ? l >= 0.8 && t >= 0.5 : !c.sources.length && t >= 0.8);
+    const score = l * 2 + t + n;
     if (ok && score > bestScore) { best = i; bestScore = score; }
   });
   return best;
@@ -139,6 +143,7 @@ export function unlistedLaws(text: string): string[] {
     const label = `Lei ${m[1]}${m[2] ? '/' + m[2] : ''}`;
     if (!findLawRefs(m[0]).length && !listed.has(label)) out.add(label);
   }
-  for (const m of text.matchAll(/\b(Resolução|Regimento|Normas da Corregedoria|Provimento)[^,;.)]{0,40}/gi)) out.add(m[0].trim());
+  // "provimento" solto é forma de ingresso no cargo: como norma, vem com número ou órgão.
+  for (const m of text.matchAll(/\b(Resolução|Regimento|Normas da Corregedoria|Provimento\s+(?:n[º°o.]*\s*\d|CG\b|\d))[^,;.)]{0,40}/gi)) out.add(m[0].trim());
   return [...out];
 }

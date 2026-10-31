@@ -58,7 +58,7 @@ A leitura do edital é medida contra gabaritos feitos à mão (`evals/gabaritos`
 | Questões por matéria (quando o edital informa) | 100% |
 | Tópicos que não aparecem no texto do PDF | ≤ 2% |
 
-Prompt `notice-v2` com `gemini-3.8-flash`: 4/4 editais dentro dos limites (0% de tópicos fora do PDF), 35–80 s e US$ 0,03–0,07 por edital. Rode a avaliação antes de trocar modelo ou prompt:
+Prompt `notice-v2` com `gemini-3.8-flash` e raciocínio baixo: 4/4 editais dentro dos limites (0% de tópicos fora do PDF), 23–30 s e US$ 0,02–0,04 por edital. Se o Gemini recusar a transcrição (filtro `RECITATION`), a função tenta de novo dentro de um limite de 130 s, para gravar a falha antes de ser encerrada aos 150 s. Rode a avaliação antes de trocar modelo ou prompt:
 
 ```bash
 node evals/pdf-text.mjs <pasta> evals/editais/*.pdf     # texto dos PDFs, para montar gabaritos
@@ -171,7 +171,7 @@ Ao abrir a tela **Hoje**, no máximo uma vez por dia e plano, o app prepara as a
 
 ## Vídeos
 
-A aba **Vídeos** do modo estudo sugere de 2 a 3 vídeo-aulas da sessão, de até 30 minutos cada,, com player dentro do app e marcação de assistido por concurso. Não usa IA: a função `videos` busca na YouTube Data API pelo tema da sessão, descarta Shorts (menos de 4 min), vídeos de mais de 30 min, lives, vídeos sem incorporação ou bloqueados no Brasil e os que não citam o tema, e ordena por uma conta fixa (`shared/domain/videos.ts`): relevância do YouTube, tema no título, duração, visualizações e idade, com no máximo 2 por canal. Os vídeos não são revisados, e a tela avisa isso.
+A aba **Vídeos** do modo estudo sugere de 2 a 3 vídeo-aulas da sessão, de até 30 minutos cada, com player dentro do app e marcação de assistido por concurso. Não usa IA: a função `videos` busca na YouTube Data API pela palavra-chave da sessão e pelo número da lei citada no título, descarta Shorts (menos de 4 min), vídeos de mais de 30 min, lives, vídeos sem incorporação ou bloqueados no Brasil e os fora do tema (sem termo do tema no título nem pelo menos metade dos termos na descrição), e ordena por uma conta fixa (`shared/domain/videos.ts`): relevância do YouTube, tema no título, citação da lei da sessão, duração, visualizações e idade, com no máximo 2 por canal. Os vídeos não são revisados, e a tela avisa isso.
 
 A cota gratuita é de 10 mil unidades por dia, e cada busca nova gasta 101 (cerca de 99 buscas por dia). Se restar menos de 2 vídeos, uma segunda busca só por vídeos médios (4 a 20 min) gasta mais 101; sem vídeo suficiente, a aba mostra o que houver. Por isso a busca só roda ao abrir a aba e fica guardada em `video_searches` por 30 dias, compartilhada entre sessões e estudantes; 30 dias é o limite de guarda dos termos da API. Sem chave, sem cota ou com erro, a aba mostra o link de busca do YouTube.
 
@@ -199,9 +199,9 @@ O leitor (`web/src/components/PdfViewer.tsx`) rola as páginas em sequência e d
 
 Selecionar um texto abre uma barra para marcar em três cores, anotar ou copiar (`material_notes`). As marcações valem para a apostila inteira, em qualquer trecho, e guardam a posição em frações da página, então acompanham o zoom. PDF escaneado não tem texto para selecionar.
 
-Na aba **Meus PDFs** do modo estudo, cada apostila aparece como "Ler das páginas X a Y" e o leitor só mostra e navega por esse trecho. O estudante corrige, acrescenta e apaga trechos, e também confere todos os trechos de uma apostila em **Meus materiais**. "Mapear de novo" mantém os trechos corrigidos ou acrescentados (`manual`) e só refaz as outras sessões. A restrição é da tela: o navegador baixa o PDF inteiro, e a apostila completa segue em **Meus materiais**.
+Na aba **Meus PDFs** do modo estudo, cada apostila aparece como "Ler das páginas X a Y" e o leitor só mostra e navega por esse trecho. O estudante corrige, acrescenta e apaga trechos, e em **Meus materiais** o botão **No cronograma** mostra em que matérias e sessões a apostila entra, com as páginas e as tarefas de cada sessão (data, feita ou atrasada, com link para estudar; no ciclo, sem datas). "Mapear de novo" mantém os trechos corrigidos ou acrescentados (`manual`) e só refaz as outras sessões. A restrição é da tela: o navegador baixa o PDF inteiro, e a apostila completa segue em **Meus materiais**.
 
-Para gastar pouco, a IA não recebe a apostila inteira: recebe o sumário, o começo de cada página, os títulos e as linhas que citam termos das sessões, com raciocínio reduzido. Pode indicar até 3 trechos por sessão, porque uma sessão como "Estabilidade e Petição" costuma juntar assuntos de partes diferentes da apostila. Trecho cuja leitura estimada (1,5 min por página) passa do tempo da tarefa de teoria ganha um aviso.
+O navegador extrai o texto do PDF e a função `material-map` só chama a IA e responde na mesma requisição, porque extrair no servidor esbarra no limite de CPU das Edge Functions em apostilas grandes. Para gastar pouco, a IA não recebe a apostila inteira: recebe o sumário, o começo de cada página, os títulos e as linhas que citam termos das sessões, com raciocínio reduzido. Pode indicar até 3 trechos por sessão, porque uma sessão como "Estabilidade e Petição" costuma juntar assuntos de partes diferentes da apostila. Trecho cuja leitura estimada (1,5 min por página) passa do tempo da tarefa de teoria ganha um aviso.
 
 ## Etapas
 

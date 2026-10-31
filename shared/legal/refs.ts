@@ -6,7 +6,7 @@ import { LAWS, lawForSubject } from './registry.ts';
 export interface ArticleRange { from: number; to: number; fromSuffix?: string; toSuffix?: string }
 export interface LawRef { law: string; ranges: ArticleRange[] } // ranges vazio = a lei toda / sem artigo citado
 
-const NUM = String.raw`(\d{1,3}(?:\.\d{3})*)\s*(?:º|°)?(?:\s*-\s*([A-Z]{1,2})\b)?`;
+const NUM = String.raw`(\d{1,4}(?:\.\d{3})*)(?:\s*(?:º|°))?(?:\s*-\s*([A-Z]{1,2})\b)?`;
 const num = (s: string) => Number(s.replace(/\./g, ''));
 
 // Intervalos a partir de "293 a 305; 307; 308; 311-A; 312 a 317 e 319".
@@ -21,8 +21,15 @@ export function parseRanges(s: string): ArticleRange[] {
   return out;
 }
 
-// Trecho de artigos logo depois da menção à lei (ou "arts. X da CF", antes dela).
-const ART_LIST = String.raw`\b(?:arts?\.|artigos?)\s*((?:${NUM}(?:\s*(?:,|;|e|a|até|ao|-)\s*)?)+)`;
+// Trecho de artigos logo depois da menção à lei (ou "arts. X da CF", antes dela). O separador é obrigatório entre
+// os números: opcional, a regex tenta todas as divisões da lista e leva minutos em listas longas de edital.
+const SEP = String.raw`\s*(?:,|;|e|a|até|ao|-)`;
+const ART_LIST = String.raw`\b(?:arts?\.|artigos?)\s*(${NUM}(?:${SEP}\s*${NUM})*(?:${SEP})?)`;
+
+// Cita lei fora do registro (ex.: estadual)? Então os artigos do texto são dela, não de outra lei conhecida.
+export function citesUnlistedLaw(text: string) {
+  return [...text.matchAll(/\bLei(?:\s+Complementar)?\s*(?:Estadual\s*)?(?:n[º°o.]*\s*)?\d{1,2}\.?\d{3}/gi)].some((m) => !LAWS.some((l) => l.match.test(m[0])));
+}
 
 export function findLawRefs(text: string, subject = ''): LawRef[] {
   const found = new Map<string, ArticleRange[]>();
@@ -48,7 +55,7 @@ export function findLawRefs(text: string, subject = ''): LawRef[] {
     add(m.law, [...(b ? parseRanges(b[1]!) : []), ...(a ? parseRanges(a[1]!) : [])]);
   });
   // Sem lei citada: artigos soltos ("arts. 4º a 23") vão para a lei principal da matéria.
-  if (!found.size) {
+  if (!found.size && !citesUnlistedLaw(text)) {
     const law = lawForSubject(subject), a = new RegExp(ART_LIST, 'i').exec(text);
     if (law) add(law, a ? parseRanges(a[1]!) : []);
   }

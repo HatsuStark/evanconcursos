@@ -1,11 +1,12 @@
 // Biblioteca pessoal: PDFs do estudante (bucket privado), mapeamento de páginas pela IA e links temporários.
 import { useQuery } from '@tanstack/react-query';
 import type { MarkRect } from '../../../shared/domain/pdf-reading.ts';
+import { extractPages } from './pdfjs.ts';
 import { supabase } from './supabase.ts';
 
 export interface Material { id: string; title: string; storage_path: string; pages: number | null; status: 'uploaded' | 'mapping' | 'mapped' | 'failed'; status_detail: string; size_bytes: number; created_at: string }
 export interface SessionPages { id: string; page_from: number; page_to: number; manual: boolean; material: { id: string; title: string; storage_path: string; pages: number | null } }
-export interface MaterialPages { id: string; page_from: number; page_to: number; manual: boolean; session: { title: string; subject: { name: string } | null } | null }
+export interface MaterialPages { id: string; session_id: string; page_from: number; page_to: number; manual: boolean; session: { title: string; subject: { name: string } | null } | null }
 export type NoteColor = 'yellow' | 'green' | 'pink';
 export interface MaterialNote { id: string; page: number; rects: MarkRect[]; quote: string; note: string; color: NoteColor }
 export const MAX_MATERIAL_BYTES = 50 * 1024 * 1024;
@@ -37,7 +38,7 @@ export const useMaterialPages = (materialId: string | null) => useQuery({
   queryKey: ['material-pages', materialId],
   enabled: !!materialId,
   queryFn: async () => {
-    const { data, error } = await supabase.from('material_maps').select('id, page_from, page_to, manual, session:study_sessions(title, subject:notice_subjects(name))').eq('material_id', materialId!).order('page_from');
+    const { data, error } = await supabase.from('material_maps').select('id, session_id, page_from, page_to, manual, session:study_sessions(title, subject:notice_subjects(name))').eq('material_id', materialId!).order('page_from');
     if (error) throw new Error(error.message);
     return data as unknown as MaterialPages[];
   },
@@ -94,16 +95,22 @@ export async function uploadMaterial(file: File, planId: string) {
   const { data: u } = await supabase.auth.getUser();
   if (!u.user) throw new Error('Entre na sua conta.');
   const bytes = await file.arrayBuffer();
+  const pages = await extractPages(bytes);
   const sha = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
   const path = `${u.user.id}/${planId}/${sha}.pdf`;
   const up = await supabase.storage.from('materiais').upload(path, bytes, { contentType: 'application/pdf', upsert: false });
   if (up.error && !/exists|duplicate/i.test(up.error.message)) throw new Error(`Falha no envio: ${up.error.message}`);
   const { data, error } = await supabase.from('materials').insert({ plan_id: planId, title: file.name.replace(/\.pdf$/i, '').slice(0, 200), storage_path: path, sha256: sha, size_bytes: file.size }).select('id').single();
   if (error) throw new Error(/duplicate|unique/i.test(error.message) ? 'Este PDF já está na sua biblioteca.' : error.message);
-  await invoke('material-map', { materialId: (data as { id: string }).id });
+  await invoke('material-map', { materialId: (data as { id: string }).id, pages });
 }
 
-export const remapMaterial = (id: string) => invoke('material-map', { materialId: id });
+// O texto é extraído aqui no navegador: a função do servidor só chama a IA, sem esbarrar no limite de CPU dela.
+export async function remapMaterial(m: Material) {
+  const r = await fetch(await signedUrl(m.storage_path));
+  if (!r.ok) throw new Error(`Não foi possível baixar o PDF (${r.status}).`);
+  await invoke('material-map', { materialId: m.id, pages: await extractPages(await r.arrayBuffer()) });
+}
 
 export async function deleteMaterial(m: Material) {
   await supabase.storage.from('materiais').remove([m.storage_path]);

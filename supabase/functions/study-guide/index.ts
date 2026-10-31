@@ -43,14 +43,14 @@ async function resolve(auth: Auth, admin: Admin, task: { subject_id: string | nu
 }
 type GuideContext = NonNullable<Awaited<ReturnType<typeof resolve>>>;
 
-// 1) Apostila igual (mesmo conteúdo); 2) semelhante (mesma matéria/banca/profundidade, mesmos artigos e
-// tópicos parecidos), de qualquer sessão ou estudante. Só gera com a IA quando não há nenhuma.
+// 1) Apostila igual (mesmo conteúdo); 2) semelhante (mesma matéria/banca/profundidade, mesmos artigos,
+// tópicos e título parecidos), de qualquer sessão ou estudante. Só gera com a IA quando não há nenhuma.
 async function findGuide(admin: Admin, { input, key }: GuideContext) {
   const { data: cached } = await admin.from('study_guides').select('*').eq('cache_key', key).maybeSingle();
   if (cached) return cached;
   const { data: similar } = await admin.from('study_guides').select('*').eq('subject_key', normalizeText(input.subject)).eq('depth', input.depth)
     .eq('banca', normalizeText(input.banca)).eq('prompt_version', GUIDE_PROMPT_VERSION).order('created_at', { ascending: false }).limit(60);
-  const hit = pickSimilarGuide({ topics: topicKeys(input.topics), law: lawKeys(input.law) }, similar ?? []);
+  const hit = pickSimilarGuide({ title: input.title, topics: topicKeys(input.topics), law: lawKeys(input.law) }, similar ?? []);
   return hit >= 0 ? similar![hit] : null;
 }
 

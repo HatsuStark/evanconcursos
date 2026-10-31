@@ -5,7 +5,7 @@
 // O app acompanha pelo job; o usuário confere e aprova depois (approve_notice).
 import { extractText } from 'unpdf';
 import { GeminiError, generateJson, toBase64, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { checkNotice, NOTICE_PROMPT_VERSION, NoticeExtraction, noticeJsonSchema, noticePrompt } from '../../../shared/ai/notice.ts';
+import { checkNotice, extractWithRetry, NOTICE_PROMPT_VERSION, NOTICE_THINKING, NoticeExtraction, noticeJsonSchema, noticePrompt } from '../../../shared/ai/notice.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
@@ -59,10 +59,11 @@ async function process(p: { jobId: string; ownerId: string; noticeId: string; fi
     } catch { /* PDF só com imagem ou protegido */ }
 
     await step('analyzing');
-    const r = await generateJson({
-      apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: NoticeExtraction, jsonSchema: noticeJsonSchema(),
-      parts: [{ inline_data: { mime_type: 'application/pdf', data: toBase64(bytes) } }, { text: noticePrompt(p.roleHint) }],
-    });
+    const pdf = toBase64(bytes);
+    const r = await extractWithRetry(({ temperature, retry, timeoutMs }) => generateJson({
+      apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: NoticeExtraction, jsonSchema: noticeJsonSchema(), temperature, timeoutMs, thinkingLevel: NOTICE_THINKING,
+      parts: [{ inline_data: { mime_type: 'application/pdf', data: pdf } }, { text: noticePrompt(p.roleHint, retry) }],
+    }));
     usage = r.usage; latencyMs = r.latencyMs;
 
     await step('checking');
@@ -77,7 +78,9 @@ async function process(p: { jobId: string; ownerId: string; noticeId: string; fi
     await logUsage(admin, { ownerId: p.ownerId, jobId: p.jobId, operation: OPERATION, model, promptVersion: NOTICE_PROMPT_VERSION, usage, latencyMs, status: 'ok' });
     await admin.from('ai_jobs').update({ status: 'succeeded', finished_at: new Date().toISOString(), result: { extractionId: extraction.id }, progress: { step: 'done' } }).eq('id', p.jobId);
   } catch (err) {
+    const cause = err instanceof Error ? err.cause : null;
     if (err instanceof GeminiError) usage = err.usage;
+    else if (cause instanceof GeminiError) usage = cause.usage;
     const message = err instanceof Error ? err.message : String(err);
     await logUsage(admin, { ownerId: p.ownerId, jobId: p.jobId, operation: OPERATION, model, promptVersion: NOTICE_PROMPT_VERSION, usage, latencyMs, status: 'error', error: message });
     await admin.from('ai_jobs').update({ status: 'failed', finished_at: new Date().toISOString(), error: message.slice(0, 1000) }).eq('id', p.jobId);

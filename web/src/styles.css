@@ -381,8 +381,14 @@ a.task-title:hover { color: var(--cyan); }
 
 /* ---------- E4.5: materiais e leitor de PDF ---------- */
 .material-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.material-ranges { display: grid; gap: 10px; width: 100%; list-style: none; margin: 4px 0 0; padding: 10px 0 0; border-top: 1px solid var(--surface-3); }
+.material-ranges { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; width: 100%; margin: 4px 0 0; padding: 10px 0 0; border-top: 1px solid var(--surface-3); }
+.material-sessions { display: grid; gap: 8px; list-style: none; margin: 6px 0 0; padding: 0; }
+.material-session { display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--surface-3); }
 .material-range { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.material-tasks { display: flex; flex-wrap: wrap; gap: 6px; }
+.material-task { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--cyan); color: var(--cyan); font-size: 12px; text-decoration: none; }
+.material-task.done { border-color: var(--lime); color: var(--lime); }
+.material-task.late { border-color: var(--orange); color: var(--orange); }
 .pdf { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .pdf-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pdf-bar .icon-btn { width: 36px; height: 36px; }

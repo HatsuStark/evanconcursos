@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseLawHtml } from './parse.ts';
-import { findLawRefs, inRanges, noticeLawKeys, parseRanges } from './refs.ts';
+import { citesUnlistedLaw, findLawRefs, inRanges, noticeLawKeys, parseRanges } from './refs.ts';
 
 // Trecho real do HTML do CPP no normas.leg.br (estrutura preservada).
 const HTML = `<html><body>
@@ -20,6 +20,32 @@ const HTML = `<html><body>
 <p><span>Art. 1.025. Consideram-se incluídos no acórdão os elementos.</span></p>
 <p><span>Pena - detenção, de três meses a um ano.</span></p>
 </body></html>`;
+
+describe('lei fora do registro', () => {
+  it('reconhece a citação e não atribui os artigos a outra lei', () => {
+    const title = 'Ingresso e Exercício: posse (Lei 10.261/68, arts. 1º a 14, 46 e 47)';
+    expect(citesUnlistedLaw(title)).toBe(true);
+    expect(citesUnlistedLaw('Juizados (Lei 9.099/1995, arts. 3º ao 19)')).toBe(false);
+    expect(citesUnlistedLaw('Peculato (CP, arts. 312 a 327)')).toBe(false);
+    expect(findLawRefs(title, 'Direito Penal')).toEqual([]);
+    expect(findLawRefs('Peculato, arts. 312 a 327', 'Direito Penal')[0]!.law).toBe('CP');
+  });
+});
+
+describe('findLawRefs com listas de edital', () => {
+  it('lista longa de artigos termina na hora, sem backtracking explosivo', () => {
+    const text = 'Código de Processo Penal – artigos 251 a 258; 261 a 267; 274; 351 a 372; 394 a 497; 531 a 538; 541 a 548; 574 a 667 e Lei n.º 9.099 de 26.09.1995 (artigos 60 a 83; 88 e 89).';
+    const started = performance.now();
+    const refs = findLawRefs(text);
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(refs.find((r) => r.law === 'CPP')!.ranges.map((r) => [r.from, r.to])).toEqual([[251, 258], [261, 267], [274, 274], [351, 372], [394, 497], [531, 538], [541, 548], [574, 667]]);
+    expect(refs.find((r) => r.law === 'L9099')!.ranges.map((r) => [r.from, r.to])).toEqual([[60, 83], [88, 88], [89, 89]]);
+  });
+  it('entende "ao" e número de quatro dígitos sem ponto', () => {
+    expect(findLawRefs('Lei 9.099/1995, arts. 3º ao 19')[0]!.ranges).toEqual([{ from: 3, to: 19 }]);
+    expect(findLawRefs('CPC, arts. 994 a 1026')[0]!.ranges).toEqual([{ from: 994, to: 1026 }]);
+  });
+});
 
 describe('parseLawHtml', () => {
   const arts = parseLawHtml(HTML);

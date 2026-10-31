@@ -1,16 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Copy, Highlighter, Maximize2, Pencil, ZoomIn, ZoomOut } from 'lucide-react';
 import * as pdfjs from 'pdfjs-dist';
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { mergeRects, type MarkRect } from '../../../shared/domain/pdf-reading.ts';
 import { addMaterialNotes, deleteMaterialNote, updateMaterialNote, useMaterialNotes, type MaterialNote, type NoteColor } from '../lib/materials.ts';
+import { openPdf } from '../lib/pdfjs.ts';
 import { NOTE_COLORS, PdfNotes } from './PdfNotes.tsx';
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-
-// Fontes padrão, mapas de caracteres e decodificadores que o PDF.js busca quando o arquivo precisa deles.
-const ASSETS = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}`;
 const READING_WIDTH = 820, GUTTER = 12, MIN_ZOOM = 0.5, MAX_ZOOM = 2.5, ZOOM_STEP = 0.1;
 const MAX_CANVAS_PIXELS = 16_000_000;
 
@@ -152,7 +148,7 @@ export function PdfViewer({ url, range, storageKey, materialId }: { url: string;
     fetch(url).then((r) => { if (!r.ok) throw new Error(`Não foi possível baixar o PDF (${r.status}).`); return r.arrayBuffer(); })
       .then((b) => {
         if (cancelled) return;
-        task = pdfjs.getDocument({ data: new Uint8Array(b), standardFontDataUrl: `${ASSETS}/standard_fonts/`, cMapUrl: `${ASSETS}/cmaps/`, cMapPacked: true, wasmUrl: `${ASSETS}/wasm/` });
+        task = openPdf(new Uint8Array(b));
         return task.promise;
       })
       .then(async (d) => {
