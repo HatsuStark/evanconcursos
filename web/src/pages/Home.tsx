@@ -1,13 +1,16 @@
-import { CalendarClock, CheckCircle2, FileUp, Layers, RotateCcw, Sparkles } from 'lucide-react';
+import { CalendarClock, CheckCircle2, FileUp, Layers, PenLine, RotateCcw, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ReplanBanner } from '../components/ReplanBanner.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { TaskCard } from '../components/TaskCard.tsx';
 import { daysUntil, fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
 import { useAuth } from '../lib/auth.tsx';
+import { useDiscursiveRules, useLastDiscursive } from '../lib/discursive.ts';
 import { useNotices } from '../lib/notices.ts';
 import { useDueCounts } from '../lib/practice.ts';
 import { today, useActivePlan } from '../lib/plans.ts';
+
+const DISCURSIVE_NUDGE_DAYS = 7;
 
 // Tela inicial: o estudo do dia. Sem plano ainda, conduz o primeiro acesso até o cronograma.
 export function HomePage() {
@@ -15,6 +18,8 @@ export function HomePage() {
   const notices = useNotices();
   const active = useActivePlan();
   const due = useDueCounts();
+  const discursive = useDiscursiveRules(active.data?.notice.id);
+  const lastDiscursive = useLastDiscursive(active.data?.notice.id);
   const name = session?.user.email?.split('@')[0] ?? '';
   const subtitle = name ? `Olá, ${name}. Pronto para estudar?` : 'Pronto para estudar?';
   if (notices.isLoading || active.isLoading) return <Shell title="Hoje" subtitle={subtitle}><div className="spinner" /></Shell>;
@@ -91,6 +96,13 @@ export function HomePage() {
           <div style={{ flex: 1 }}><strong>Revisar hoje</strong><div className="muted small">{due.data!.errors} questão(ões) do caderno de erros · {due.data!.cards} flashcard(s)</div></div>
           {!!due.data!.errors && <Link className="btn sm" to="/questoes?aba=revisar">Revisar erros</Link>}
           {!!due.data!.cards && <Link className="btn ghost sm" to="/questoes?aba=flashcards">Flashcards</Link>}
+        </div>
+      )}
+      {discursive.data?.rules && (lastDiscursive.data === null || (lastDiscursive.data ?? 0) >= DISCURSIVE_NUDGE_DAYS) && !lastDiscursive.isLoading && (
+        <div className="glass card review-today">
+          <PenLine size={20} style={{ color: 'var(--violet)' }} />
+          <div style={{ flex: 1 }}><strong>Treinar a discursiva</strong><div className="muted small">{lastDiscursive.data === null ? 'Você ainda não fez nenhum treino.' : `Último treino há ${lastDiscursive.data} dias.`}{discursive.data.rules.minPoints && discursive.data.rules.maxPoints ? ` O edital exige ${discursive.data.rules.minPoints} de ${discursive.data.rules.maxPoints} pontos.` : ''}</div></div>
+          <Link className="btn ghost sm" to="/discursivas">Treinar</Link>
         </div>
       )}
       <div className="section-title"><h2>Estudo do dia</h2><span className="badge cyan">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'short' })}</span></div>

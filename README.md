@@ -15,7 +15,7 @@ web/         React + TypeScript (Vite)
 supabase/
   migrations/ SQL versionado (aplicado com scripts/db.mjs push)
   tests/     testes pgTAP de isolamento entre usuários (scripts/db.mjs test)
-  functions/ Edge Functions: notice-extract (leitura do edital), plan-design (estratégia e sessões); study-guide na E5
+  functions/ Edge Functions: notice-extract (leitura do edital), plan-design (estratégia e sessões), study-guide (apostila), discursive (treino e correção), entre outras
 evals/       editais de referência (gabaritos) e avaliação da extração
 scripts/     legal-seed.ts (carrega as leis do registro), db.mjs (migrações e testes do banco), deploy-functions.mjs (funções e segredos), gemini-models.mjs
 ```
@@ -108,9 +108,17 @@ Começar o cronômetro de uma sessão (ou o botão **Modo foco**) esconde barra 
 
 Cada questão tem uma discussão entre estudantes, liberada só depois de responder (no simulado, depois da entrega); a regra fica no banco, em funções `comment_*` e `comments_list`, sem acesso direto às tabelas. Só texto, com apelido (o e-mail nunca aparece), votos de "útil" ordenando a lista e limite de 5 comentários por minuto. Três denúncias de pessoas diferentes escondem o comentário. Não há painel: para revisar, consulte `question_comments where hidden` e, se for o caso, faça `update ... set hidden = false` e apague as linhas de `comment_reports` (ou apague o comentário). **Antes de abrir o app ao público:** publicar termos de uso com regras de comentários e canal de denúncia, e confirmar nos termos da Quest API que a discussão pública é permitida.
 
+## Discursivas
+
+A página **Discursivas** lê do edital o formato, o número de questões, a nota e o mínimo (`discursiveRules`, sem IA). O treino de **questão** tira o tema das sessões do cronograma, priorizando o que já foi estudado e menos treinado, e usa só os artigos oficiais da lei seca. Em conhecimentos específicos, só entram as matérias específicas. O treino de **redação** traz tema de interesse público, sem dados inventados.
+
+O rascunho salva sozinho. **Corrigir** envia o texto à IA, que marca cada ponto do espelho como atendido, parcial ou ausente e avalia estrutura e linguagem. A nota sai de uma conta no código (`scoreGrade`): conteúdo 70%, estrutura 15% e linguagem 15% na questão; 50%, 25% e 25% na redação. **Esses pesos são do app, não da banca**, e a tela avisa que a nota é estimada. Ponto não avaliado conta como ausente, fora do tema zera, trecho apontado que não está no texto é descartado e artigo citado sem fonte vira aviso. **Reescrever** cria nova versão do mesmo enunciado e mostra a evolução. Enunciados são reaproveitados entre treinos e estudantes; espelho e resposta modelo só ficam disponíveis depois da correção (`discursive_prompts` é só do backend). O mesmo texto não é corrigido duas vezes.
+
+A tela Hoje lembra de treinar depois de 7 dias sem correção. Os treinos não viram tarefas no cronograma. Avaliação com a IA real: `node --experimental-strip-types evals/discursive-run.ts [questao|redacao]`.
+
 ## Excluir um concurso
 
-Na página **Concursos**, a lixeira de cada card apaga de vez o edital, os PDFs (edital e materiais), o cronograma, as tarefas, as tentativas e os simulados daquele concurso (`delete_notice`). Anotações, caderno de erros, flashcards e marcações de lei são por questão ou artigo: saem só se foram usados apenas nele. Fica o que também aparece em outro concurso, em questões livres ou em simulados personalizados, além dos catálogos compartilhados (apostilas, mnemônicos, questões, leis) e do registro de custo da IA. `scripts/e2e-delete-notice.ts` testa os buckets com login real.
+Na página **Concursos**, a lixeira de cada card apaga de vez o edital, os PDFs (edital e materiais), o cronograma, as tarefas, as tentativas, os simulados e os treinos de discursiva daquele concurso (`delete_notice`). Anotações, caderno de erros, flashcards e marcações de lei são por questão ou artigo: saem só se foram usados apenas nele. Fica o que também aparece em outro concurso, em questões livres ou em simulados personalizados, além dos catálogos compartilhados (apostilas, mnemônicos, questões, leis) e do registro de custo da IA. `scripts/e2e-delete-notice.ts` testa os buckets com login real.
 
 ## Prática além do cronograma
 
@@ -130,6 +138,7 @@ Página **Questões**: resolver questões livres com filtros (matéria, assunto,
 | E4.4 | Apostila da IA (completa ou revisão curta) baseada só no edital e na lei seca, com fontes e reaproveitamento | feito |
 | E4.5 | Biblioteca pessoal: PDFs privados, leitor PDF.js e mapeamento de páginas para as sessões | feito |
 | depois | Vídeos do YouTube integrados (precisa de chave da YouTube Data API) | |
-| E5 | Roteiros e materiais em segundo plano, desempenho, reforço e discursivas | |
+| E5 | Desempenho, reforço e discursivas | feito |
+| depois | Roteiros e materiais em segundo plano | |
 
 O app estático original está na tag `v0-legado`.

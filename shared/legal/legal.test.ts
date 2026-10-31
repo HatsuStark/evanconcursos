@@ -54,6 +54,10 @@ describe('leis de um edital', () => {
 
 describe('referências a leis', () => {
   const r = (t: string, subject = '') => findLawRefs(t, subject).map((x) => `${x.law}:${x.ranges.map((y) => y.from === y.to ? `${y.from}${y.fromSuffix ?? ''}` : `${y.from}-${y.to}`).join(',')}`);
+  it('separa artigos citados antes de cada lei', () => {
+    expect(r('Veja o art. 121 do CP e o art. 312 do CP.')).toEqual(['CP:121,312']);
+    expect(r('O art. 121 do CP e o art. 5º da CF.')).toEqual(['CP:121', 'CF:5']);
+  });
   it('títulos de sessão gerados pela IA', () => {
     expect(r('Funcionário Público e Peculato: conceito e modalidades (CP, arts. 327 e 312 a 315)')).toEqual(['CP:327,312-315']);
     expect(r('Inquérito policial: natureza, prazos e arquivamento (CPP, arts. 4º a 23)')).toEqual(['CPP:4-23']);

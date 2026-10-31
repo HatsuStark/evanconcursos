@@ -39,10 +39,13 @@ export function findLawRefs(text: string, subject = ''): LawRef[] {
   kept.forEach((m, i) => {
     const next = kept[i + 1]?.start ?? text.length;
     const after = text.slice(m.end, next), before = text.slice(Math.max(0, (kept[i - 1]?.end ?? 0)), m.start);
-    const a = new RegExp(ART_LIST, 'i').exec(after);
     // "art. 5º da CF": artigos imediatamente antes da menção.
-    const b = !a ? new RegExp(`${ART_LIST}\\s*(?:da|do|de)\\s*$`, 'i').exec(before) : null;
-    add(m.law, a ? parseRanges(a[1]!) : b ? parseRanges(b[1]!) : []);
+    const tail = new RegExp(`${ART_LIST}\\s*(?:da|do|de)\\s*$`, 'i');
+    let a = new RegExp(ART_LIST, 'i').exec(after);
+    // "art. 121 do CP e art. 5º da CF": o 5º logo depois do CP pertence à CF.
+    if (a && i + 1 < kept.length && tail.exec(after)?.index === a.index) a = null;
+    const b = tail.exec(before);
+    add(m.law, [...(b ? parseRanges(b[1]!) : []), ...(a ? parseRanges(a[1]!) : [])]);
   });
   // Sem lei citada: artigos soltos ("arts. 4º a 23") vão para a lei principal da matéria.
   if (!found.size) {

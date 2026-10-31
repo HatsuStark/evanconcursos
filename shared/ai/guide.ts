@@ -48,12 +48,10 @@ Regras obrigatórias:
 // Fontes legais da sessão: as leis citadas (com artigos) e os trechos carregados do banco.
 export const sourceRef = (lawKey: string, label: string) => `${lawByKey(lawKey)?.short ?? lawKey}, art. ${label}`;
 
-// Confere as citações: refs da seção "legislacao" precisam ser fontes fornecidas; artigos citados no texto
-// (ex.: "art. 312 do CP") precisam cair nos intervalos fornecidos. Devolve as citações não verificáveis.
-export function verifyGuide(g: Guide, provided: { lawKey: string; label: string; num: number; suffix: string }[], subject = '') {
-  const refs = new Set(provided.map((p) => sourceRef(p.lawKey, p.label).toLowerCase()));
-  const legislacao = g.legislacao.filter((l) => refs.has(l.ref.trim().toLowerCase()));
-  const text = [g.introducao, ...g.secoes.flatMap((s) => [s.texto, ...s.exemplos]), ...g.legislacao.map((l) => l.comentario), ...g.pontos_banca, ...g.pegadinhas, ...g.resumo, ...g.perguntas.flatMap((q) => [q.pergunta, q.resposta])].join('\n');
+export interface ProvidedArticle { lawKey: string; label: string; num: number; suffix: string }
+
+// Artigos citados no texto (ex.: "art. 312 do CP") que não caem nas fontes fornecidas.
+export function unverifiedLawRefs(text: string, provided: ProvidedArticle[], subject = '') {
   const unverified: string[] = [];
   for (const r of findLawRefs(text, subject) as LawRef[]) {
     for (const range of r.ranges) {
@@ -63,7 +61,16 @@ export function verifyGuide(g: Guide, provided: { lawKey: string; label: string;
       }
     }
   }
-  return { guide: { ...g, legislacao }, unverified: [...new Set(unverified)], droppedRefs: g.legislacao.length - legislacao.length };
+  return [...new Set(unverified)];
+}
+
+// Confere as citações: refs da seção "legislacao" precisam ser fontes fornecidas; artigos citados no texto
+// precisam cair nos intervalos fornecidos. Devolve as citações não verificáveis.
+export function verifyGuide(g: Guide, provided: ProvidedArticle[], subject = '') {
+  const refs = new Set(provided.map((p) => sourceRef(p.lawKey, p.label).toLowerCase()));
+  const legislacao = g.legislacao.filter((l) => refs.has(l.ref.trim().toLowerCase()));
+  const text = [g.introducao, ...g.secoes.flatMap((s) => [s.texto, ...s.exemplos]), ...g.legislacao.map((l) => l.comentario), ...g.pontos_banca, ...g.pegadinhas, ...g.resumo, ...g.perguntas.flatMap((q) => [q.pergunta, q.resposta])].join('\n');
+  return { guide: { ...g, legislacao }, unverified: unverifiedLawRefs(text, provided, subject), droppedRefs: g.legislacao.length - legislacao.length };
 }
 
 // Chave de reaproveitamento: mesmo tema, mesmas fontes, mesma profundidade e versão do prompt.

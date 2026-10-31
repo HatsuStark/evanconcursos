@@ -1,7 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { Shell } from './components/Shell.tsx';
 import { useAuth } from './lib/auth.tsx';
 import { AuthPage } from './pages/Auth.tsx';
+import { DiscursivePage } from './pages/Discursive.tsx';
 import { HomePage } from './pages/Home.tsx';
 import { MaterialsPage } from './pages/Materials.tsx';
 import { NewNoticePage } from './pages/NewNotice.tsx';
@@ -13,14 +13,6 @@ import { ReadingPage } from './pages/Reading.tsx';
 import { ReviewPage } from './pages/Review.tsx';
 import { SchedulePage } from './pages/Schedule.tsx';
 import { StudyPage } from './pages/Study.tsx';
-
-function Soon({ title, stage }: { title: string; stage: string }) {
-  return (
-    <Shell title={title}>
-      <div className="glass card"><span className="badge orange">{stage}</span><p className="muted" style={{ marginBottom: 0 }}>Esta área chega numa das próximas etapas.</p></div>
-    </Shell>
-  );
-}
 
 export function App() {
   const { session, loading } = useAuth();
@@ -40,7 +32,7 @@ export function App() {
       <Route path="/questoes" element={<QuestionsHubPage />} />
       <Route path="/simulados/:id" element={<SimuladoPage />} />
       <Route path="/desempenho" element={<Navigate to="/questoes?aba=desempenho" replace />} />
-      <Route path="/discursivas" element={<Soon title="Discursivas" stage="E5" />} />
+      <Route path="/discursivas" element={<DiscursivePage />} />
       <Route path="*" element={<HomePage />} />
     </Routes>
   );

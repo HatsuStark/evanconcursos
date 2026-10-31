@@ -470,3 +470,20 @@ a.task-title:hover { color: var(--cyan); }
 .sim-score { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .sim-block { padding: 14px 18px; }
 .review-today { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 18px; border-color: rgba(255, 138, 76, .35); }
+
+/* Discursivas */
+.disc-start { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.disc-start .field { flex: 1; min-width: 220px; max-width: 360px; }
+.disc-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.disc-stats .card { display: grid; gap: 4px; padding: 14px 16px; }
+.disc-stats strong { font-size: 22px; }
+.disc-text { white-space: pre-wrap; line-height: 1.6; overflow-wrap: anywhere; }
+.disc-support { margin: 12px 0 8px; padding: 2px 0 2px 12px; border-left: 2px solid var(--line-2); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.disc-editor { min-height: 420px; line-height: 1.7; }
+.disc-bar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+.disc-score { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; }
+.disc-score strong { font-size: 44px; line-height: 1; }
+.disc-score small { font-size: 18px; color: var(--muted); font-weight: 500; }
+.disc-point { display: flex; gap: 10px; padding: 14px 16px; }
+.disc-versions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 16px; }
+details.card summary { cursor: pointer; font-weight: 600; }
