@@ -39,8 +39,8 @@ async function fetchGuide(taskId: string, depth: string, cancelled: () => boolea
 const paragraphs = (t: string) => t.split(/\n\s*\n|\n/).map((p) => p.trim()).filter(Boolean);
 
 // Apostila da sessão: completa ou revisão curta, gerada pela IA a partir do edital e da lei seca oficial.
-export function GuidePanel({ taskId, hasSession }: { taskId: string; hasSession: boolean }) {
-  const [depth, setDepth] = useState<'completa' | 'revisao'>('completa');
+export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { taskId: string; hasSession: boolean; initialDepth?: 'completa' | 'revisao' }) {
+  const [depth, setDepth] = useState(initialDepth);
   const [guide, setGuide] = useState<GuideRow | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');

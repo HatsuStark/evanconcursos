@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Check, FileText, ListChecks, Maximize2, Minimize2, Pause, Play, Scale, Video } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { evaluate } from '../../../shared/domain/adaptive.ts';
 import { videoQuery } from '../../../shared/domain/videos.ts';
 import { GuidePanel } from '../components/GuidePanel.tsx';
@@ -10,6 +10,7 @@ import { QuestionsPanel } from '../components/QuestionsPanel.tsx';
 import { SessionMaterials } from '../components/SessionMaterials.tsx';
 import { SimuladoStarter } from '../components/SimuladoStarter.tsx';
 import { Shell } from '../components/Shell.tsx';
+import { TheoryReviewCard } from '../components/TheoryReviewCard.tsx';
 import { VideosPanel } from '../components/VideosPanel.tsx';
 import { fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
 import { sessionLawRefs } from '../lib/legal.ts';
@@ -61,6 +62,7 @@ export function StudyPage() {
 function StudyView({ d }: { d: StudyData }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const timer = useTimer(d.task.id, d.task.time_spent_sec);
   const lawRefs = sessionLawRefs(d.task.title, d.topics, d.subject?.name ?? '');
   const hasSession = !!d.task.session_id;
@@ -168,6 +170,7 @@ function StudyView({ d }: { d: StudyData }) {
 
       {d.task.kind === 'simulado' ? <SimuladoStarter planId={d.task.plan_id} taskId={d.task.id} /> : (
         <>
+          <TheoryReviewCard taskId={d.task.id} />
           {!focus && tabBar}
           {videosOpened && (
             <div hidden={tab !== 'videos'}>
@@ -177,7 +180,7 @@ function StudyView({ d }: { d: StudyData }) {
           {tab === 'videos' ? null
             : tab === 'questoes' ? <QuestionsPanel source={{ kind: 'task', taskId: d.task.id, planId: d.task.plan_id }} goal={d.task.goal_questions} answered={mine.length} />
             : tab === 'lei' ? <LawReader refs={lawRefs} />
-            : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={hasSession} />
+            : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={hasSession} initialDepth={params.has('revisao') ? 'revisao' : 'completa'} />
             : <SessionMaterials sessionId={d.task.session_id} />}
         </>
       )}

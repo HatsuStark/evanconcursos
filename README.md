@@ -108,6 +108,18 @@ Começar o cronômetro de uma sessão (ou o botão **Modo foco**) esconde barra 
 
 Cada questão tem uma discussão entre estudantes, liberada só depois de responder (no simulado, depois da entrega); a regra fica no banco, em funções `comment_*` e `comments_list`, sem acesso direto às tabelas. Só texto, com apelido (o e-mail nunca aparece), votos de "útil" ordenando a lista e limite de 5 comentários por minuto. Três denúncias de pessoas diferentes escondem o comentário. Não há painel: para revisar, consulte `question_comments where hidden` e, se for o caso, faça `update ... set hidden = false` e apague as linhas de `comment_reports` (ou apague o comentário). **Antes de abrir o app ao público:** publicar termos de uso com regras de comentários e canal de denúncia, e confirmar nos termos da Quest API que a discussão pública é permitida.
 
+## Edital verticalizado
+
+A página **Edital** lista todos os tópicos do edital por matéria: situação (não estudado, em andamento, estudado, fora do cronograma), questões, acerto, última vez visto e atalho para a próxima tarefa do tópico. Filtros: não estudados, pontos fracos e estudados sem questões. Um tópico é **ponto fraco** com pelo menos 5 questões e acerto abaixo de 75%, o mesmo limite do reforço. **Onde focar** ordena os pontos fracos pelo erro e pelo peso da matéria. Sem IA nem custo: a conta está em `shared/domain/verticalized.ts`, e o banco só soma as questões por sessão (`session_attempt_stats`).
+
+A tentativa aponta para a sessão, não para o tópico. Por isso, uma sessão com vários tópicos conta suas questões para todos eles, sem repetir nos totais da matéria. Simulados, revisão de erros e questões livres não têm sessão e ficam fora: continuam na aba Desempenho.
+
+## Revisão de teoria
+
+Concluir uma sessão de teoria agenda o tema para voltar em **1, 7 e 30 dias**, os mesmos intervalos do caderno de erros. Os temas vencidos aparecem em **Hoje**, do mais atrasado para o mais recente, e abrem a sessão com a revisão curta da apostila. O estudante tenta lembrar, faz algumas questões, se quiser, e responde: **lembrei bem** avança (depois da 3ª, o tema encerra), **lembrei em parte** repete o intervalo e **esqueci** volta para 1 dia. O resultado é a avaliação do próprio estudante; o app não o confere com as questões.
+
+Perto da prova, a revisão é antecipada para a véspera, e nada novo é agendado a partir da véspera. Desfazer a conclusão apaga a revisão ainda não feita. As regras ficam no banco (`theory_reviews`, `theory_review_answer`), com datas no fuso de Brasília. A única despesa de IA é gerar a revisão curta, uma vez por tema, com reaproveitamento.
+
 ## Apostilas em segundo plano
 
 A apostila é gerada no servidor, sem depender da tela: dá para sair e voltar, e a tela consulta a cada 4 s até ficar pronta. Uma trava em `ai_jobs` (índice único, com liberação depois de 3 min) impede pagar duas vezes pela mesma apostila, mesmo com estudantes diferentes.
@@ -154,5 +166,8 @@ Página **Questões**: resolver questões livres com filtros (matéria, assunto,
 | E4.6 | Vídeos do YouTube no modo estudo (busca na YouTube Data API, sem IA) | feito |
 | E5 | Desempenho, reforço e discursivas | feito |
 | E5.1 | Apostilas em segundo plano e preparadas com antecedência (o mapeamento de PDFs já rodava assim) | feito |
+| E6.1 | Edital verticalizado: situação e desempenho por tópico | feito |
+| E6.2 | Revisão de teoria: tema estudado volta em 1, 7 e 30 dias | feito |
+| E6.3 | Metas semanais e constância na tela Hoje | |
 
 O app estático original está na tag `v0-legado`.

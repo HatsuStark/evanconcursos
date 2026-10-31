@@ -10,8 +10,10 @@ import { useDiscursiveRules, useLastDiscursive } from '../lib/discursive.ts';
 import { useNotices } from '../lib/notices.ts';
 import { useDueCounts } from '../lib/practice.ts';
 import { prepareGuides, today, useActivePlan } from '../lib/plans.ts';
+import { useDueTheoryReviews } from '../lib/theoryReviews.ts';
 
 const DISCURSIVE_NUDGE_DAYS = 7;
+const THEORY_REVIEWS_SHOWN = 4;
 
 // Tela inicial: o estudo do dia. Sem plano ainda, conduz o primeiro acesso até o cronograma.
 export function HomePage() {
@@ -22,6 +24,7 @@ export function HomePage() {
   const discursive = useDiscursiveRules(active.data?.notice.id);
   const lastDiscursive = useLastDiscursive(active.data?.notice.id);
   const planId = active.data?.plan.id;
+  const theoryReviews = useDueTheoryReviews(planId);
   useEffect(() => { if (planId) prepareGuides(planId); }, [planId]);
   const name = session?.user.email?.split('@')[0] ?? '';
   const subtitle = name ? `Olá, ${name}. Pronto para estudar?` : 'Pronto para estudar?';
@@ -99,6 +102,27 @@ export function HomePage() {
           <div style={{ flex: 1 }}><strong>Revisar hoje</strong><div className="muted small">{due.data!.errors} questão(ões) do caderno de erros · {due.data!.cards} flashcard(s)</div></div>
           {!!due.data!.errors && <Link className="btn sm" to="/questoes?aba=revisar">Revisar erros</Link>}
           {!!due.data!.cards && <Link className="btn ghost sm" to="/questoes?aba=flashcards">Flashcards</Link>}
+        </div>
+      )}
+      {!!theoryReviews.data?.length && (
+        <div className="glass card" style={{ marginTop: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <RotateCcw size={20} style={{ color: 'var(--cyan)' }} />
+            <strong>Revisão de teoria</strong>
+            <span className="muted small">{theoryReviews.data.length} {theoryReviews.data.length === 1 ? 'tema' : 'temas'} para hoje</span>
+          </div>
+          <div className="grid" style={{ gap: 8 }}>
+            {theoryReviews.data.slice(0, THEORY_REVIEWS_SHOWN).map((r) => (
+              <div key={r.id} className="material-row">
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div>{r.task.title}</div>
+                  <div className="muted small">{subjects.find((s) => s.id === r.task.subject_id)?.name ?? ''} · revisão {r.stage} de 3{r.due_on < today() ? ' · atrasada' : ''}</div>
+                </div>
+                <Link className="btn ghost sm" to={`/estudo/${r.task_id}?revisao=1`}>Revisar</Link>
+              </div>
+            ))}
+          </div>
+          {theoryReviews.data.length > THEORY_REVIEWS_SHOWN && <p className="faint small" style={{ margin: '10px 0 0' }}>Os próximos aparecem conforme você revisa, começando pelos mais atrasados.</p>}
         </div>
       )}
       {discursive.data?.rules && (lastDiscursive.data === null || (lastDiscursive.data ?? 0) >= DISCURSIVE_NUDGE_DAYS) && !lastDiscursive.isLoading && (
