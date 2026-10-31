@@ -35,7 +35,7 @@ reset role;
 insert into public.mnemonics (concept, concept_key, mnemonic, model, prompt_version) values ('Requisitos do ato', 'requisitos do ato', 'COFIFOMOB', 'm', 'v');
 select pg_temp.as_user('00000000-0000-4000-8000-0000000000b3');
 select is((select count(*) from public.question_notes), 0::bigint, 'B não vê anotações de A');
-select is((select count(*) from public.mnemonics), 1::bigint, 'mnemônico é compartilhado (leitura)');
+select is((select count(*) from public.mnemonics where concept_key = 'requisitos do ato'), 1::bigint, 'mnemônico é compartilhado (leitura)');
 select throws_ok($$insert into public.mnemonics (concept, concept_key, mnemonic, model, prompt_version) values ('x', 'x', 'x', 'm', 'v')$$, '42501', null, 'usuário não grava mnemônico');
 
 select * from finish();

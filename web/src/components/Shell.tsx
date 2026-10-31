@@ -1,4 +1,4 @@
-import { CalendarDays, FileText, LayoutDashboard, Library, ListChecks, LogOut, PenLine } from 'lucide-react';
+import { CalendarDays, ClipboardList, FileText, LayoutDashboard, Library, ListChecks, LogOut, PenLine } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { supabase } from '../lib/supabase.ts';
@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase.ts';
 const NAV = [
   { to: '/', label: 'Hoje', icon: LayoutDashboard, end: true },
   { to: '/cronograma', label: 'Cronograma', icon: CalendarDays },
+  { to: '/edital', label: 'Edital', icon: ClipboardList },
   { to: '/questoes', label: 'Questões', icon: ListChecks },
   { to: '/materiais', label: 'Meus materiais', icon: Library },
   { to: '/discursivas', label: 'Discursivas', icon: PenLine },
