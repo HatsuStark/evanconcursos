@@ -137,6 +137,10 @@ Concluir uma sessão de teoria agenda o tema para voltar em **1, 7 e 30 dias**, 
 
 Perto da prova, a revisão é antecipada para a véspera, e nada novo é agendado a partir da véspera. Desfazer a conclusão apaga a revisão ainda não feita. As regras ficam no banco (`theory_reviews`, `theory_review_answer`), com datas no fuso de Brasília. A única despesa de IA é gerar a revisão curta, uma vez por tema, com reaproveitamento.
 
+## Adiantar o estudo
+
+Em **Hoje**, **Ver próximas tarefas** lista as tarefas pendentes dos próximos dias, e clicar em uma matéria de **Conteúdo estudado** abre todas as aulas dela. Qualquer uma pode ser estudada antes da data. A tarefa adiantada continua na data original, já marcada como feita, e as demais não mudam de dia; a revisão de teoria conta a partir do dia da conclusão.
+
 ## Apostilas em segundo plano
 
 A apostila é gerada no servidor, sem depender da tela: dá para sair e voltar, e a tela consulta a cada 4 s até ficar pronta. Uma trava em `ai_jobs` (índice único, com liberação depois de 3 min) impede pagar duas vezes pela mesma apostila, mesmo com estudantes diferentes.

@@ -1,9 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { Check, Clock, Target } from 'lucide-react';
+import { CalendarDays, Check, Clock, Target } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { KIND_LABEL, setTaskDone, type SubjectRow, type TaskRow } from '../lib/plans.ts';
-import { subjectColor, SubjectIcon } from './ui.tsx';
+import { fmtDate, subjectColor, SubjectIcon } from './ui.tsx';
 
 export const KIND_COLOR: Record<string, string> = {
   simulado: 'var(--magenta)', weekly_review: 'var(--lime)', consolidation: 'var(--orange)', final_review: 'var(--orange)', eve: 'var(--cyan)', exam: '#fff',
@@ -15,7 +15,8 @@ export const taskColor = (t: TaskRow, subjects: SubjectRow[]) => {
 const fmtMinutes = (m: number) => (m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? String(m % 60).padStart(2, '0') : ''}` : `${m} min`);
 
 // Tarefa do cronograma: matéria, título, tempo previsto, meta de questões e conclusão.
-export function TaskCard({ task, subjects }: { task: TaskRow; subjects: SubjectRow[] }) {
+// showDate: para listas com tarefas de vários dias.
+export function TaskCard({ task, subjects, showDate }: { task: TaskRow; subjects: SubjectRow[]; showDate?: boolean }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
   const idx = subjects.findIndex((s) => s.id === task.subject_id), subject = subjects[idx];
@@ -36,7 +37,8 @@ export function TaskCard({ task, subjects }: { task: TaskRow; subjects: SubjectR
         </div>
         <Link className="task-title" to={`/estudo/${task.id}`}>{task.title}</Link>
         <div className="task-meta">
-          {task.minutes > 0 && <span className="chip"><Clock /> {fmtMinutes(task.minutes)}</span>}
+          {showDate && <span className="chip"><CalendarDays /> {fmtDate(task.date)}</span>}
+          {task.minutes > 0 &&<span className="chip"><Clock /> {fmtMinutes(task.minutes)}</span>}
           {task.goal_questions > 0 && <span className="chip"><Target /> {task.goal_questions} questões</span>}
         </div>
       </div>

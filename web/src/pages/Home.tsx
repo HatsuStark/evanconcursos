@@ -1,5 +1,5 @@
-import { CalendarClock, CheckCircle2, FileUp, Layers, PenLine, RotateCcw, Sparkles } from 'lucide-react';
-import { useEffect } from 'react';
+import { CalendarClock, Check, CheckCircle2, ChevronDown, ChevronUp, Circle, FileUp, Layers, PenLine, RotateCcw, Sparkles } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ReplanBanner } from '../components/ReplanBanner.tsx';
 import { Shell } from '../components/Shell.tsx';
@@ -14,6 +14,7 @@ import { useDueTheoryReviews } from '../lib/theoryReviews.ts';
 
 const DISCURSIVE_NUDGE_DAYS = 7;
 const THEORY_REVIEWS_SHOWN = 4;
+const NEXT_TASKS_STEP = 5;
 
 // Tela inicial: o estudo do dia. Sem plano ainda, conduz o primeiro acesso até o cronograma.
 export function HomePage() {
@@ -26,6 +27,7 @@ export function HomePage() {
   const planId = active.data?.plan.id;
   const theoryReviews = useDueTheoryReviews(planId);
   useEffect(() => { if (planId) prepareGuides(planId); }, [planId]);
+  const [nextShown, setNextShown] = useState(0);
   const name = session?.user.email?.split('@')[0] ?? '';
   const subtitle = name ? `Olá, ${name}. Pronto para estudar?` : 'Pronto para estudar?';
   if (notices.isLoading || active.isLoading) return <Shell title="Hoje" subtitle={subtitle}><div className="spinner" /></Shell>;
@@ -53,6 +55,7 @@ export function HomePage() {
   const t0 = today(), todays = tasks.filter((t) => t.date === t0), upcoming = tasks.find((t) => t.date > t0 && !t.done_at);
   const days = daysUntil(notice.exam_date);
   const theory = tasks.filter((t) => t.kind === 'theory');
+  const nextTasks = tasks.filter((t) => t.date > t0 && !t.done_at && t.kind !== 'exam');
 
   const rail = (
     <>
@@ -67,15 +70,34 @@ export function HomePage() {
         <h3>Conteúdo estudado</h3>
         <div className="grid" style={{ gap: 12 }}>
           {subjects.map((s, i) => {
-            const mine = theory.filter((t) => t.subject_id === s.id), pct = mine.length ? (mine.filter((t) => t.done_at).length / mine.length) * 100 : 0;
+            const mine = theory.filter((t) => t.subject_id === s.id), doneCount = mine.filter((t) => t.done_at).length, pct = mine.length ? (doneCount / mine.length) * 100 : 0;
             return (
-              <div key={s.id} className="glass" style={{ padding: 12, display: 'flex', gap: 12, alignItems: 'center' }}>
-                <SubjectIcon name={s.name} index={i} style={{ width: 36, height: 36 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</div>
-                  <div className="bar" style={{ marginTop: 6 }}><span style={{ width: `${Math.max(pct, 2)}%`, background: subjectColor(i), boxShadow: `0 0 10px ${subjectColor(i)}` }} /></div>
-                </div>
-              </div>
+              <details key={s.id} className="glass lesson-group" name="subject-lessons">
+                <summary>
+                  <SubjectIcon name={s.name} index={i} style={{ width: 36, height: 36 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</div>
+                    <div className="bar" style={{ marginTop: 6 }}><span style={{ width: `${Math.max(pct, 2)}%`, background: subjectColor(i), boxShadow: `0 0 10px ${subjectColor(i)}` }} /></div>
+                    <div className="muted small" style={{ marginTop: 6 }}>{doneCount} de {mine.length} aulas</div>
+                  </div>
+                  <ChevronDown size={16} className="lesson-chevron" />
+                </summary>
+                {mine.length ? (
+                  <ul className="lesson-list">
+                    {mine.map((t) => (
+                      <li key={t.id}>
+                        <Link className="lesson-row" to={`/estudo/${t.id}`}>
+                          {t.done_at ? <Check size={15} style={{ color: 'var(--lime)' }} aria-label="Concluída" /> : <Circle size={15} style={{ color: 'var(--faint)' }} aria-label="Não concluída" />}
+                          <span style={{ minWidth: 0 }}>
+                            <span className="lesson-title">{t.title}</span>
+                            <span className="faint small">{fmtDate(t.date)}</span>
+                          </span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p className="muted small" style={{ margin: 0, padding: '0 12px 12px' }}>Nenhuma aula desta matéria no cronograma.</p>}
+              </details>
             );
           })}
         </div>
@@ -138,6 +160,15 @@ export function HomePage() {
           <p style={{ margin: 0 }}>Hoje é dia livre no seu cronograma.</p>
           {upcoming && <p className="muted" style={{ margin: '8px 0 0' }}>Próxima tarefa: {fmtDate(upcoming.date)} · {upcoming.title}</p>}
         </div>
+      )}
+      {!!nextTasks.length && (
+        <>
+          <button className="btn ghost sm" style={{ marginTop: 14 }} aria-expanded={nextShown > 0} onClick={() => setNextShown(nextShown ? 0 : NEXT_TASKS_STEP)}>
+            {nextShown ? <><ChevronUp size={15} /> Ocultar próximas tarefas</> : <><ChevronDown size={15} /> Ver próximas tarefas</>}
+          </button>
+          {nextShown > 0 && <div className="grid" style={{ gap: 12, marginTop: 12 }}>{nextTasks.slice(0, nextShown).map((t) => <TaskCard key={t.id} task={t} subjects={subjects} showDate />)}</div>}
+          {nextShown > 0 && nextTasks.length > nextShown && <button className="btn ghost sm" style={{ marginTop: 12 }} onClick={() => setNextShown(nextShown + NEXT_TASKS_STEP)}>Ver mais</button>}
+        </>
       )}
     </Shell>
   );
