@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { findLawRefs, inRanges, type LawRef } from '../legal/refs.ts';
 import { lawByKey } from '../legal/registry.ts';
 
-export const GUIDE_PROMPT_VERSION = 'guide-v1';
+export const GUIDE_PROMPT_VERSION = 'guide-v2';
 export type GuideDepth = 'completa' | 'revisao';
 
 export const Guide = z.object({
@@ -14,6 +14,7 @@ export const Guide = z.object({
     titulo: z.string(),
     texto: z.string().describe('Explicação didática em parágrafos separados por linha em branco.'),
     exemplos: z.array(z.string()).describe('Exemplos práticos curtos.'),
+    como_banca_cobra: z.string().describe('Como a banca cobra o assunto desta seção, pelo que se vê nas questões fornecidas, em até 2 frases. Vazio se nenhuma questão fornecida tratar dele.'),
   })),
   legislacao: z.array(z.object({ ref: z.string().describe('Exatamente como no colchete do trecho fornecido, ex.: "CP, art. 312".'), comentario: z.string() })),
   pontos_banca: z.array(z.string()).describe('O que a banca mais cobra neste tema.'),
@@ -27,14 +28,37 @@ export const guideJsonSchema = () => z.toJSONSchema(Guide, { target: 'draft-7' }
 
 export interface GuideSource { ref: string; text: string }
 
-export function guidePrompt(p: { depth: GuideDepth; banca: string; cargo: string; subject: string; title: string; topics: string[]; law: GuideSource[] }) {
-  const full = p.depth === 'completa';
+// ---------- perfil da banca: questões reais que embasam "como a banca cobra" ----------
+export const BOARD_SAMPLE_MAX = 8;
+const BOARD_TEXT_MAX = 500, BOARD_OPTION_MAX = 140;
+export interface BoardQuestion { assunto: string; ano?: number | null; enunciado: string; alternativas: string[] }
+
+// Amostra variada: uma questão de cada assunto por vez, para o perfil não sair de um assunto só.
+export function boardSample(questions: BoardQuestion[], max = BOARD_SAMPLE_MAX) {
+  const groups = new Map<string, BoardQuestion[]>();
+  for (const q of questions) groups.set(q.assunto, [...(groups.get(q.assunto) ?? []), q]);
+  const out: BoardQuestion[] = [];
+  for (let round = 0; out.length < Math.min(max, questions.length); round++) {
+    for (const list of groups.values()) if (list[round] && out.length < max) out.push(list[round]!);
+  }
+  return out;
+}
+
+// Sem questão real não há perfil: a IA não pode descrever a banca de memória. O número de questões fica na apostila.
+export function applyBoardEvidence(g: Guide, banca: string, questions: number) {
+  const secoes = questions ? g.secoes : g.secoes.map((s) => ({ ...s, como_banca_cobra: '' }));
+  return { ...g, secoes, perfil_banca: questions ? { banca, questoes: questions } : null };
+}
+
+export function guidePrompt(p: { depth: GuideDepth; banca: string; cargo: string; subject: string; title: string; topics: string[]; law: GuideSource[]; boardQuestions?: BoardQuestion[] }) {
+  const full = p.depth === 'completa', board = p.boardQuestions ?? [];
   return `Você é professor de cursinho para concursos públicos brasileiros. Escreva uma apostila ${full ? 'completa, para quem está começando' : 'de revisão curta, para quem já estudou o tema'}.
 Concurso: ${p.cargo || 'não informado'}${p.banca ? `, banca ${p.banca}` : ''}.
 Matéria: ${p.subject}
 Tema da sessão: ${p.title}
 Conteúdo do edital coberto: ${p.topics.join(' | ') || '—'}
 ${p.law.length ? `Trechos oficiais da lei (lei seca, única fonte legal permitida):\n${p.law.map((l) => `[${l.ref}] ${l.text}`).join('\n\n')}` : 'Nenhum trecho de lei foi fornecido para este tema.'}
+${board.length ? `Questões reais da banca ${p.banca} sobre o tema (amostra, não o total):\n${board.map((q, i) => `Q${i + 1} (${[q.assunto, q.ano].filter(Boolean).join(', ')}): ${q.enunciado.slice(0, BOARD_TEXT_MAX)}${q.alternativas.length ? `\n${q.alternativas.map((a) => a.slice(0, BOARD_OPTION_MAX)).join(' | ')}` : ''}`).join('\n\n')}` : 'Nenhuma questão real da banca foi fornecida.'}
 Regras obrigatórias:
 - Cite artigos SOMENTE dos trechos fornecidos, no formato do colchete (ex.: "CP, art. 312"). Se não houver trecho, não cite números de artigos.
 - Não cite jurisprudência, súmulas, autores ou posições doutrinárias. Não invente leis, prazos ou números.
@@ -42,6 +66,7 @@ Regras obrigatórias:
 - ${full ? 'secoes: 3 a 6 seções, explicação didática com exemplos; perguntas: 5 a 8.' : 'secoes: até 3 seções curtas; perguntas: 5; foco em resumo e pontos de prova.'}
 - legislacao: comente os artigos fornecidos mais importantes para a prova (ref exatamente como no colchete).
 - pontos_banca e pegadinhas: o que costuma cair e as confusões comuns${p.banca ? ` da ${p.banca}` : ''}.
+- ${board.length ? 'secoes[].como_banca_cobra: diga como as questões fornecidas abordam o assunto da seção (letra da lei, caso prático, conceito, exceção, tipo de distrator). Só o que se observa nelas: sem percentuais, sem "sempre" ou "nunca", sem copiar enunciados. Deixe vazio na seção que nenhuma questão trata. As questões são só amostra de estilo, nunca fonte do conteúdo.' : 'secoes[].como_banca_cobra: deixe vazio em todas as seções.'}
 - Linguagem clara, frases curtas, sem markdown.`;
 }
 
@@ -69,7 +94,7 @@ export function unverifiedLawRefs(text: string, provided: ProvidedArticle[], sub
 export function verifyGuide(g: Guide, provided: ProvidedArticle[], subject = '') {
   const refs = new Set(provided.map((p) => sourceRef(p.lawKey, p.label).toLowerCase()));
   const legislacao = g.legislacao.filter((l) => refs.has(l.ref.trim().toLowerCase()));
-  const text = [g.introducao, ...g.secoes.flatMap((s) => [s.texto, ...s.exemplos]), ...g.legislacao.map((l) => l.comentario), ...g.pontos_banca, ...g.pegadinhas, ...g.resumo, ...g.perguntas.flatMap((q) => [q.pergunta, q.resposta])].join('\n');
+  const text = [g.introducao, ...g.secoes.flatMap((s) => [s.texto, ...s.exemplos, s.como_banca_cobra]), ...g.legislacao.map((l) => l.comentario), ...g.pontos_banca, ...g.pegadinhas, ...g.resumo, ...g.perguntas.flatMap((q) => [q.pergunta, q.resposta])].join('\n');
   return { guide: { ...g, legislacao }, unverified: unverifiedLawRefs(text, provided, subject), droppedRefs: g.legislacao.length - legislacao.length };
 }
 

@@ -6,16 +6,19 @@
 // Reaproveita apostilas idênticas (mesmo tema, fontes e profundidade) entre sessões e estudantes.
 // Não há "gerar de novo" pelo estudante (economia de créditos): uma apostila existente é sempre reaproveitada.
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { Guide, GUIDE_PROMPT_VERSION, guideCacheKey, guideJsonSchema, guidePrompt, lawKeys, pickSimilarGuide, topicKeys, unlistedLaws, verifyGuide, type GuideDepth } from '../../../shared/ai/guide.ts';
+import { applyBoardEvidence, BOARD_SAMPLE_MAX, boardSample, Guide, GUIDE_PROMPT_VERSION, guideCacheKey, guideJsonSchema, guidePrompt, lawKeys, pickSimilarGuide, topicKeys, unlistedLaws, verifyGuide, type BoardQuestion, type GuideDepth } from '../../../shared/ai/guide.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
+import { QuestClient } from '../../../shared/qbank/client.ts';
+import { QMAP_PROMPT_VERSION } from '../../../shared/qbank/map.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { loadLawSources } from '../_shared/law.ts';
+import { cacheQuestions, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, type PublicQuestion } from '../_shared/qbank.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
 const STUCK_MS = 3 * 60 * 1000; // geração interrompida: libera nova tentativa
 // Por chamada, cabe no limite de tempo da função (150 s). Horizonte curto: a sessão quase certamente será estudada.
-const PREPARE_DAYS = 3, PREPARE_MAX = 3;
+const PREPARE_DAYS = 3, PREPARE_MAX = 2;
 const PREPARE_RETRY_MS = 24 * 3600 * 1000; // apostila que falhou não gasta de novo sem o estudante pedir
 
 type Auth = Exclude<Awaited<ReturnType<typeof requireUser>>, Response>;
@@ -25,7 +28,7 @@ type Admin = ReturnType<typeof adminClient>;
 async function resolve(auth: Auth, admin: Admin, task: { subject_id: string | null; session_id: string | null }, depth: GuideDepth) {
   if (!task.session_id || !task.subject_id) return null;
   const [{ data: session }, { data: subject }] = await Promise.all([
-    auth.client.from('study_sessions').select('title, topic_ids').eq('id', task.session_id).single(),
+    auth.client.from('study_sessions').select('title, keyword, topic_ids').eq('id', task.session_id).single(),
     auth.client.from('notice_subjects').select('name, notice_id').eq('id', task.subject_id).single(),
   ]);
   const { data: notice } = await auth.client.from('notices').select('board, role_name').eq('id', subject!.notice_id).single();
@@ -33,7 +36,10 @@ async function resolve(auth: Auth, admin: Admin, task: { subject_id: string | nu
   const topics = (tt ?? []).sort((a, b) => session!.topic_ids.indexOf(a.id) - session!.topic_ids.indexOf(b.id)).map((t) => t.text);
   const { articles, law } = await loadLawSources(admin, { title: session!.title, topics, subject: subject!.name });
   const input = { depth, banca: notice?.board ?? '', subject: subject!.name, title: session!.title, topics, law };
-  return { input, key: guideCacheKey(input), articles, noticeId: subject!.notice_id as string, cargo: (notice?.role_name ?? '') as string };
+  return {
+    input, key: guideCacheKey(input), articles, noticeId: subject!.notice_id as string, cargo: (notice?.role_name ?? '') as string,
+    sessionId: task.session_id, subjectId: task.subject_id, keyword: (session?.keyword ?? '') as string,
+  };
 }
 type GuideContext = NonNullable<Awaited<ReturnType<typeof resolve>>>;
 
@@ -65,14 +71,51 @@ async function claim(admin: Admin, ownerId: string, ctx: GuideContext, source: '
   return data!.id as string;
 }
 
-async function generate(admin: Admin, ownerId: string, jobId: string, { input, key, articles, cargo }: GuideContext) {
+// Questões reais da banca nos assuntos da sessão: primeiro as já guardadas; faltando, busca (6 créditos por questão, uma
+// vez, e elas ficam guardadas). Qualquer falha aqui só tira o perfil da banca: a apostila sai do mesmo jeito.
+async function boardEvidence(admin: Admin, ownerId: string, ctx: GuideContext): Promise<BoardQuestion[]> {
+  const { input } = ctx;
+  if (!input.banca) return [];
+  const quest = new QuestClient(Deno.env.get('QUEST_API_KEY') ?? '');
+  const usage: GeminiUsage = { inputTokens: 0, outputTokens: 0, thinkingTokens: 0 }, started = Date.now();
+  const deps = mapDeps(admin, quest, usage);
+  try {
+    const sm = await ensureSubjectMap(admin, quest, deps, ownerId, ctx.subjectId, async () => {
+      const { data: all } = await admin.from('notice_topics').select('text, position').eq('subject_id', ctx.subjectId).order('position');
+      return { name: input.subject, board: input.banca, topics: (all ?? []).map((t) => t.text) };
+    });
+    const filter = await ensureSessionMap(admin, deps, ownerId, ctx.sessionId, sm.materia, async () => ({ subject: input.subject, title: input.title, keyword: ctx.keyword, topics: input.topics }));
+    // Atualidades envelhece rápido, e sem banca identificada não há o que observar.
+    if (!sm.banca || !filter.materia || !filter.assuntos.length || /atualidade/i.test(filter.materia)) return [];
+    const { data: cached } = await admin.from('qbank_questions').select('payload').eq('materia', filter.materia).in('assunto', filter.assuntos).limit(300);
+    const found = (cached ?? []).map((c) => c.payload as PublicQuestion).filter((q) => normalizeText(q.prova?.banca ?? '') === normalizeText(sm.banca));
+    const perAssunto = Math.ceil(BOARD_SAMPLE_MAX / filter.assuntos.length);
+    for (const assunto of filter.assuntos) {
+      if (found.length >= BOARD_SAMPLE_MAX) break;
+      const missing = perAssunto - found.filter((q) => q.assunto === assunto).length;
+      if (missing <= 0) continue;
+      const r = await quest.questoes({ banca: sm.banca, materia: filter.materia, assunto }, Math.min(missing, BOARD_SAMPLE_MAX - found.length));
+      await cacheQuestions(admin, r.items);
+      for (const q of r.items.map(publicQuestion)) if (!found.some((f) => f.qid === q.qid)) found.push(q);
+    }
+    await logUsage(admin, { ownerId, operation: 'qbank_fetch', model: usage.inputTokens ? (Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash') : 'quest-api', promptVersion: QMAP_PROMPT_VERSION, usage: usage.inputTokens ? usage : null, latencyMs: Date.now() - started, status: 'ok', credits: quest.credits });
+    return boardSample(found.map((q) => ({ assunto: q.assunto, ano: q.prova?.ano, enunciado: plain(q.enunciado), alternativas: q.alternativas.map((a) => `${a.letra}) ${plain(a.texto)}`) })));
+  } catch (err) {
+    console.error('boardEvidence:', err);
+    return [];
+  }
+}
+
+async function generate(admin: Admin, ownerId: string, jobId: string, ctx: GuideContext) {
+  const { input, key, articles, cargo } = ctx;
   const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash', started = Date.now();
   let usage: GeminiUsage | null = null;
   try {
+    const boardQuestions = await boardEvidence(admin, ownerId, ctx);
     const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: Guide, jsonSchema: guideJsonSchema(), temperature: 0.3,
-      parts: [{ text: guidePrompt({ ...input, cargo }) }] });
+      parts: [{ text: guidePrompt({ ...input, cargo, boardQuestions }) }] });
     usage = r.usage;
-    const v = verifyGuide(r.data, articles, input.subject);
+    const v = verifyGuide(applyBoardEvidence(r.data, input.banca, boardQuestions.length), articles, input.subject);
     const { error } = await admin.from('study_guides').upsert({
       cache_key: key, depth: input.depth, subject_name: input.subject, subject_key: normalizeText(input.subject), banca: normalizeText(input.banca), topic_keys: topicKeys(input.topics),
       title: input.title, content: v.guide, sources: input.law.map((l) => l.ref), unlisted_sources: unlistedLaws([input.title, ...input.topics].join('\n')), unverified: v.unverified,

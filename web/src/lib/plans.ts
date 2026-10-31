@@ -91,8 +91,9 @@ export async function generatePlan(noticeId: string, inputs: PlanInputs, onProgr
   return data as string;
 }
 
+export type Pacing = 'agenda' | 'ciclo';
 export interface ActivePlan {
-  plan: { id: string; name: string; notice_id: string; active_version_id: string | null };
+  plan: { id: string; name: string; notice_id: string; active_version_id: string | null; pacing: Pacing };
   notice: { id: string; role_name: string; organization: string; board: string; exam_date: string | null };
   version: { id: string; number: number; reason: string; inputs: PlanInputs; strategy: Strategy; summary: { weeks?: number; hours?: number; perSubject?: { subjectId: string; name: string; days: number }[] }; created_at: string } | null;
   subjects: SubjectRow[];
@@ -103,7 +104,7 @@ export interface ActivePlan {
 export const useActivePlan = (noticeId?: string) => useQuery({
   queryKey: ['active-plan', noticeId ?? 'latest'],
   queryFn: async (): Promise<ActivePlan | null> => {
-    let q = supabase.from('study_plans').select('id, name, notice_id, active_version_id').eq('status', 'active').order('created_at', { ascending: false }).limit(1);
+    let q = supabase.from('study_plans').select('id, name, notice_id, active_version_id, pacing').eq('status', 'active').order('created_at', { ascending: false }).limit(1);
     if (noticeId) q = q.eq('notice_id', noticeId);
     const plan = (must(await q) as ActivePlan['plan'][])[0];
     if (!plan) return null;
@@ -127,6 +128,11 @@ export const usePlanAttempts = (planId: string | undefined, enabled: boolean) =>
 
 export async function applyReplan(planId: string, r: Replan) {
   const { error } = await supabase.rpc('replan_version', { p_plan: planId, p_data: r });
+  if (error) throw new Error(error.message);
+}
+
+export async function setPacing(planId: string, pacing: Pacing) {
+  const { error } = await supabase.from('study_plans').update({ pacing }).eq('id', planId);
   if (error) throw new Error(error.message);
 }
 

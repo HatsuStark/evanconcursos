@@ -83,8 +83,6 @@ function StudyView({ d }: { d: StudyData }) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [focus]);
-  // A largura do conteúdo muda sem a janela mudar: avisa quem mede a tela (visualizador de PDF).
-  useEffect(() => { window.dispatchEvent(new Event('resize')); }, [focus]);
   // Começar a estudar entra no modo foco (o simulado já tem tela própria).
   function start() {
     if (!timer.running) timer.toggle();
@@ -136,7 +134,7 @@ function StudyView({ d }: { d: StudyData }) {
   );
 
   return (
-    <Shell title={d.subject?.name ?? KIND_LABEL[d.task.kind] ?? 'Estudo'} subtitle={focus ? undefined : `${fmtDate(d.task.date)} · ${KIND_LABEL[d.task.kind] ?? ''}`} rail={focus ? undefined : rail} focus={focus}
+    <Shell title={d.subject?.name ?? KIND_LABEL[d.task.kind] ?? 'Estudo'} subtitle={focus ? undefined : d.pacing === 'ciclo' ? KIND_LABEL[d.task.kind] : `${fmtDate(d.task.date)} · ${KIND_LABEL[d.task.kind] ?? ''}`} rail={focus ? undefined : rail} focus={focus}
       actions={focus ? (
         <div className="focus-bar">
           {tabBar}

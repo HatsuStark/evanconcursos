@@ -1,4 +1,4 @@
-import { AlertTriangle, BookOpen, CheckCircle2, Headphones, Pause, Play, Printer, SkipBack, SkipForward, Sparkles, Square } from 'lucide-react';
+import { AlertTriangle, BookOpen, CheckCircle2, Headphones, Landmark, Pause, Play, Printer, SkipBack, SkipForward, Sparkles, Square } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { guideSpeech } from '../../../shared/ai/speech.ts';
 import { localVoiceSupported } from '../lib/piper.ts';
@@ -7,11 +7,12 @@ import { BROWSER_DEFAULT, FABER, RATES, useGuideVoice, voiceSupported } from '..
 
 interface GuideContent {
   titulo: string; introducao: string;
-  secoes: { titulo: string; texto: string; exemplos: string[] }[];
+  secoes: { titulo: string; texto: string; exemplos: string[]; como_banca_cobra?: string }[];
   legislacao: { ref: string; comentario: string }[];
   pontos_banca: string[]; pegadinhas: string[]; resumo: string[];
   perguntas: { pergunta: string; resposta: string }[];
   depende_legislacao: boolean;
+  perfil_banca?: { banca: string; questoes: number } | null;
 }
 interface GuideRow { content: GuideContent; sources: string[]; unlisted_sources: string[]; unverified: string[]; model: string; created_at: string; depth: string }
 
@@ -114,6 +115,12 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
               <h3>{s.titulo}</h3>
               {paragraphs(s.texto).map((p, j) => <p key={j}>{p}</p>)}
               {!!s.exemplos.length && <div className="guide-examples">{s.exemplos.map((e, j) => <p key={j}><b>Exemplo:</b> {e}</p>)}</div>}
+              {s.como_banca_cobra && g.perfil_banca && (
+                <aside className="guide-board">
+                  <strong><Landmark size={15} /> Como a {g.perfil_banca.banca} cobra</strong>
+                  <p>{s.como_banca_cobra}</p>
+                </aside>
+              )}
             </section>
           ))}
           {!!g.legislacao.length && (
@@ -138,6 +145,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
           <footer className="faint small">
             <Sparkles size={12} /> Gerada por IA ({guide!.model}) em {new Date(guide!.created_at).toLocaleDateString('pt-BR')} a partir do conteúdo do edital
             {guide!.sources.length ? ` e do texto oficial da lei (normas.leg.br): ${guide!.sources.length} artigo(s)` : ''}.
+            {g.perfil_banca ? ` "Como a ${g.perfil_banca.banca} cobra" vem de uma amostra de ${g.perfil_banca.questoes} ${g.perfil_banca.questoes === 1 ? 'questão real' : 'questões reais'}, não de toda a banca.` : ''}
             {g.depende_legislacao ? ' Depende de legislação que pode ser alterada: confira se houve mudança após essa data.' : ''} Não substitui a leitura da lei seca.
           </footer>
         </article>

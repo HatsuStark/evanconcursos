@@ -1,8 +1,43 @@
 import { describe, expect, it } from 'vitest';
-import { guideCacheKey, lawKeys, pickSimilarGuide, topicKeys } from './guide.ts';
+import { applyBoardEvidence, boardSample, guideCacheKey, guidePrompt, lawKeys, pickSimilarGuide, topicKeys, verifyGuide, type BoardQuestion, type Guide } from './guide.ts';
 
 const law = [{ ref: 'CP, art. 312', text: 'x'.repeat(100) }, { ref: 'CP, art. 313', text: 'y'.repeat(80) }];
 const base = { depth: 'completa' as const, subject: 'Direito Penal', banca: 'VUNESP', topics: ['Peculato', 'Concussão'], law };
+
+const question = (assunto: string, enunciado = 'Enunciado'): BoardQuestion => ({ assunto, ano: 2024, enunciado, alternativas: ['A) um', 'B) dois'] });
+const guide: Guide = {
+  titulo: 'T', introducao: 'I', secoes: [{ titulo: 'S', texto: 'X', exemplos: [], como_banca_cobra: 'Cobra a letra do art. 999 do CP.' }],
+  legislacao: [], pontos_banca: [], pegadinhas: [], resumo: [], perguntas: [], depende_legislacao: false,
+};
+const promptBase = { depth: 'completa' as const, banca: 'VUNESP', cargo: 'Escrevente', subject: 'Direito Penal', title: 'Peculato', topics: ['Peculato'], law: [] };
+
+describe('como a banca cobra', () => {
+  it('a amostra passa por todos os assuntos e respeita o limite', () => {
+    const qs = [question('a', '1'), question('a', '2'), question('a', '3'), question('b', '4'), question('c', '5')];
+    expect(boardSample(qs, 4).map((q) => q.enunciado)).toEqual(['1', '4', '5', '2']);
+    expect(boardSample(qs, 50)).toHaveLength(5);
+    expect(boardSample([])).toEqual([]);
+  });
+  it('sem questões reais, o texto da IA é descartado e não há perfil', () => {
+    const r = applyBoardEvidence(guide, 'VUNESP', 0);
+    expect(r.secoes[0]!.como_banca_cobra).toBe('');
+    expect(r.perfil_banca).toBeNull();
+  });
+  it('com questões reais, guarda o texto, a banca e o tamanho da amostra', () => {
+    const r = applyBoardEvidence(guide, 'VUNESP', 8);
+    expect(r.secoes[0]!.como_banca_cobra).toBe(guide.secoes[0]!.como_banca_cobra);
+    expect(r.perfil_banca).toEqual({ banca: 'VUNESP', questoes: 8 });
+  });
+  it('o prompt só pede o perfil quando recebe questões', () => {
+    expect(guidePrompt(promptBase)).toContain('deixe vazio em todas as seções');
+    const p = guidePrompt({ ...promptBase, boardQuestions: [question('Peculato', 'Sobre o peculato')] });
+    expect(p).toContain('Sobre o peculato');
+    expect(p).not.toContain('deixe vazio em todas as seções');
+  });
+  it('artigo citado no perfil também passa pela conferência', () => {
+    expect(verifyGuide(guide, []).unverified).toContain('CP, art. 999');
+  });
+});
 
 describe('reaproveitamento de apostilas', () => {
   it('chave não depende do título nem da ordem/acentos dos tópicos', () => {

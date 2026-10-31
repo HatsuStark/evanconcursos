@@ -54,7 +54,7 @@ export function MaterialsPage() {
               <button className="icon-btn" title="Apagar" aria-label={`Apagar ${m.title}`} onClick={() => confirm(`Apagar "${m.title}"?`) && act(() => deleteMaterial(m))}><Trash2 size={16} /></button>
             </div>
           ))}
-          {viewing && <div className="glass card"><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}><strong>{viewing.m.title}</strong><button className="btn ghost sm" onClick={() => setViewing(null)}>Fechar</button></div><PdfViewer url={viewing.url} page={1} /></div>}
+          {viewing && <div className="glass card"><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}><strong>{viewing.m.title}</strong><button className="btn ghost sm" onClick={() => setViewing(null)}>Fechar</button></div><PdfViewer url={viewing.url} storageKey={viewing.m.id} /></div>}
         </div>
       )}
     </Shell>

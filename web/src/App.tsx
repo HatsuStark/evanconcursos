@@ -12,6 +12,7 @@ import { SimuladoPage } from './pages/Simulado.tsx';
 import { QuestionnairePage } from './pages/Questionnaire.tsx';
 import { ReadingPage } from './pages/Reading.tsx';
 import { ReviewPage } from './pages/Review.tsx';
+import { ReviewsPage } from './pages/Reviews.tsx';
 import { SchedulePage } from './pages/Schedule.tsx';
 import { StudyPage } from './pages/Study.tsx';
 import { VerticalizedPage } from './pages/Verticalized.tsx';
@@ -32,6 +33,7 @@ export function App() {
       <Route path="/concursos/:noticeId/questionario" element={<QuestionnairePage />} />
       <Route path="/cronograma" element={<SchedulePage />} />
       <Route path="/edital" element={<VerticalizedPage />} />
+      <Route path="/revisoes" element={<ReviewsPage />} />
       <Route path="/estudo/:taskId" element={<StudyPage />} />
       <Route path="/materiais" element={<MaterialsPage />} />
       <Route path="/questoes" element={<QuestionsHubPage />} />

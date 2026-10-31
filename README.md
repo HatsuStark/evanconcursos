@@ -81,6 +81,8 @@ Avaliação com a IA real (`node --experimental-strip-types evals/plan-run.ts [f
 
 A chave fica só no servidor (segredo `QUEST_API_KEY`) e o gabarito nunca vai ao navegador antes da resposta. Filtros automáticos (`shared/qbank/map.ts`, prompt `qmap-v3`): matéria do edital → matéria da API (nome + tamanho da lista de assuntos; IA nos casos ambíguos) e sessão → até 5 assuntos escolhidos pela IA dentro da lista oficial (sem assunto correspondente, a sessão fica sem questões em vez de mostrar questões erradas). Busca: banca nos assuntos, depois os mesmos assuntos em outras bancas; Atualidades só em provas recentes; dias de reforço usam os assuntos com pior acerto. Avaliação nas sessões reais do TJSP (`evals/qmap-run.ts`): 93% de relevância ponderada, nenhuma questão irrelevante.
 
+**Meta e distribuição:** a sessão de teoria pede de 5 a 10 questões (`theoryGoal`, 1 a cada 12 minutos); é só meta, e o estudante pode continuar. Primeiro, todos os assuntos da sessão recebem uma questão, do mais ao menos cobrado. Depois, cada questão vai para o assunto mais abaixo da sua parte na cobrança da banca (`planPicks`). A cobrança é o total de questões da banca em cada assunto, medido uma vez por sessão com 3 créditos por assunto (`qbank_session_maps.incidence`); sem nenhuma na banca, vale o total das outras. Dias de consolidação mantêm a meta maior. A API não mostra ordenação por repetição: só dentro de cada lote vêm antes as questões que caíram em mais provas.
+
 `scripts/e2e-questions.ts` testa a função ponta a ponta com um usuário temporário (exige incluir `e2e@evanconcursos.test` em `ALLOWED_EMAILS`).
 
 ## Reorganizar depois de atrasos
@@ -141,23 +143,37 @@ Perto da prova, a revisão é antecipada para a véspera, e nada novo é agendad
 
 Em **Hoje**, **Ver próximas tarefas** lista as tarefas pendentes dos próximos dias, e clicar em uma matéria de **Conteúdo estudado** abre todas as aulas dela. Qualquer uma pode ser estudada antes da data. A tarefa adiantada continua na data original, já marcada como feita, e as demais não mudam de dia; a revisão de teoria conta a partir do dia da conclusão.
 
+## Painel de revisões
+
+`/revisoes`, aberto por **Ver todas** no cartão de revisão da tela Hoje, separa os temas em atrasadas, de hoje, programadas e concluídas. Só as revisões vencidas podem ser respondidas, como manda `theory_review_answer`.
+
+## Ciclo de estudos
+
+Em **Cronograma**, o estudante alterna entre **Agenda** e **Ciclo** sem refazer o plano (`study_plans.pacing`). No ciclo, as mesmas tarefas viram uma fila na ordem do plano, sem dias fixos e sem tarefa atrasada: a tela Hoje mostra as próximas, e as datas só medem o ritmo até a prova (`shared/domain/cycle.ts`). Voltar para a agenda devolve as datas originais, e o que passou sem ser feito aparece como atrasado, com a proposta de reorganizar.
+
+Metas semanais e folgas continuam vindo do plano, e o preparo antecipado de apostilas segue as datas: no ciclo, a apostila pode ser gerada só ao abrir a sessão.
+
 ## Metas e constância
 
 As metas da semana (segunda a domingo) saem do cronograma, sem configuração: horas, questões e tarefas previstas contra o que foi feito na semana. Tarefa adiantada ou atrasada conta na semana em que foi feita, e questões de qualquer origem contam. A constância soma os dias seguidos com pelo menos 1 minuto de cronômetro, uma questão, uma tarefa concluída ou uma discursiva corrigida. Hoje ainda sem estudo e as folgas do questionário não quebram a sequência. Depois de reorganizar ou refazer o cronograma, valem as folgas da versão ativa.
 
 O cronômetro guarda o total por tarefa, então um gatilho soma o que ele avança em `study_days`, por dia no fuso de Brasília. O tempo estudado antes dessa tabela não entra nas horas. A conta fica em `shared/domain/goals.ts`.
 
+## Como a banca cobra
+
+As seções da apostila podem trazer um destaque **Como a [banca] cobra**, escrito pela IA a partir de até 8 questões reais da banca nos assuntos da sessão (`boardSample`). Primeiro usa as questões já guardadas; faltando, busca na Quest API, a 6 créditos por questão, uma vez por apostila. Sem questão real, sem banca identificada ou em Atualidades, o destaque não aparece: o servidor descarta o que a IA tiver escrito (`applyBoardEvidence`). É uma leitura de amostra, e o rodapé diz o tamanho dela. A mudança veio com o prompt `guide-v2`: cada apostila antiga é gerada de novo só quando aberta, e as antigas continuam no banco.
+
 ## Apostilas em segundo plano
 
 A apostila é gerada no servidor, sem depender da tela: dá para sair e voltar, e a tela consulta a cada 4 s até ficar pronta. Uma trava em `ai_jobs` (índice único, com liberação depois de 3 min) impede pagar duas vezes pela mesma apostila, mesmo com estudantes diferentes.
 
-Ao abrir a tela **Hoje**, no máximo uma vez por dia e plano, o app prepara as apostilas **completas** das sessões pendentes dos próximos 3 dias, até 3 por vez, na ordem do cronograma. A revisão curta só é gerada ao pedir. O que já existe não gasta nada, e uma apostila que falhou só volta a ser tentada automaticamente depois de 24 h. Custo medido: cerca de US$ 0,012 por apostila e 33 s. Com 2 sessões por dia, são cerca de US$ 0,024 por dia, valor que seria gasto de qualquer forma ao estudar essas sessões. Para mudar o horizonte ou o limite: `PREPARE_DAYS` e `PREPARE_MAX` em `supabase/functions/study-guide/index.ts`.
+Ao abrir a tela **Hoje**, no máximo uma vez por dia e plano, o app prepara as apostilas **completas** das sessões pendentes dos próximos 3 dias, até 2 por vez, na ordem do cronograma. A revisão curta só é gerada ao pedir. O que já existe não gasta nada, e uma apostila que falhou só volta a ser tentada automaticamente depois de 24 h. Custo medido: cerca de US$ 0,012 por apostila e 33 s. Com 2 sessões por dia, são cerca de US$ 0,024 por dia, valor que seria gasto de qualquer forma ao estudar essas sessões. Para mudar o horizonte ou o limite: `PREPARE_DAYS` e `PREPARE_MAX` em `supabase/functions/study-guide/index.ts`.
 
 ## Vídeos
 
-A aba **Vídeos** do modo estudo sugere até 6 vídeo-aulas da sessão, com player dentro do app e marcação de assistido por concurso. Não usa IA: a função `videos` busca na YouTube Data API pelo tema da sessão, descarta Shorts (menos de 4 min), lives, vídeos sem incorporação ou bloqueados no Brasil e os que não citam o tema, e ordena por uma conta fixa (`shared/domain/videos.ts`): relevância do YouTube, tema no título, duração, visualizações e idade, com no máximo 2 por canal. Os vídeos não são revisados, e a tela avisa isso.
+A aba **Vídeos** do modo estudo sugere de 2 a 3 vídeo-aulas da sessão, de até 30 minutos cada,, com player dentro do app e marcação de assistido por concurso. Não usa IA: a função `videos` busca na YouTube Data API pelo tema da sessão, descarta Shorts (menos de 4 min), vídeos de mais de 30 min, lives, vídeos sem incorporação ou bloqueados no Brasil e os que não citam o tema, e ordena por uma conta fixa (`shared/domain/videos.ts`): relevância do YouTube, tema no título, duração, visualizações e idade, com no máximo 2 por canal. Os vídeos não são revisados, e a tela avisa isso.
 
-A cota gratuita é de 10 mil unidades por dia, e cada busca nova gasta 101 (cerca de 99 buscas por dia). Por isso a busca só roda ao abrir a aba e fica guardada em `video_searches` por 30 dias, compartilhada entre sessões e estudantes; 30 dias é o limite de guarda dos termos da API. Sem chave, sem cota ou com erro, a aba mostra o link de busca do YouTube.
+A cota gratuita é de 10 mil unidades por dia, e cada busca nova gasta 101 (cerca de 99 buscas por dia). Se restar menos de 2 vídeos, uma segunda busca só por vídeos médios (4 a 20 min) gasta mais 101; sem vídeo suficiente, a aba mostra o que houver. Por isso a busca só roda ao abrir a aba e fica guardada em `video_searches` por 30 dias, compartilhada entre sessões e estudantes; 30 dias é o limite de guarda dos termos da API. Sem chave, sem cota ou com erro, a aba mostra o link de busca do YouTube.
 
 Para ativar: no Google Cloud, ative a **YouTube Data API v3**, crie uma chave de API restrita a essa API, grave `YOUTUBE_API_KEY` no `.env` e rode `node scripts/deploy-functions.mjs`. Para avaliar a busca: `node --experimental-strip-types evals/video-run.ts "Direito Penal" "Peculato"`. **Antes de abrir o app ao público:** os termos de uso e a política de privacidade precisam citar os do YouTube e do Google.
 
@@ -176,6 +192,12 @@ Na página **Concursos**, a lixeira de cada card apaga de vez o edital, os PDFs 
 ## Prática além do cronograma
 
 Página **Questões**: resolver questões livres com filtros (matéria, assunto, banca, ano, dificuldade, tipo — inclusive Certo/Errado —, órgão, cargo, só inéditas), **caderno de erros** (toda questão errada volta em 1, 7 e 30 dias), **flashcards** (Leitner; nascem das questões erradas e dos mnemônicos), **simulados** (do concurso, na estrutura de blocos e nota mínima do edital, completo ou reduzido, ou personalizados; com ou sem cronômetro; correção só na entrega) e **desempenho por contexto** (cronograma, livres, simulados, revisão). Os dias de simulado do cronograma abrem o simulado do concurso. No modo estudo, as questões são a última aba, a lei seca só aparece em assuntos de legislação, a explicação abre o artigo citado ("ver artigo") e cada bateria termina com resumo por assunto e tempo médio.
+
+## Leitor de PDF e trechos
+
+O leitor (`web/src/components/PdfViewer.tsx`) rola as páginas em sequência e desenha só as próximas da área visível. O canvas é múltiplo exato dos pixels da tela, para o texto não borrar. Zoom vai de 50% a 250% e fica salvo; a última página lida fica salva por apostila ou trecho.
+
+Na aba **Meus PDFs** do modo estudo, cada apostila aparece como "Ler das páginas X a Y" e o leitor só mostra e navega por esse trecho. O estudante corrige as páginas no lápis; criar e apagar trechos continua com o backend. Remapear a apostila apaga e recria os trechos, inclusive os corrigidos à mão. A restrição é da tela: o navegador baixa o PDF inteiro, e a apostila completa segue em **Materiais**.
 
 ## Etapas
 
@@ -196,6 +218,8 @@ Página **Questões**: resolver questões livres com filtros (matéria, assunto,
 | E6.1 | Edital verticalizado: situação e desempenho por tópico | feito |
 | E6.2 | Revisão de teoria: tema estudado volta em 1, 7 e 30 dias | feito |
 | E6.3 | Metas semanais e constância na tela Hoje | feito |
+| E6.4 | Painel de revisões de teoria | feito |
+| E6.5 | Ciclo de estudos sem dias fixos | feito |
 | E7 | Publicação para convidados: login por convite, Netlify e CSP de produção | feito |
 
 O app estático original está na tag `v0-legado`.

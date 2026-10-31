@@ -1,6 +1,8 @@
 import { CalendarClock, Check, CheckCircle2, ChevronDown, ChevronUp, Circle, FileUp, Layers, PenLine, RotateCcw, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { cycleProgress, cycleQueue } from '../../../shared/domain/cycle.ts';
+import { groupReviews } from '../../../shared/domain/theory-reviews.ts';
 import { ReplanBanner } from '../components/ReplanBanner.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { TaskCard } from '../components/TaskCard.tsx';
@@ -12,11 +14,12 @@ import { useStudyActivity } from '../lib/goals.ts';
 import { useNotices } from '../lib/notices.ts';
 import { useDueCounts } from '../lib/practice.ts';
 import { prepareGuides, today, useActivePlan } from '../lib/plans.ts';
-import { useDueTheoryReviews } from '../lib/theoryReviews.ts';
+import { useTheoryReviews } from '../lib/theoryReviews.ts';
 
 const DISCURSIVE_NUDGE_DAYS = 7;
 const THEORY_REVIEWS_SHOWN = 4;
 const NEXT_TASKS_STEP = 5;
+const CYCLE_SHOWN = 3;
 
 // Tela inicial: o estudo do dia. Sem plano ainda, conduz o primeiro acesso até o cronograma.
 export function HomePage() {
@@ -27,7 +30,7 @@ export function HomePage() {
   const discursive = useDiscursiveRules(active.data?.notice.id);
   const lastDiscursive = useLastDiscursive(active.data?.notice.id);
   const planId = active.data?.plan.id;
-  const theoryReviews = useDueTheoryReviews(planId);
+  const theoryReviews = useTheoryReviews(planId);
   const activity = useStudyActivity(planId);
   useEffect(() => { if (planId) prepareGuides(planId); }, [planId]);
   const [nextShown, setNextShown] = useState(0);
@@ -54,11 +57,14 @@ export function HomePage() {
     );
   }
 
-  const { notice, subjects, tasks, version } = active.data;
+  const { plan, notice, subjects, tasks, version } = active.data;
+  const isCycle = plan.pacing === 'ciclo';
   const t0 = today(), todays = tasks.filter((t) => t.date === t0), upcoming = tasks.find((t) => t.date > t0 && !t.done_at);
   const days = daysUntil(notice.exam_date);
   const theory = tasks.filter((t) => t.kind === 'theory');
   const nextTasks = tasks.filter((t) => t.date > t0 && !t.done_at && t.kind !== 'exam');
+  const queue = cycleQueue(tasks), pace = cycleProgress(tasks, t0), cycleShown = CYCLE_SHOWN + nextShown;
+  const reviewGroups = groupReviews(theoryReviews.data ?? [], t0), dueReviews = [...reviewGroups.overdue, ...reviewGroups.today];
 
   const rail = (
     <>
@@ -94,7 +100,7 @@ export function HomePage() {
                           {t.done_at ? <Check size={15} style={{ color: 'var(--lime)' }} aria-label="Concluída" /> : <Circle size={15} style={{ color: 'var(--faint)' }} aria-label="Não concluída" />}
                           <span style={{ minWidth: 0 }}>
                             <span className="lesson-title">{t.title}</span>
-                            <span className="faint small">{fmtDate(t.date)}</span>
+                            {!isCycle && <span className="faint small">{fmtDate(t.date)}</span>}
                           </span>
                         </Link>
                       </li>
@@ -132,13 +138,14 @@ export function HomePage() {
       )}
       {!!theoryReviews.data?.length && (
         <div className="glass card" style={{ marginTop: 18 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: dueReviews.length ? 10 : 0, flexWrap: 'wrap' }}>
             <RotateCcw size={20} style={{ color: 'var(--cyan)' }} />
             <strong>Revisão de teoria</strong>
-            <span className="muted small">{theoryReviews.data.length} {theoryReviews.data.length === 1 ? 'tema' : 'temas'} para hoje</span>
+            <span className="muted small" style={{ flex: 1 }}>{dueReviews.length ? `${dueReviews.length} ${dueReviews.length === 1 ? 'tema' : 'temas'} para hoje` : 'Nada para hoje'}</span>
+            <Link className="btn ghost sm" to="/revisoes">Ver todas</Link>
           </div>
           <div className="grid" style={{ gap: 8 }}>
-            {theoryReviews.data.slice(0, THEORY_REVIEWS_SHOWN).map((r) => (
+            {dueReviews.slice(0, THEORY_REVIEWS_SHOWN).map((r) => (
               <div key={r.id} className="material-row">
                 <div style={{ flex: 1, minWidth: 200 }}>
                   <div>{r.task.title}</div>
@@ -148,7 +155,7 @@ export function HomePage() {
               </div>
             ))}
           </div>
-          {theoryReviews.data.length > THEORY_REVIEWS_SHOWN && <p className="faint small" style={{ margin: '10px 0 0' }}>Os próximos aparecem conforme você revisa, começando pelos mais atrasados.</p>}
+          {dueReviews.length > THEORY_REVIEWS_SHOWN && <p className="faint small" style={{ margin: '10px 0 0' }}>Os próximos aparecem conforme você revisa, começando pelos mais atrasados.</p>}
         </div>
       )}
       {discursive.data?.rules && (lastDiscursive.data === null || (lastDiscursive.data ?? 0) >= DISCURSIVE_NUDGE_DAYS) && !lastDiscursive.isLoading && (
@@ -158,14 +165,28 @@ export function HomePage() {
           <Link className="btn ghost sm" to="/discursivas">Treinar</Link>
         </div>
       )}
-      <div className="section-title"><h2>Estudo do dia</h2><span className="badge cyan">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'short' })}</span></div>
-      {todays.length ? <div className="grid" style={{ gap: 12 }}>{todays.map((t) => <TaskCard key={t.id} task={t} subjects={subjects} />)}</div> : (
-        <div className="glass card">
-          <p style={{ margin: 0 }}>Hoje é dia livre no seu cronograma.</p>
-          {upcoming && <p className="muted" style={{ margin: '8px 0 0' }}>Próxima tarefa: {fmtDate(upcoming.date)} · {upcoming.title}</p>}
-        </div>
+      {isCycle ? (
+        <>
+          <div className="section-title"><h2>Próximas do ciclo</h2><span className="badge cyan">{pace.done} de {pace.total} tarefas</span></div>
+          <p className="muted small" style={{ margin: '0 0 12px' }}>
+            {pace.behind ? `${pace.behind} ${pace.behind === 1 ? 'tarefa' : 'tarefas'} atrás do ritmo para terminar antes da prova.` : pace.ahead ? `${pace.ahead} ${pace.ahead === 1 ? 'tarefa' : 'tarefas'} à frente do ritmo.` : 'No ritmo para terminar antes da prova.'}
+          </p>
+          {queue.length ? <div className="grid" style={{ gap: 12 }}>{queue.slice(0, cycleShown).map((t) => <TaskCard key={t.id} task={t} subjects={subjects} />)}</div>
+            : <div className="glass card"><p style={{ margin: 0 }}>Você concluiu todas as tarefas do ciclo.</p></div>}
+          {queue.length > cycleShown && <button className="btn ghost sm" style={{ marginTop: 12 }} onClick={() => setNextShown(nextShown + NEXT_TASKS_STEP)}>Ver mais</button>}
+        </>
+      ) : (
+        <>
+          <div className="section-title"><h2>Estudo do dia</h2><span className="badge cyan">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'short' })}</span></div>
+          {todays.length ? <div className="grid" style={{ gap: 12 }}>{todays.map((t) => <TaskCard key={t.id} task={t} subjects={subjects} />)}</div> : (
+            <div className="glass card">
+              <p style={{ margin: 0 }}>Hoje é dia livre no seu cronograma.</p>
+              {upcoming && <p className="muted" style={{ margin: '8px 0 0' }}>Próxima tarefa: {fmtDate(upcoming.date)} · {upcoming.title}</p>}
+            </div>
+          )}
+        </>
       )}
-      {!!nextTasks.length && (
+      {!isCycle && !!nextTasks.length && (
         <>
           <button className="btn ghost sm" style={{ marginTop: 14 }} aria-expanded={nextShown > 0} onClick={() => setNextShown(nextShown ? 0 : NEXT_TASKS_STEP)}>
             {nextShown ? <><ChevronUp size={15} /> Ocultar próximas tarefas</> : <><ChevronDown size={15} /> Ver próximas tarefas</>}

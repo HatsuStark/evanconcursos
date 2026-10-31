@@ -4,7 +4,7 @@ export interface SpeechSection { key: string; title: string; chunks: string[] }
 
 interface SpeakableGuide {
   titulo: string; introducao: string;
-  secoes: { titulo: string; texto: string; exemplos: string[] }[];
+  secoes: { titulo: string; texto: string; exemplos: string[]; como_banca_cobra?: string }[];
   legislacao: { ref: string; comentario: string }[];
   pontos_banca: string[]; pegadinhas: string[]; resumo: string[];
   perguntas: { pergunta: string; resposta: string }[];
@@ -77,7 +77,7 @@ export function guideSpeech(g: SpeakableGuide): SpeechSection[] {
   const list = (key: string, title: string, items: string[]) => (items.length ? [section(key, title, items)] : []);
   return [
     section('intro', g.titulo, [g.introducao]),
-    ...g.secoes.map((s, i) => section(`s${i}`, s.titulo, [s.texto, ...s.exemplos.map((e) => `Exemplo: ${e}`)])),
+    ...g.secoes.map((s, i) => section(`s${i}`, s.titulo, [s.texto, ...s.exemplos.map((e) => `Exemplo: ${e}`), ...(s.como_banca_cobra ? [`Como a banca cobra: ${s.como_banca_cobra}`] : [])])),
     ...list('lei', 'Lei seca comentada', g.legislacao.map((l) => `${l.ref}: ${l.comentario}`)),
     ...list('banca', 'O que mais cai', g.pontos_banca),
     ...list('pegadinhas', 'Pegadinhas', g.pegadinhas),

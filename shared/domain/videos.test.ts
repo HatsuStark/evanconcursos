@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { parseDuration, rankVideos, searchYoutube, videoQuery, YoutubeError, type VideoCandidate } from './videos.ts';
+import { findVideos, parseDuration, rankVideos, searchYoutube, videoQuery, YoutubeError, type VideoCandidate } from './videos.ts';
 
 const NOW = new Date('2026-10-30T00:00:00Z').getTime();
 const video = (over: Partial<VideoCandidate> = {}): VideoCandidate => ({
@@ -43,9 +43,12 @@ describe('rankVideos', () => {
   it('descarta o que não pode ser assistido no app', () => {
     const r = rankVideos([
       video({ id: 'ok' }), video({ id: 'bloqueado', embeddable: false }), video({ id: 'live', live: true }), video({ id: 'brasil', blockedBR: true }),
-      video({ id: 'short', durationSec: 60 }), video({ id: 'maratona', durationSec: 7 * 3600 }),
+      video({ id: 'short', durationSec: 60 }), video({ id: 'longo', durationSec: 30 * 60 + 1 }),
     ], ['peculato'], NOW);
     expect(ids(r)).toEqual(['ok']);
+  });
+  it('aceita vídeo de exatamente 30 minutos', () => {
+    expect(ids(rankVideos([video({ id: 'limite', durationSec: 30 * 60 })], ['peculato'], NOW))).toEqual(['limite']);
   });
   it('descarta vídeo fora do tema; aceita tema só na descrição e variação da palavra', () => {
     const r = rankVideos([
@@ -60,14 +63,39 @@ describe('rankVideos', () => {
     const filler = Array.from({ length: 23 }, (_, i) => video({ id: `f${i}`, title: 'crase' }));
     const first = (a: VideoCandidate, b: VideoCandidate) => ids(rankVideos([a, b, ...filler], ['peculato'], NOW))[0];
     expect(first(video({ id: 'descricao', title: 'Crimes', description: 'peculato' }), video({ id: 'titulo' }))).toBe('titulo');
-    expect(first(video({ id: 'longo', durationSec: 4 * 3600 }), video({ id: 'ideal' }))).toBe('ideal');
+    expect(first(video({ id: 'curto', durationSec: 5 * 60 }), video({ id: 'ideal' }))).toBe('ideal');
     expect(first(video({ id: 'antigo', publishedAt: '2018-01-01T00:00:00Z' }), video({ id: 'novo' }))).toBe('novo');
   });
-  it('no máximo 2 por canal e 6 no total, sem campos internos', () => {
+  it('no máximo 2 por canal e 3 no total, sem campos internos', () => {
     const r = rankVideos(Array.from({ length: 10 }, (_, i) => video({ id: `v${i}`, channel: i < 4 ? 'Mesmo' : `Canal ${i}` })), ['peculato'], NOW);
-    expect(r).toHaveLength(6);
+    expect(r).toHaveLength(3);
     expect(r.filter((v) => v.channel === 'Mesmo')).toHaveLength(2);
     expect(r[0]).not.toHaveProperty('description');
+  });
+});
+
+describe('findVideos', () => {
+  const page = (...items: { id: string; min: number; channel: string }[]) => [
+    new Response(JSON.stringify({ items: items.map((v) => ({ id: { videoId: v.id } })) })),
+    new Response(JSON.stringify({ items: items.map((v) => ({
+      id: v.id, snippet: { title: 'Peculato', channelTitle: v.channel, publishedAt: '2025-01-01', liveBroadcastContent: 'none' },
+      contentDetails: { duration: `PT${v.min}M` }, statistics: { viewCount: '5' }, status: { embeddable: true },
+    })) })),
+  ];
+  const queue = (...responses: Response[]) => responses.reduce((f, r) => f.mockResolvedValueOnce(r), vi.fn());
+  it('com vídeos suficientes, não gasta a segunda busca', async () => {
+    const f = queue(...page({ id: 'a', min: 10, channel: 'A' }, { id: 'b', min: 20, channel: 'B' }));
+    expect((await findVideos('k', 'q', ['peculato'], f as unknown as typeof fetch, NOW)).map((v) => v.id).sort()).toEqual(['a', 'b']);
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+  it('faltando vídeos curtos, busca os médios e junta sem repetir', async () => {
+    const f = queue(...page({ id: 'a', min: 15, channel: 'A' }, { id: 'longo', min: 90, channel: 'B' }), ...page({ id: 'a', min: 15, channel: 'A' }, { id: 'c', min: 18, channel: 'C' }));
+    expect((await findVideos('k', 'q', ['peculato'], f as unknown as typeof fetch, NOW)).map((v) => v.id).sort()).toEqual(['a', 'c']);
+    expect(String(f.mock.calls[2]![0])).toContain('videoDuration=medium');
+  });
+  it('mesmo assim sem o bastante, devolve o que achou', async () => {
+    const f = queue(...page({ id: 'longo', min: 90, channel: 'B' }), new Response(JSON.stringify({ items: [] })));
+    expect(await findVideos('k', 'q', ['peculato'], f as unknown as typeof fetch, NOW)).toEqual([]);
   });
 });
 

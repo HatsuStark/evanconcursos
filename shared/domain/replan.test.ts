@@ -42,8 +42,8 @@ describe('reorganizar o cronograma', () => {
     const a = task('2030-03-08', 'theory'), b = task('2030-03-10', 'theory');
     const r = replan([a, b], subjects, [], TODAY, NOW);
     expect(r.tasks).toMatchObject([
-      { date: '2030-03-10', position: 0, minutes: 60, goal: 10, sessionId: a.session_id },
-      { date: '2030-03-10', position: 1, minutes: 60, goal: 10, sessionId: b.session_id },
+      { date: '2030-03-10', position: 0, minutes: 60, goal: 5, sessionId: a.session_id },
+      { date: '2030-03-10', position: 1, minutes: 60, goal: 5, sessionId: b.session_id },
     ]);
   });
   it('não mexe em tarefa feita, simulado, véspera nem prova', () => {

@@ -135,17 +135,47 @@ export async function mapSession(d: MapDeps, subjectMateria: string | null,
 
 // Ordem de busca: banca nos assuntos (do mais relevante) e, se esgotar, os mesmos assuntos em outras bancas.
 // Atualidades: só provas recentes (este ano e o anterior), senão os fatos estão desatualizados.
-export function searchFilters(f: SessionFilter, banca: string, now = new Date()): { key: string; params: Record<string, string> }[] {
+export function searchFilters(f: SessionFilter, banca: string, now = new Date()): { key: string; assunto: string; params: Record<string, string> }[] {
   if (!f.materia || !f.assuntos.length) return [];
   const m = f.materia;
   if (/atualidade/i.test(m)) {
     const years = [now.getFullYear(), now.getFullYear() - 1].map(String);
-    return years.flatMap((ano) => f.assuntos.map((assunto) => ({ key: `${ano}:${assunto}`, params: { materia: m, assunto, ano } })));
+    return years.flatMap((ano) => f.assuntos.map((assunto) => ({ key: `${ano}:${assunto}`, assunto, params: { materia: m, assunto, ano } })));
   }
   return [
-    ...f.assuntos.map((assunto) => ({ key: `b:${assunto}`, params: { banca, materia: m, assunto } })),
-    ...f.assuntos.map((assunto) => ({ key: `*:${assunto}`, params: { materia: m, assunto } })),
+    ...f.assuntos.map((assunto) => ({ key: `b:${assunto}`, assunto, params: { banca, materia: m, assunto } })),
+    ...f.assuntos.map((assunto) => ({ key: `*:${assunto}`, assunto, params: { materia: m, assunto } })),
   ];
+}
+
+// ---------- distribuição das questões entre os assuntos da sessão ----------
+export interface Incidence { assunto: string; total: number }
+export const equalIncidence = (assuntos: string[]): Incidence[] => assuntos.map((assunto) => ({ assunto, total: 1 }));
+
+// Quantas questões a banca tem em cada assunto. Sem nenhuma na banca, vale o total das outras bancas.
+// Atualidades fica em partes iguais: só contam as provas recentes, e o histórico não diz o que volta a cair.
+export async function measureIncidence(count: (params: Record<string, string>) => Promise<number>, f: SessionFilter, banca: string): Promise<Incidence[]> {
+  if (!f.materia || /atualidade/i.test(f.materia)) return equalIncidence(f.assuntos);
+  const measure = async (extra: Record<string, string>) => {
+    const out: Incidence[] = [];
+    for (const assunto of f.assuntos) out.push({ assunto, total: await count({ ...extra, materia: f.materia!, assunto }) });
+    return out;
+  };
+  const inBoard = banca ? await measure({ banca }) : [];
+  return inBoard.some((i) => i.total > 0) ? inBoard : measure({});
+}
+
+// Quais assuntos recebem as próximas n questões: primeiro todos passam pela sessão, do mais ao menos cobrado;
+// depois, cada questão vai para o assunto que está mais abaixo da sua parte na cobrança da banca.
+export function planPicks(incidence: Incidence[], served: Map<string, number>, n: number) {
+  const rows = incidence.map((i, order) => ({ assunto: i.assunto, weight: Math.max(i.total, 1), order, got: served.get(normalizeText(i.assunto)) ?? 0 }));
+  const picks: string[] = [];
+  for (let slot = 0; rows.length && slot < n; slot++) {
+    const next = [...rows].sort((a, b) => Number(b.got === 0) - Number(a.got === 0) || (a.got === 0 ? b.weight - a.weight : (a.got + 1) / a.weight - (b.got + 1) / b.weight) || a.order - b.order)[0]!;
+    next.got++;
+    picks.push(next.assunto);
+  }
+  return picks;
 }
 
 // ---------- explicação da questão (IA), ancorada no texto oficial da lei ----------

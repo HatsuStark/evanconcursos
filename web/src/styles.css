@@ -356,6 +356,9 @@ a.task-title:hover { color: var(--cyan); }
 .guide ul { margin: 0; padding-left: 22px; display: grid; gap: 6px; }
 .guide-examples { padding: 12px 14px; border-left: 3px solid var(--violet); background: rgba(169, 116, 255, .07); border-radius: 8px; }
 .guide-examples p:last-child { margin: 0; }
+.guide-board { margin-top: 12px; padding: 12px 14px; border-left: 3px solid var(--orange); background: rgba(255, 138, 76, .08); border-radius: 8px; }
+.guide-board strong { display: flex; align-items: center; gap: 6px; color: var(--orange); font-size: 14px; }
+.guide-board p { margin: 4px 0 0; }
 .guide-traps li::marker { color: var(--orange); }
 .guide-q { margin-bottom: 8px; }
 .guide-q .link-btn { font-size: 15.5px; color: var(--text); text-align: left; margin: 0; }
@@ -382,8 +385,12 @@ a.task-title:hover { color: var(--cyan); }
 .pdf-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pdf-bar .icon-btn { width: 36px; height: 36px; }
 .pdf-page { width: 70px; display: inline-block; padding: 6px 8px; margin: 0 4px; text-align: center; }
-.pdf-canvas { overflow: auto; max-height: 80vh; border-radius: 12px; background: #2a2f3d; display: flex; justify-content: center; }
-.pdf-canvas canvas { display: block; background: #fff; }
+.pdf-canvas { position: relative; overflow: auto; height: 80vh; border-radius: 12px; background: #2a2f3d; scrollbar-gutter: stable; outline-offset: 2px; }
+.pdf-canvas > .spinner { margin: 40px auto; }
+.pdf-pages { box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 12px; width: max-content; min-width: 100%; }
+.pdf-sheet { flex: none; background: #fff; box-shadow: 0 2px 10px rgb(0 0 0 / 35%); }
+.pdf-sheet canvas { display: block; width: 100%; height: 100%; }
+.pdf-range { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
 /* ---------- questões: navegação, tachado, abas, mnemônico ---------- */
 .q-nav { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 16px; }
@@ -438,7 +445,7 @@ a.task-title:hover { color: var(--cyan); }
 .app.focus .tabs { margin: 0; padding: 3px; }
 .app.focus .tab { padding: 7px 12px; }
 .app.focus .guide { font-size: 17px; }
-.app.focus .pdf-canvas { max-height: calc(100vh - 130px); }
+.app.focus .pdf-canvas { height: calc(100vh - 130px); }
 .focus-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .app.focus .focus-bar { width: 100%; }
 .focus-spacer { flex: 1; }

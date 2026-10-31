@@ -1,7 +1,9 @@
 import { AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, RefreshCw, Sparkles } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { cycleProgress, cycleQueue } from '../../../shared/domain/cycle.ts';
 import { parseYmd, ymd } from '../../../shared/domain/dates.ts';
+import { PacingSwitch } from '../components/PacingSwitch.tsx';
 import { ReplanBanner } from '../components/ReplanBanner.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { TaskCard, taskColor } from '../components/TaskCard.tsx';
@@ -9,12 +11,14 @@ import { fmtDate, subjectColor } from '../components/ui.tsx';
 import { KIND_LABEL, today, useActivePlan } from '../lib/plans.ts';
 
 const WEEKDAYS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+const QUEUE_STEP = 20;
 
 // Cronograma: calendário do mês com as tarefas, detalhe do dia escolhido e a estratégia da IA ao lado.
 export function SchedulePage() {
   const active = useActivePlan();
   const [month, setMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [selected, setSelected] = useState(today());
+  const [queueShown, setQueueShown] = useState(QUEUE_STEP);
   const byDate = useMemo(() => {
     const m = new Map<string, NonNullable<typeof active.data>['tasks']>();
     for (const t of active.data?.tasks ?? []) { if (!m.has(t.date)) m.set(t.date, []); m.get(t.date)!.push(t); }
@@ -31,7 +35,8 @@ export function SchedulePage() {
       </Shell>
     );
   }
-  const { notice, version, subjects, tasks } = active.data;
+  const { plan, notice, version, subjects, tasks } = active.data;
+  const isCycle = plan.pacing === 'ciclo';
   const done = tasks.filter((t) => t.done_at).length, studyTasks = tasks.filter((t) => t.kind !== 'exam');
 
   // Grade do mês começando na segunda-feira.
@@ -86,6 +91,20 @@ export function SchedulePage() {
     </>
   );
 
+  if (isCycle) {
+    const queue = cycleQueue(tasks), pace = cycleProgress(tasks, today());
+    return (
+      <Shell title="Cronograma" subtitle={[notice.role_name, notice.board].filter(Boolean).join(' · ')} rail={rail}>
+        <PacingSwitch planId={plan.id} pacing={plan.pacing} />
+        <div className="section-title"><h2>Fila do ciclo</h2><span className="badge cyan">{queue.length} {queue.length === 1 ? 'pendente' : 'pendentes'}</span></div>
+        {!!pace.behind && <p className="muted small" style={{ margin: '0 0 12px' }}>{pace.behind} {pace.behind === 1 ? 'tarefa' : 'tarefas'} atrás do ritmo para terminar antes da prova.</p>}
+        {queue.length ? <div className="grid" style={{ gap: 12 }}>{queue.slice(0, queueShown).map((t) => <TaskCard key={t.id} task={t} subjects={subjects} />)}</div>
+          : <div className="glass card muted">Você concluiu todas as tarefas do ciclo.</div>}
+        {queue.length > queueShown && <button className="btn ghost sm" style={{ marginTop: 12 }} onClick={() => setQueueShown(queueShown + QUEUE_STEP)}>Ver mais</button>}
+      </Shell>
+    );
+  }
+
   return (
     <Shell title="Cronograma" subtitle={[notice.role_name, notice.board].filter(Boolean).join(' · ')} rail={rail}
       actions={
@@ -95,6 +114,7 @@ export function SchedulePage() {
           <button className="icon-btn" onClick={() => shift(1)} aria-label="Próximo mês"><ChevronRight size={18} /></button>
         </div>
       }>
+      <PacingSwitch planId={plan.id} pacing={plan.pacing} />
       <ReplanBanner active={active.data} />
       <div className="calendar glass" role="grid" aria-label="Calendário de estudos">
         {WEEKDAYS.map((d) => <div key={d} className="cal-head" role="columnheader">{d}</div>)}

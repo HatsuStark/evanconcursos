@@ -2,7 +2,7 @@
 // e produz o payload de create_plan_version. Duas passadas: a 1ª dá quantos dias de teoria cada matéria
 // recebe (n de sessões pedido à IA); a 2ª encaixa as sessões, uma por dia, na ordem.
 import { parseYmd, ymd } from '../domain/dates.ts';
-import { generateSchedule, topicKeyword, type DayKind, type ScheduleConfig, type ScheduleInput } from '../domain/scheduler.ts';
+import { generateSchedule, theoryGoal, topicKeyword, type DayKind, type ScheduleConfig, type ScheduleInput } from '../domain/scheduler.ts';
 import type { PlanInputs, Session } from './plan.ts';
 
 export const GENERATOR_VERSION = 'scheduler-v1';
@@ -68,7 +68,7 @@ export function buildPlanPayload(b: PlanBase, sessions: Record<string, Session[]
       sessionKey: session ? `${subjectId}:${d.item}` : null,
       title: session?.title ?? TITLES[d.kind] ?? d.text,
       keyword: session ? (session.keyword || topicKeyword(session.title)) : '',
-      goal: d.kind === 'theory' ? Math.round(d.hours * 10) : d.kind === 'simulado' ? b.totalQuestions : d.goal,
+      goal: d.kind === 'theory' ? theoryGoal(Math.round(d.hours * 60)) : d.kind === 'simulado' ? b.totalQuestions : d.goal,
     });
   }));
   const summary = {

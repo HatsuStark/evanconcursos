@@ -4,7 +4,7 @@
 // ainda faltar espaço, um dia recebe mais de uma sessão. Os dias de reforço restantes vão para as matérias mais fracas.
 import { HALF_LIFE_DAYS, PRIOR, PRIOR_WEIGHT } from './adaptive.ts';
 import { DAY_MS } from './dates.ts';
-import { apportion, interleave } from './scheduler.ts';
+import { apportion, interleave, theoryGoal } from './scheduler.ts';
 
 export const ERROR_REASONS = [
   { key: 'conteudo', label: 'Falta de conteúdo' },
@@ -85,7 +85,7 @@ export function replan(tasks: ReplanTask[], subjects: ReplanSubject[], attempts:
       for (let p = 0; p < size; p++) {
         const s = sessions[next++]!;
         if (size === 1 && s.date === day.date) kept.add(s.id);
-        else add(day, s, p, minutes, Math.round(minutes / 6));
+        else add(day, s, p, minutes, theoryGoal(minutes));
       }
     });
   } else for (const s of sessions) kept.add(s.id);

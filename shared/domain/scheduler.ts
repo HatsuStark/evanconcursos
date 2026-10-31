@@ -7,6 +7,8 @@ export const LEVELS = ['Iniciante', 'Básico', 'Intermediário', 'Avançado'] as
 export const DEFAULT_HOURS = [2, 2, 2, 2, 2, 3, 2];
 // Marca de tarefa de reforço: o assunto é decidido na hora pelo desempenho (assunto mais fraco).
 export const WEAK_MARK = '*fracos*';
+// Meta de questões da sessão de teoria: amostra do tema, não bateria longa; os dias de consolidação treinam volume.
+export const theoryGoal = (minutes: number) => Math.min(10, Math.max(5, Math.round(minutes / 12)));
 
 export interface SubjectInput { name: string; core: boolean }
 export interface ScheduleInput { startDate: string; examDate: string; subjects: SubjectInput[] }

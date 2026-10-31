@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from './supabase.ts';
 
 export interface Material { id: string; title: string; storage_path: string; pages: number | null; status: 'uploaded' | 'mapping' | 'mapped' | 'failed'; status_detail: string; size_bytes: number; created_at: string }
-export interface SessionPages { id: string; page_from: number; page_to: number; material: { id: string; title: string; storage_path: string } }
+export interface SessionPages { id: string; page_from: number; page_to: number; material: { id: string; title: string; storage_path: string; pages: number | null } }
 export const MAX_MATERIAL_BYTES = 50 * 1024 * 1024;
 
 export const useMaterials = (planId: string | undefined) => useQuery({
@@ -22,11 +22,17 @@ export const useSessionPages = (sessionId: string | null) => useQuery({
   queryKey: ['session-pages', sessionId],
   enabled: !!sessionId,
   queryFn: async () => {
-    const { data, error } = await supabase.from('material_maps').select('id, page_from, page_to, material:materials(id, title, storage_path)').eq('session_id', sessionId!);
+    const { data, error } = await supabase.from('material_maps').select('id, page_from, page_to, material:materials(id, title, storage_path, pages)').eq('session_id', sessionId!);
     if (error) throw new Error(error.message);
     return data as unknown as SessionPages[];
   },
 });
+
+// O estudante corrige o trecho indicado pela IA. "Mapear de novo" recomeça do zero.
+export async function updateSessionPages(id: string, from: number, to: number) {
+  const { error } = await supabase.from('material_maps').update({ page_from: from, page_to: to }).eq('id', id);
+  if (error) throw new Error(error.message);
+}
 
 async function invoke(name: string, body: Record<string, unknown>) {
   const { error } = await supabase.functions.invoke(name, { body });

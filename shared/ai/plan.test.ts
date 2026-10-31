@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { theoryGoal } from '../domain/scheduler.ts';
 import { buildPlanPayload, theoryPlan, type PlanBase } from './plan-build.ts';
 import { fallbackSessions, repairSessions, type SubjectSessions } from './plan.ts';
 
@@ -82,7 +83,7 @@ describe('buildPlanPayload', () => {
       const wd = (new Date(t.date + 'T12:00:00').getDay() + 6) % 7;
       if (t.kind !== 'exam') expect(t.minutes).toBe(base.inputs.hours[wd]! * 60);
     }
-    expect(theory.every((t) => t.goal === Math.round(t.minutes / 6))).toBe(true);
+    expect(theory.every((t) => t.goal === theoryGoal(t.minutes))).toBe(true);
     expect(p.tasks.filter((t) => t.kind === 'simulado').every((t) => t.goal === 70)).toBe(true);
   });
   it('prioridade: mais dias para quem tem mais peso e menos nível', () => {

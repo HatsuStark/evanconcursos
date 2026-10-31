@@ -16,7 +16,7 @@ export function ReplanBanner({ active }: { active: ActivePlan }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const overdue = overdueTasks(active.tasks, t0);
-  const show = !!overdue.length && !dismissed;
+  const show = active.plan.pacing === 'agenda' && !!overdue.length && !dismissed; // no ciclo não há tarefa atrasada
   const attempts = usePlanAttempts(active.plan.id, show);
   const plan = useMemo(() => (show && attempts.data ? replan(active.tasks, active.subjects, attempts.data, t0) : null), [show, attempts.data, active, t0]);
   if (!show || !plan) return null;

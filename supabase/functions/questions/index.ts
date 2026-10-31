@@ -10,12 +10,12 @@ import { findLawRefs, inRanges, type LawRef } from '../../../shared/legal/refs.t
 import { lawByKey } from '../../../shared/legal/registry.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import {
-  EXPLAIN_PROMPT_VERSION, Explanation, explainPrompt, explanationJsonSchema, mapSession, mapSubject,
-  QMAP_PROMPT_VERSION, searchFilters, type SessionFilter,
+  equalIncidence, EXPLAIN_PROMPT_VERSION, Explanation, explainPrompt, explanationJsonSchema, measureIncidence, planPicks,
+  QMAP_PROMPT_VERSION, searchFilters, type Incidence, type SessionFilter,
 } from '../../../shared/qbank/map.ts';
 import { conceptKey, MNEMONIC_PROMPT_VERSION, MnemonicChoice, mnemonicJsonSchema, mnemonicPrompt, pickExisting } from '../../../shared/qbank/mnemonic.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-import { cacheQuestions, mapDeps, plain, publicQuestion, recordAnswer, upsertFlashcard, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
+import { cacheQuestions, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, recordAnswer, upsertFlashcard, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -134,28 +134,22 @@ Deno.serve(async (req) => {
     const topics = ((subject.notice_topics ?? []) as { text: string; position: number }[]).sort((a, b) => a.position - b.position).map((t) => t.text);
 
     // Matéria da disciplina (uma vez) e banca do edital.
-    let { data: sm } = await admin.from('qbank_subject_maps').select('materia, banca').eq('subject_id', subject.id).maybeSingle();
-    if (!sm) {
+    const sm = await ensureSubjectMap(admin, quest, deps, auth.user.id, subject.id, async () => {
       const { data: notice } = await auth.client.from('notices').select('board').eq('id', subject.notice_id).single();
-      const bancas = notice?.board ? await quest.bancas(String(notice.board).split(/[\s/-]/)[0]!) : [];
-      const banca = bancas.find((b) => normalizeText(b) === normalizeText(notice?.board ?? '')) ?? bancas[0] ?? '';
-      const r = await mapSubject(deps, { name: subject.name, topics });
-      sm = { materia: r.materia, banca };
-      await admin.from('qbank_subject_maps').upsert({ subject_id: subject.id, owner_id: auth.user.id, materia: r.materia, banca, how: r.how, prompt_version: QMAP_PROMPT_VERSION });
-    }
+      return { name: subject.name, board: String(notice?.board ?? ''), topics };
+    });
 
     // Filtro: assuntos da sessão (uma vez por sessão); em dias de reforço, os assuntos em que o estudante mais erra.
     let filter: SessionFilter = { materia: null, assuntos: [], how: '' };
+    let incidence: Incidence[] | null = null;
     const scope = task.session_id ?? `subject:${subject.id}`;
     if (task.session_id) {
-      const { data: m } = await admin.from('qbank_session_maps').select('materia, assuntos, how').eq('session_id', task.session_id).maybeSingle();
-      if (m) filter = m as SessionFilter;
-      else {
+      const m = await ensureSessionMap(admin, deps, auth.user.id, task.session_id, sm.materia, async () => {
         const { data: ss } = await auth.client.from('study_sessions').select('title, keyword, topic_ids').eq('id', task.session_id).single();
         const { data: tt } = ss?.topic_ids?.length ? await auth.client.from('notice_topics').select('text').in('id', ss.topic_ids) : { data: [] };
-        filter = await mapSession(deps, sm.materia, { subject: subject.name, title: ss?.title ?? '', keyword: ss?.keyword ?? '', topics: (tt ?? []).map((t) => t.text) });
-        await admin.from('qbank_session_maps').upsert({ session_id: task.session_id, owner_id: auth.user.id, materia: filter.materia, assuntos: filter.assuntos, how: filter.how, prompt_version: QMAP_PROMPT_VERSION });
-      }
+        return { subject: subject.name, title: ss?.title ?? '', keyword: ss?.keyword ?? '', topics: (tt ?? []).map((t) => t.text) };
+      });
+      filter = m; incidence = m.incidence;
     } else if (sm.materia) {
       const { data: tries } = await admin.from('question_attempts').select('assunto, correct').eq('owner_id', auth.user.id).eq('subject_id', subject.id).limit(2000);
       const acc = new Map<string, { c: number; t: number }>();
@@ -170,17 +164,30 @@ Deno.serve(async (req) => {
     const filters = searchFilters(filter, sm.banca);
     if (!filters.length) { await log('qbank_fetch', 'ok'); return json(200, { questions: [], reason: 'sem-assunto' }); }
 
-    // Busca na ordem dos filtros, pulando o que o estudante já respondeu; cursor por filtro.
-    const { data: done } = await admin.from('question_attempts').select('qid').eq('owner_id', auth.user.id).eq('subject_id', subject.id).limit(5000);
+    // Peso de cada assunto: medido uma vez por sessão. Se a medição falhar, divide igual e tenta de novo na próxima busca.
+    if (!incidence) {
+      if (task.session_id) {
+        try {
+          incidence = await measureIncidence((params) => quest.count(params), filter, sm.banca);
+          await admin.from('qbank_session_maps').update({ incidence }).eq('session_id', task.session_id);
+        } catch { incidence = equalIncidence(filter.assuntos); }
+      } else incidence = equalIncidence(filter.assuntos);
+    }
+
+    // Pula o que o estudante já respondeu; o que ele respondeu nesta sessão define a vez de cada assunto.
+    const { data: done } = await admin.from('question_attempts').select('qid, assunto, session_id').eq('owner_id', auth.user.id).eq('subject_id', subject.id).limit(5000);
     const seen = new Set((done ?? []).map((d) => d.qid));
+    const served = new Map<string, number>();
+    for (const d of done ?? []) if (task.session_id && d.session_id === task.session_id) served.set(normalizeText(d.assunto), (served.get(normalizeText(d.assunto)) ?? 0) + 1);
     const out: QuestQuestion[] = [];
-    for (const f of filters) {
-      if (out.length >= count) break;
+    // Traz até `limit` questões no total, com um cursor por filtro.
+    const take = async (f: (typeof filters)[number], limit: number) => {
+      if (out.length >= limit) return;
       const { data: cur } = await admin.from('qbank_cursors').select('after_id, exhausted').eq('owner_id', auth.user.id).eq('scope', scope).eq('filter_key', f.key).maybeSingle();
-      if (cur?.exhausted) continue;
+      if (cur?.exhausted) return;
       let after = cur?.after_id ?? undefined, exhausted = false;
-      for (let round = 0; round < 3 && out.length < count && !exhausted; round++) {
-        const r = await quest.questoes(f.params, count - out.length, after);
+      for (let round = 0; round < 3 && out.length < limit && !exhausted; round++) {
+        const r = await quest.questoes(f.params, limit - out.length, after);
         const fresh = r.items.filter((q) => q.gabarito && !seen.has(q.id) && !out.some((o) => o.id === q.id));
         await cacheQuestions(admin, r.items);
         out.push(...fresh);
@@ -188,8 +195,18 @@ Deno.serve(async (req) => {
         exhausted = !r.hasMore || !r.items.length;
       }
       await admin.from('qbank_cursors').upsert({ owner_id: auth.user.id, scope, filter_key: f.key, after_id: after ?? null, exhausted, updated_at: new Date().toISOString() });
+    };
+    // Cada assunto busca a sua parte (banca e, se faltar, outras bancas); o que sobrar vem de qualquer assunto com questões.
+    const wanted = new Map<string, number>();
+    for (const a of planPicks(incidence, served, count)) wanted.set(a, (wanted.get(a) ?? 0) + 1);
+    for (const [assunto, n] of wanted) {
+      const limit = out.length + n;
+      for (const f of filters.filter((x) => x.assunto === assunto)) await take(f, limit);
     }
+    for (const f of filters) await take(f, count);
     await log('qbank_fetch', 'ok');
+    // Dentro do lote, primeiro as questões que caíram em mais provas.
+    out.sort((a, b) => (b.provas?.length ?? 0) - (a.provas?.length ?? 0));
     return json(200, { questions: await withMnemo(admin, out.slice(0, count).map(publicQuestion)), filter: { materia: filter.materia, assuntos: filter.assuntos, how: filter.how }, reason: out.length ? null : 'esgotado' });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

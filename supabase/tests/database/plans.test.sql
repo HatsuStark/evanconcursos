@@ -92,6 +92,21 @@ select lives_ok($$insert into public.materials (plan_id, title, storage_path, sh
 select throws_ok($$update public.materials set status = 'mapped'$$, '42501', null, 'status do material é do backend');
 select throws_ok($$insert into public.material_maps (owner_id, material_id, session_id, page_from, page_to) select owner_id, id, (select id from public.study_sessions limit 1), 1, 2 from public.materials$$, '42501', null, 'mapeamento é do backend');
 select lives_ok($$insert into storage.objects (bucket_id, name) values ('materiais', '00000000-0000-4000-8000-0000000000a1/m/x.pdf')$$, 'A envia o PDF à própria pasta');
+-- O backend mapeia; o estudante só corrige as páginas do próprio trecho.
+select set_config('role', 'postgres', true);
+insert into public.material_maps (owner_id, material_id, session_id, page_from, page_to)
+  select m.owner_id, m.id, (select s.id from public.study_sessions s where s.owner_id = m.owner_id limit 1), 3, 25
+  from public.materials m where m.owner_id = '00000000-0000-4000-8000-0000000000a1';
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000a1');
+select lives_ok($$update public.material_maps set page_from = 5, page_to = 20$$, 'A corrige as páginas do trecho');
+select throws_ok($$update public.material_maps set page_to = 1$$, '23514', null, 'página final antes da inicial é recusada');
+select throws_ok($$update public.material_maps set session_id = session_id$$, '42501', null, 'A não troca a sessão do trecho');
+select throws_ok($$delete from public.material_maps$$, '42501', null, 'A não apaga o trecho');
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000b1');
+update public.material_maps set page_from = 1, page_to = 2;
+select is((select count(*) from public.material_maps), 0::bigint, 'B não vê trechos de A');
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000a1');
+select is((select page_from from public.material_maps), 5, 'update de B não afetou o trecho de A');
 select pg_temp.as_user('00000000-0000-4000-8000-0000000000b1');
 select is((select count(*) from public.materials), 0::bigint, 'B não vê materiais de A');
 select is((select count(*) from storage.objects where bucket_id = 'materiais'), 0::bigint, 'B não vê PDFs de A');
