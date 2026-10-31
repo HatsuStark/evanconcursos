@@ -1,14 +1,16 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Check, FileText, ListChecks, Maximize2, Minimize2, Pause, Play, Scale } from 'lucide-react';
+import { BookOpen, Check, FileText, ListChecks, Maximize2, Minimize2, Pause, Play, Scale, Video } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { evaluate } from '../../../shared/domain/adaptive.ts';
+import { videoQuery } from '../../../shared/domain/videos.ts';
 import { GuidePanel } from '../components/GuidePanel.tsx';
 import { LawReader } from '../components/LawReader.tsx';
 import { QuestionsPanel } from '../components/QuestionsPanel.tsx';
 import { SessionMaterials } from '../components/SessionMaterials.tsx';
 import { SimuladoStarter } from '../components/SimuladoStarter.tsx';
 import { Shell } from '../components/Shell.tsx';
+import { VideosPanel } from '../components/VideosPanel.tsx';
 import { fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
 import { sessionLawRefs } from '../lib/legal.ts';
 import { KIND_LABEL, setTaskDone } from '../lib/plans.ts';
@@ -18,6 +20,7 @@ const fmtClock = (s: number) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) +
 // Ordem de estudo: teoria primeiro, questões por último. Lei seca só em assuntos de legislação.
 const TABS = [
   { key: 'apostila', label: 'Apostila', icon: BookOpen },
+  { key: 'videos', label: 'Vídeos', icon: Video },
   { key: 'lei', label: 'Lei seca', icon: Scale },
   { key: 'material', label: 'Meus PDFs', icon: FileText },
   { key: 'questoes', label: 'Questões', icon: ListChecks },
@@ -61,8 +64,9 @@ function StudyView({ d }: { d: StudyData }) {
   const timer = useTimer(d.task.id, d.task.time_spent_sec);
   const lawRefs = sessionLawRefs(d.task.title, d.topics, d.subject?.name ?? '');
   const hasSession = !!d.task.session_id;
-  const tabs = TABS.filter((t) => (t.key === 'lei' ? lawRefs.length > 0 : t.key === 'apostila' || t.key === 'material' ? hasSession : true));
+  const tabs = TABS.filter((t) => (t.key === 'lei' ? lawRefs.length > 0 : t.key === 'apostila' || t.key === 'videos' || t.key === 'material' ? hasSession : true));
   const [tab, setTab] = useState<TabKey>(tabs[0]!.key);
+  const [videosOpened, setVideosOpened] = useState(false);
   const color = d.subjectIndex >= 0 ? subjectColor(d.subjectIndex) : 'var(--magenta)';
   const mine = d.attempts.filter((a) => a.task_id === d.task.id);
   const right = mine.filter((a) => a.correct).length;
@@ -93,7 +97,7 @@ function StudyView({ d }: { d: StudyData }) {
   const tabBar = (
     <div className="tabs" role="tablist">
       {tabs.map((t) => (
-        <button key={t.key} role="tab" aria-selected={tab === t.key} className={'tab' + (tab === t.key ? ' on' : '')} onClick={() => setTab(t.key)}>
+        <button key={t.key} role="tab" aria-selected={tab === t.key} className={'tab' + (tab === t.key ? ' on' : '')} onClick={() => { setTab(t.key); if (t.key === 'videos') setVideosOpened(true); }}>
           <t.icon size={16} /> {t.label}
         </button>
       ))}
@@ -165,7 +169,13 @@ function StudyView({ d }: { d: StudyData }) {
       {d.task.kind === 'simulado' ? <SimuladoStarter planId={d.task.plan_id} taskId={d.task.id} /> : (
         <>
           {!focus && tabBar}
-          {tab === 'questoes' ? <QuestionsPanel source={{ kind: 'task', taskId: d.task.id, planId: d.task.plan_id }} goal={d.task.goal_questions} answered={mine.length} />
+          {videosOpened && (
+            <div hidden={tab !== 'videos'}>
+              <VideosPanel taskId={d.task.id} noticeId={d.noticeId} visible={tab === 'videos'} query={videoQuery({ subject: d.subject?.name ?? '', title: d.session?.title ?? d.task.title, topics: d.topics }).q} />
+            </div>
+          )}
+          {tab === 'videos' ? null
+            : tab === 'questoes' ? <QuestionsPanel source={{ kind: 'task', taskId: d.task.id, planId: d.task.plan_id }} goal={d.task.goal_questions} answered={mine.length} />
             : tab === 'lei' ? <LawReader refs={lawRefs} />
             : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={hasSession} />
             : <SessionMaterials sessionId={d.task.session_id} />}

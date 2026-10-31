@@ -11,6 +11,7 @@ const must = <T,>(r: { data: T | null; error: { message: string } | null }): T =
 export interface Attempt { id: string; task_id: string | null; qid: string; assunto: string; correct: boolean; created_at: string }
 export interface StudyData {
   task: TaskRow & { plan_id: string; time_spent_sec: number };
+  noticeId: string;
   subject: SubjectRow | null;
   subjectIndex: number;
   session: { id: string; title: string; keyword: string; topic_ids: string[] } | null;
@@ -34,7 +35,7 @@ export const useStudy = (taskId: string | undefined) => useQuery({
     const topics = sess?.topic_ids.length ? (must(await supabase.from('notice_topics').select('id, text').in('id', sess.topic_ids)) as { id: string; text: string }[])
       .sort((a, b) => sess.topic_ids.indexOf(a.id) - sess.topic_ids.indexOf(b.id)).map((t) => t.text) : [];
     const subjectIndex = subs.findIndex((s) => s.id === task.subject_id);
-    return { task, subject: subs[subjectIndex] ?? null, subjectIndex, session: sess, topics, attempts: must(attempts) as Attempt[] };
+    return { task, noticeId: plan.notice_id, subject: subs[subjectIndex] ?? null, subjectIndex, session: sess, topics, attempts: must(attempts) as Attempt[] };
   },
 });
 

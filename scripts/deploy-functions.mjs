@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const CLI = 'supabase@2.120.0';
-const FUNCTIONS = ['notice-extract', 'plan-design', 'legal-text', 'questions', 'study-guide', 'material-map', 'practice', 'guide-voice', 'discursive'];
+const FUNCTIONS = ['notice-extract', 'plan-design', 'legal-text', 'questions', 'study-guide', 'material-map', 'practice', 'guide-voice', 'discursive', 'videos'];
 const root = new URL('..', import.meta.url);
 const env = Object.fromEntries(
   readFileSync(new URL('.env', root), 'utf8')
@@ -37,7 +37,7 @@ const secretsFile = join(dir, 'secrets.env');
 try {
   writeFileSync(
     secretsFile,
-    ['GEMINI_API_KEY', 'GEMINI_MODEL', 'ALLOWED_EMAILS', 'QUEST_API_KEY'].filter((k) => env[k]).map((k) => `${k}=${env[k]}`).join('\n'),
+    ['GEMINI_API_KEY', 'GEMINI_MODEL', 'ALLOWED_EMAILS', 'QUEST_API_KEY', 'YOUTUBE_API_KEY'].filter((k) => env[k]).map((k) => `${k}=${env[k]}`).join('\n'),
   );
   run(['secrets', 'set', '--env-file', secretsFile, '--project-ref', env.SUPABASE_PROJECT_REF]);
 } finally {

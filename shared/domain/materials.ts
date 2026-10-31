@@ -28,7 +28,7 @@ const SUBJECT_LAWS: [RegExp, string][] = [[/process\w*\s+penal/i, 'CPP'], [/proc
 const LAW_RE = /\bLei(?:\s+Complementar)?\s*(?:n[º°o.]*\s*)?(\d{1,2}\.?\d{3})(?:\s*\/\s*(\d{2,4}))?/gi;
 
 const search = (base: string, param: string, q: string) => { const u = new URL(base); u.searchParams.set(param, q); return u.href; };
-const youtube = (q: string) => search('https://www.youtube.com/results', 'search_query', q);
+export const youtube = (q: string) => search('https://www.youtube.com/results', 'search_query', q);
 const google = (q: string) => search('https://www.google.com/search', 'q', q);
 
 // Tema da tarefa sem a matéria e sem marcações de parte ("(parte 1 de 2)").
