@@ -108,6 +108,23 @@ Começar o cronômetro de uma sessão (ou o botão **Modo foco**) esconde barra 
 
 Cada questão tem uma discussão entre estudantes, liberada só depois de responder (no simulado, depois da entrega); a regra fica no banco, em funções `comment_*` e `comments_list`, sem acesso direto às tabelas. Só texto, com apelido (o e-mail nunca aparece), votos de "útil" ordenando a lista e limite de 5 comentários por minuto. Três denúncias de pessoas diferentes escondem o comentário. Não há painel: para revisar, consulte `question_comments where hidden` e, se for o caso, faça `update ... set hidden = false` e apague as linhas de `comment_reports` (ou apague o comentário). **Antes de abrir o app ao público:** publicar termos de uso com regras de comentários e canal de denúncia, e confirmar nos termos da Quest API que a discussão pública é permitida.
 
+## Acesso por convite e publicação
+
+O site fica na Netlify, ligada ao GitHub: cada push na `main` publica (`netlify.toml`). O cadastro público está desligado no Supabase, e só entra quem tem conta criada por `scripts/users.mjs`:
+
+```
+node scripts/users.mjs add email@exemplo.com     # cria a conta, libera em ALLOWED_EMAILS e mostra a senha temporária
+node scripts/users.mjs reset email@exemplo.com   # nova senha temporária (não há "esqueci a senha")
+node scripts/users.mjs remove email@exemplo.com  # encerra o acesso; os dados ficam no banco
+node scripts/users.mjs list                      # contas, último acesso e gasto de IA em 30 dias
+```
+
+A troca da senha temporária é obrigatória no primeiro acesso. Na página **Conta**, o estudante altera a senha e sai. Não há limite de IA por pessoa: o controle é a lista de convidados e o `list`. A cota do YouTube e as chaves de IA são compartilhadas.
+
+O CSP de produção fica em `web/public/_headers` e não se aplica ao `npm run dev`: recurso externo novo precisa entrar lá. Hoje ele libera o player do YouTube e as origens que a voz local baixa (cdnjs, jsDelivr e Hugging Face). A violação `script-src eval` no console é a sondagem do Zod, que ele captura; não libere `unsafe-eval` por causa dela.
+
+**Antes de abrir a qualquer pessoa:** limite de IA por usuário, termos de uso e privacidade (LGPD), canal de denúncia, e-mail transacional com "esqueci a senha" e confirmar o uso nos termos da Quest API.
+
 ## Edital verticalizado
 
 A página **Edital** lista todos os tópicos do edital por matéria: situação (não estudado, em andamento, estudado, fora do cronograma), questões, acerto, última vez visto e atalho para a próxima tarefa do tópico. Filtros: não estudados, pontos fracos e estudados sem questões. Um tópico é **ponto fraco** com pelo menos 5 questões e acerto abaixo de 75%, o mesmo limite do reforço. **Onde focar** ordena os pontos fracos pelo erro e pelo peso da matéria. Sem IA nem custo: a conta está em `shared/domain/verticalized.ts`, e o banco só soma as questões por sessão (`session_attempt_stats`).
@@ -169,5 +186,6 @@ Página **Questões**: resolver questões livres com filtros (matéria, assunto,
 | E6.1 | Edital verticalizado: situação e desempenho por tópico | feito |
 | E6.2 | Revisão de teoria: tema estudado volta em 1, 7 e 30 dias | feito |
 | E6.3 | Metas semanais e constância na tela Hoje | |
+| E7 | Publicação para convidados: login por convite, Netlify e CSP de produção | feito |
 
 O app estático original está na tag `v0-legado`.

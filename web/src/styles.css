@@ -511,3 +511,14 @@ details.card summary { cursor: pointer; font-weight: 600; }
 .video-duration { right: 6px; }
 .video-seen { left: 6px; display: inline-flex; align-items: center; gap: 4px; color: var(--lime); }
 .video-play { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; opacity: .85; filter: drop-shadow(0 2px 6px rgba(0, 0, 0, .6)); }
+
+/* Conta no celular: a barra inferior não tem espaço para mais um ícone. */
+.account-link { display: none; }
+@media (max-width: 720px) {
+  .account-link {
+    position: absolute; top: 18px; right: 16px; z-index: 5; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
+    background: var(--surface-2); border: 1px solid var(--line); color: var(--muted);
+  }
+  .main { position: relative; }
+  .page-head { padding-right: 44px; }
+}

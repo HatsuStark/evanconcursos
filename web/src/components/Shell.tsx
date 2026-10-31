@@ -1,7 +1,6 @@
-import { CalendarDays, ClipboardList, FileText, LayoutDashboard, Library, ListChecks, LogOut, PenLine } from 'lucide-react';
+import { CalendarDays, ClipboardList, FileText, LayoutDashboard, Library, ListChecks, PenLine, UserRound } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { NavLink } from 'react-router-dom';
-import { supabase } from '../lib/supabase.ts';
+import { Link, NavLink } from 'react-router-dom';
 
 const NAV = [
   { to: '/', label: 'Hoje', icon: LayoutDashboard, end: true },
@@ -28,12 +27,12 @@ export function Shell({ title, subtitle, actions, rail, focus, children }: {
           </NavLink>
         ))}
         <div className="nav-spacer" />
-        <button className="nav-item secondary-nav" style={{ border: 0, background: 'none', cursor: 'pointer' }} title="Sair" aria-label="Sair"
-          onClick={() => supabase.auth.signOut()}>
-          <LogOut size={20} />
-        </button>
+        <NavLink to="/conta" className={({ isActive }) => 'nav-item secondary-nav' + (isActive ? ' active' : '')} title="Conta" aria-label="Conta">
+          <UserRound size={20} />
+        </NavLink>
       </nav>
       <main className="main">
+        {!focus && <Link to="/conta" className="account-link" title="Conta" aria-label="Conta"><UserRound size={18} /></Link>}
         <header className="page-head">
           {!focus && (
             <div>

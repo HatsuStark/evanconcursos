@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './lib/auth.tsx';
+import { AccountPage, FirstPasswordPage } from './pages/Account.tsx';
 import { AuthPage } from './pages/Auth.tsx';
 import { DiscursivePage } from './pages/Discursive.tsx';
 import { HomePage } from './pages/Home.tsx';
@@ -19,8 +20,10 @@ export function App() {
   const { session, loading } = useAuth();
   if (loading) return <div className="center-page"><div className="spinner" /></div>;
   if (!session) return <AuthPage />;
+  if (session.user.user_metadata.must_change_password) return <FirstPasswordPage />;
   return (
     <Routes>
+      <Route path="/conta" element={<AccountPage />} />
       <Route path="/" element={<HomePage />} />
       <Route path="/concursos" element={<NoticesPage />} />
       <Route path="/concursos/novo" element={<NewNoticePage />} />
