@@ -1,0 +1,10 @@
+// Site estático no Cloudflare: o build sai em web/dist; rotas do React Router caem no index.html.
+// Os cabeçalhos de segurança vêm de web/public/_headers.
+{
+  "name": "evanconcursos",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./web/dist",
+    "not_found_handling": "single-page-application"
+  }
+}
