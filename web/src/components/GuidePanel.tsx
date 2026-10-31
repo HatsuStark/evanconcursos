@@ -15,15 +15,25 @@ interface GuideContent {
 }
 interface GuideRow { content: GuideContent; sources: string[]; unlisted_sources: string[]; unverified: string[]; model: string; created_at: string; depth: string }
 
+const POLL_MS = 4000, GIVE_UP_MS = 3 * 60 * 1000; // igual ao da função: depois disso a geração foi interrompida
+
 // Sem "gerar de novo" (economia de créditos): a apostila existente é sempre reaproveitada.
-async function fetchGuide(taskId: string, depth: string) {
-  const { data, error } = await supabase.functions.invoke('study-guide', { body: { taskId, depth } });
-  if (error) {
-    let msg = error.message;
-    try { msg = (await (error as { context?: Response }).context?.json())?.error ?? msg; } catch { /* sem JSON */ }
-    throw new Error(msg);
+// A geração roda em segundo plano no servidor; aqui só espera. null se a espera foi cancelada.
+async function fetchGuide(taskId: string, depth: string, cancelled: () => boolean) {
+  const giveUp = Date.now() + GIVE_UP_MS;
+  for (let poll = false; !cancelled(); poll = true) {
+    const { data, error } = await supabase.functions.invoke('study-guide', { body: { taskId, depth, poll } });
+    if (error) {
+      let msg = error.message;
+      try { msg = (await (error as { context?: Response }).context?.json())?.error ?? msg; } catch { /* sem JSON */ }
+      throw new Error(msg);
+    }
+    const guide = (data as { guide?: GuideRow }).guide;
+    if (guide) return guide;
+    if (Date.now() > giveUp) throw new Error('A apostila está demorando mais que o normal. Tente de novo em instantes.');
+    await new Promise((r) => setTimeout(r, POLL_MS));
   }
-  return (data as { guide: GuideRow }).guide;
+  return null;
 }
 
 const paragraphs = (t: string) => t.split(/\n\s*\n|\n/).map((p) => p.trim()).filter(Boolean);
@@ -36,11 +46,25 @@ export function GuidePanel({ taskId, hasSession }: { taskId: string; hasSession:
   const [error, setError] = useState('');
   const [open, setOpen] = useState<number | null>(null);
 
+  // Trocar de profundidade ou sair da aba cancela a espera; a apostila continua sendo gerada no servidor.
+  const loadId = useRef(0);
   async function load() {
+    const id = ++loadId.current, cancelled = () => id !== loadId.current;
     setLoading(true); setError('');
-    try { setGuide(await fetchGuide(taskId, depth)); } catch (e) { setError((e as Error).message); } finally { setLoading(false); }
+    try {
+      const g = await fetchGuide(taskId, depth, cancelled);
+      if (!cancelled()) setGuide(g);
+    } catch (e) {
+      if (!cancelled()) setError((e as Error).message);
+    } finally {
+      if (!cancelled()) setLoading(false);
+    }
   }
-  useEffect(() => { setGuide(null); if (hasSession) void load(); }, [depth, taskId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setGuide(null);
+    if (hasSession) void load();
+    return () => { loadId.current++; };
+  }, [depth, taskId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const g = guide?.content;
   const speech = useMemo(() => (g ? guideSpeech(g) : []), [g]);
@@ -67,7 +91,7 @@ export function GuidePanel({ taskId, hasSession }: { taskId: string; hasSession:
           </div>
         )}
       </div>
-      {loading && <div className="glass card" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> Montando a apostila com base no edital e na lei seca… (até 40 segundos na primeira vez)</div>}
+      {loading && <div className="glass card" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> Montando a apostila com base no edital e na lei seca… (até 40 segundos na primeira vez; pode sair desta tela, ela continua sendo feita)</div>}
       {error && <div className="glass card"><p className="error" style={{ margin: 0 }}>{error}</p><button className="btn sm" style={{ marginTop: 10 }} onClick={() => load()}>Tentar de novo</button></div>}
       {g && !loading && (
         <article ref={article} className="glass guide printable">

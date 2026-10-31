@@ -10,12 +10,12 @@ Começa como projeto pessoal (primeiro caso real: TJSP · Oficial de Justiça), 
 shared/      TypeScript puro, usado pelo web e pelas Edge Functions
   ai/        schemas Zod, prompts versionados, chamada ao Gemini e verificações da extração
   domain/    scheduler (calendário determinístico), foco adaptativo e revisão espaçada,
-             filtro do QConcursos, materiais (buscas e lei seca)
+             filtro do QConcursos, materiais (buscas e lei seca), vídeos (busca e ordenação)
 web/         React + TypeScript (Vite)
 supabase/
   migrations/ SQL versionado (aplicado com scripts/db.mjs push)
   tests/     testes pgTAP de isolamento entre usuários (scripts/db.mjs test)
-  functions/ Edge Functions: notice-extract (leitura do edital), plan-design (estratégia e sessões), study-guide (apostila), discursive (treino e correção), entre outras
+  functions/ Edge Functions: notice-extract (leitura do edital), plan-design (estratégia e sessões), study-guide (apostila), discursive (treino e correção), videos (vídeo-aulas da sessão), entre outras
 evals/       editais de referência (gabaritos) e avaliação da extração
 scripts/     legal-seed.ts (carrega as leis do registro), db.mjs (migrações e testes do banco), deploy-functions.mjs (funções e segredos), gemini-models.mjs
 ```
@@ -102,11 +102,25 @@ O botão **Ouvir** da apostila lê bloco a bloco com destaque na tela, escreve s
 
 ## Modo foco
 
-Começar o cronômetro de uma sessão (ou o botão **Modo foco**) esconde barra lateral, painel direito e título da sessão e deixa só o elemento em uso (apostila, lei, PDF ou questões) ocupando a tela, com abas, tempo, meta de questões, pausar e concluir numa barra fina no topo. **Esc** ou "Sair do foco" volta ao normal sem parar o cronômetro; concluir a tarefa pausa e sai. Dias de simulado não entram no foco: já têm tela própria.
+Começar o cronômetro de uma sessão (ou o botão **Modo foco**) esconde barra lateral, painel direito e título da sessão e deixa só o elemento em uso (apostila, vídeo, lei, PDF ou questões) ocupando a tela, com abas, tempo, meta de questões, pausar e concluir numa barra fina no topo. **Esc** ou "Sair do foco" volta ao normal sem parar o cronômetro; concluir a tarefa pausa e sai. Dias de simulado não entram no foco: já têm tela própria.
 
 ## Comentários
 
 Cada questão tem uma discussão entre estudantes, liberada só depois de responder (no simulado, depois da entrega); a regra fica no banco, em funções `comment_*` e `comments_list`, sem acesso direto às tabelas. Só texto, com apelido (o e-mail nunca aparece), votos de "útil" ordenando a lista e limite de 5 comentários por minuto. Três denúncias de pessoas diferentes escondem o comentário. Não há painel: para revisar, consulte `question_comments where hidden` e, se for o caso, faça `update ... set hidden = false` e apague as linhas de `comment_reports` (ou apague o comentário). **Antes de abrir o app ao público:** publicar termos de uso com regras de comentários e canal de denúncia, e confirmar nos termos da Quest API que a discussão pública é permitida.
+
+## Apostilas em segundo plano
+
+A apostila é gerada no servidor, sem depender da tela: dá para sair e voltar, e a tela consulta a cada 4 s até ficar pronta. Uma trava em `ai_jobs` (índice único, com liberação depois de 3 min) impede pagar duas vezes pela mesma apostila, mesmo com estudantes diferentes.
+
+Ao abrir a tela **Hoje**, no máximo uma vez por dia e plano, o app prepara as apostilas **completas** das sessões pendentes dos próximos 3 dias, até 3 por vez, na ordem do cronograma. A revisão curta só é gerada ao pedir. O que já existe não gasta nada, e uma apostila que falhou só volta a ser tentada automaticamente depois de 24 h. Custo medido: cerca de US$ 0,012 por apostila e 33 s. Com 2 sessões por dia, são cerca de US$ 0,024 por dia, valor que seria gasto de qualquer forma ao estudar essas sessões. Para mudar o horizonte ou o limite: `PREPARE_DAYS` e `PREPARE_MAX` em `supabase/functions/study-guide/index.ts`.
+
+## Vídeos
+
+A aba **Vídeos** do modo estudo sugere até 6 vídeo-aulas da sessão, com player dentro do app e marcação de assistido por concurso. Não usa IA: a função `videos` busca na YouTube Data API pelo tema da sessão, descarta Shorts (menos de 4 min), lives, vídeos sem incorporação ou bloqueados no Brasil e os que não citam o tema, e ordena por uma conta fixa (`shared/domain/videos.ts`): relevância do YouTube, tema no título, duração, visualizações e idade, com no máximo 2 por canal. Os vídeos não são revisados, e a tela avisa isso.
+
+A cota gratuita é de 10 mil unidades por dia, e cada busca nova gasta 101 (cerca de 99 buscas por dia). Por isso a busca só roda ao abrir a aba e fica guardada em `video_searches` por 30 dias, compartilhada entre sessões e estudantes; 30 dias é o limite de guarda dos termos da API. Sem chave, sem cota ou com erro, a aba mostra o link de busca do YouTube.
+
+Para ativar: no Google Cloud, ative a **YouTube Data API v3**, crie uma chave de API restrita a essa API, grave `YOUTUBE_API_KEY` no `.env` e rode `node scripts/deploy-functions.mjs`. Para avaliar a busca: `node --experimental-strip-types evals/video-run.ts "Direito Penal" "Peculato"`. **Antes de abrir o app ao público:** os termos de uso e a política de privacidade precisam citar os do YouTube e do Google.
 
 ## Discursivas
 
@@ -118,7 +132,7 @@ A tela Hoje lembra de treinar depois de 7 dias sem correção. Os treinos não v
 
 ## Excluir um concurso
 
-Na página **Concursos**, a lixeira de cada card apaga de vez o edital, os PDFs (edital e materiais), o cronograma, as tarefas, as tentativas, os simulados e os treinos de discursiva daquele concurso (`delete_notice`). Anotações, caderno de erros, flashcards e marcações de lei são por questão ou artigo: saem só se foram usados apenas nele. Fica o que também aparece em outro concurso, em questões livres ou em simulados personalizados, além dos catálogos compartilhados (apostilas, mnemônicos, questões, leis) e do registro de custo da IA. `scripts/e2e-delete-notice.ts` testa os buckets com login real.
+Na página **Concursos**, a lixeira de cada card apaga de vez o edital, os PDFs (edital e materiais), o cronograma, as tarefas, as tentativas, os simulados, os treinos de discursiva e os vídeos marcados como assistidos daquele concurso (`delete_notice`). Anotações, caderno de erros, flashcards e marcações de lei são por questão ou artigo: saem só se foram usados apenas nele. Fica o que também aparece em outro concurso, em questões livres ou em simulados personalizados, além dos catálogos compartilhados (apostilas, mnemônicos, questões, leis) e do registro de custo da IA. `scripts/e2e-delete-notice.ts` testa os buckets com login real.
 
 ## Prática além do cronograma
 
@@ -137,8 +151,8 @@ Página **Questões**: resolver questões livres com filtros (matéria, assunto,
 | E4.3 | Questões no app (Quest API): filtros automáticos por sessão, correção no servidor, explicação da IA com base na lei seca | feito |
 | E4.4 | Apostila da IA (completa ou revisão curta) baseada só no edital e na lei seca, com fontes e reaproveitamento | feito |
 | E4.5 | Biblioteca pessoal: PDFs privados, leitor PDF.js e mapeamento de páginas para as sessões | feito |
-| depois | Vídeos do YouTube integrados (precisa de chave da YouTube Data API) | |
+| E4.6 | Vídeos do YouTube no modo estudo (busca na YouTube Data API, sem IA) | feito |
 | E5 | Desempenho, reforço e discursivas | feito |
-| depois | Roteiros e materiais em segundo plano | |
+| E5.1 | Apostilas em segundo plano e preparadas com antecedência (o mapeamento de PDFs já rodava assim) | feito |
 
 O app estático original está na tag `v0-legado`.

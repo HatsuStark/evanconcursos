@@ -140,3 +140,14 @@ export const KIND_LABEL: Record<string, string> = {
   simulado: 'Simulado', eve: 'Véspera', exam: 'Prova',
 };
 export const today = () => ymd(new Date());
+
+// Deixa prontas as apostilas das próximas sessões, no máximo uma vez por dia e plano. Falha aqui não atrapalha:
+// a apostila é gerada ao abrir a sessão.
+export function prepareGuides(planId: string) {
+  const key = `guides-prepared:${planId}`, day = today();
+  try {
+    if (localStorage.getItem(key) === day) return;
+    localStorage.setItem(key, day);
+  } catch { return; }
+  void supabase.functions.invoke('study-guide', { body: { action: 'prepare', planId } }).catch(() => {});
+}

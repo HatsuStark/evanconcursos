@@ -1,12 +1,117 @@
 // Edge Function "study-guide": apostila da sessão gerada pela IA, baseada só no conteúdo do edital e nos
-// artigos oficiais da lei seca. POST {taskId, depth:'completa'|'revisao'} → {guide}.
+// artigos oficiais da lei seca, sempre em segundo plano (leva cerca de 35 s e não depende da tela aberta). POST:
+//   {taskId, depth:'completa'|'revisao'} → 200 {guide} se já existe; senão começa a gerar e responde 202 {pending}.
+//   {taskId, depth, poll:true} → como acima, mas não começa nada: 502 se a geração falhou.
+//   {action:'prepare', planId} → 202; prepara as apostilas completas das próximas sessões (ver PREPARE_*).
 // Reaproveita apostilas idênticas (mesmo tema, fontes e profundidade) entre sessões e estudantes.
 // Não há "gerar de novo" pelo estudante (economia de créditos): uma apostila existente é sempre reaproveitada.
-import { generateJson } from '../../../shared/ai/gemini.ts';
+import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { Guide, GUIDE_PROMPT_VERSION, guideCacheKey, guideJsonSchema, guidePrompt, lawKeys, pickSimilarGuide, topicKeys, unlistedLaws, verifyGuide, type GuideDepth } from '../../../shared/ai/guide.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { loadLawSources } from '../_shared/law.ts';
+
+declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
+
+const STUCK_MS = 3 * 60 * 1000; // geração interrompida: libera nova tentativa
+// Por chamada, cabe no limite de tempo da função (150 s). Horizonte curto: a sessão quase certamente será estudada.
+const PREPARE_DAYS = 3, PREPARE_MAX = 3;
+const PREPARE_RETRY_MS = 24 * 3600 * 1000; // apostila que falhou não gasta de novo sem o estudante pedir
+
+type Auth = Exclude<Awaited<ReturnType<typeof requireUser>>, Response>;
+type Admin = ReturnType<typeof adminClient>;
+
+// Tudo o que define a apostila de uma tarefa; null se a tarefa não tem sessão de conteúdo.
+async function resolve(auth: Auth, admin: Admin, task: { subject_id: string | null; session_id: string | null }, depth: GuideDepth) {
+  if (!task.session_id || !task.subject_id) return null;
+  const [{ data: session }, { data: subject }] = await Promise.all([
+    auth.client.from('study_sessions').select('title, topic_ids').eq('id', task.session_id).single(),
+    auth.client.from('notice_subjects').select('name, notice_id').eq('id', task.subject_id).single(),
+  ]);
+  const { data: notice } = await auth.client.from('notices').select('board, role_name').eq('id', subject!.notice_id).single();
+  const { data: tt } = session?.topic_ids?.length ? await auth.client.from('notice_topics').select('id, text').in('id', session.topic_ids) : { data: [] };
+  const topics = (tt ?? []).sort((a, b) => session!.topic_ids.indexOf(a.id) - session!.topic_ids.indexOf(b.id)).map((t) => t.text);
+  const { articles, law } = await loadLawSources(admin, { title: session!.title, topics, subject: subject!.name });
+  const input = { depth, banca: notice?.board ?? '', subject: subject!.name, title: session!.title, topics, law };
+  return { input, key: guideCacheKey(input), articles, noticeId: subject!.notice_id as string, cargo: (notice?.role_name ?? '') as string };
+}
+type GuideContext = NonNullable<Awaited<ReturnType<typeof resolve>>>;
+
+// 1) Apostila igual (mesmo conteúdo); 2) semelhante (mesma matéria/banca/profundidade, mesmos artigos e
+// tópicos parecidos), de qualquer sessão ou estudante. Só gera com a IA quando não há nenhuma.
+async function findGuide(admin: Admin, { input, key }: GuideContext) {
+  const { data: cached } = await admin.from('study_guides').select('*').eq('cache_key', key).maybeSingle();
+  if (cached) return cached;
+  const { data: similar } = await admin.from('study_guides').select('*').eq('subject_key', normalizeText(input.subject)).eq('depth', input.depth)
+    .eq('banca', normalizeText(input.banca)).eq('prompt_version', GUIDE_PROMPT_VERSION).order('created_at', { ascending: false }).limit(60);
+  const hit = pickSimilarGuide({ topics: topicKeys(input.topics), law: lawKeys(input.law) }, similar ?? []);
+  return hit >= 0 ? similar![hit] : null;
+}
+
+const lastJob = async (admin: Admin, key: string) => (await admin.from('ai_jobs').select('status, started_at').eq('kind', 'study_guide').eq('input->>cacheKey', key)
+  .order('created_at', { ascending: false }).limit(1).maybeSingle()).data;
+const isRunning = (job: { status: string; started_at: string | null } | null) => job?.status === 'running' && Date.now() - new Date(job.started_at ?? 0).getTime() < STUCK_MS;
+
+// Trava a geração: o índice único de ai_jobs garante uma por apostila. null se já há outra em andamento.
+async function claim(admin: Admin, ownerId: string, ctx: GuideContext, source: 'estudante' | 'preparo') {
+  await admin.from('ai_jobs').update({ status: 'failed', finished_at: new Date().toISOString(), error: 'Geração interrompida.' })
+    .eq('kind', 'study_guide').eq('status', 'running').eq('input->>cacheKey', ctx.key).lt('started_at', new Date(Date.now() - STUCK_MS).toISOString());
+  const { data, error } = await admin.from('ai_jobs').insert({
+    owner_id: ownerId, kind: 'study_guide', status: 'running', started_at: new Date().toISOString(),
+    input: { cacheKey: ctx.key, noticeId: ctx.noticeId, depth: ctx.input.depth, source },
+  }).select('id').single();
+  if (error?.code === '23505') return null;
+  if (error) throw new Error(error.message);
+  return data!.id as string;
+}
+
+async function generate(admin: Admin, ownerId: string, jobId: string, { input, key, articles, cargo }: GuideContext) {
+  const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash', started = Date.now();
+  let usage: GeminiUsage | null = null;
+  try {
+    const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: Guide, jsonSchema: guideJsonSchema(), temperature: 0.3,
+      parts: [{ text: guidePrompt({ ...input, cargo }) }] });
+    usage = r.usage;
+    const v = verifyGuide(r.data, articles, input.subject);
+    const { error } = await admin.from('study_guides').upsert({
+      cache_key: key, depth: input.depth, subject_name: input.subject, subject_key: normalizeText(input.subject), banca: normalizeText(input.banca), topic_keys: topicKeys(input.topics),
+      title: input.title, content: v.guide, sources: input.law.map((l) => l.ref), unlisted_sources: unlistedLaws([input.title, ...input.topics].join('\n')), unverified: v.unverified,
+      model, prompt_version: GUIDE_PROMPT_VERSION, created_at: new Date().toISOString(),
+    }, { onConflict: 'cache_key' });
+    if (error) throw new Error(error.message);
+    await admin.from('ai_jobs').update({ status: 'succeeded', finished_at: new Date().toISOString() }).eq('id', jobId);
+    await logUsage(admin, { ownerId, jobId, operation: 'study_guide', model, promptVersion: GUIDE_PROMPT_VERSION, usage, latencyMs: Date.now() - started, status: 'ok' });
+  } catch (err) {
+    if (err instanceof GeminiError) usage = err.usage;
+    const message = err instanceof Error ? err.message : String(err);
+    await admin.from('ai_jobs').update({ status: 'failed', finished_at: new Date().toISOString(), error: message.slice(0, 1000) }).eq('id', jobId);
+    await logUsage(admin, { ownerId, jobId, operation: 'study_guide', model, promptVersion: GUIDE_PROMPT_VERSION, usage, latencyMs: Date.now() - started, status: 'error', error: message }).catch(() => {});
+  }
+}
+
+// Uma de cada vez e na ordem do cronograma. O que já existe não conta no limite.
+async function prepare(auth: Auth, admin: Admin, planId: string) {
+  const from = new Date().toISOString().slice(0, 10), to = new Date(Date.now() + PREPARE_DAYS * 864e5).toISOString().slice(0, 10);
+  const { data: tasks } = await auth.client.from('tasks').select('subject_id, session_id').eq('plan_id', planId).is('superseded_in_version', null).is('done_at', null)
+    .not('session_id', 'is', null).gte('date', from).lte('date', to).order('date').order('position').limit(20);
+  const seen = new Set<string | null>();
+  let made = 0;
+  for (const task of tasks ?? []) {
+    if (made >= PREPARE_MAX) break;
+    if (seen.has(task.session_id)) continue;
+    seen.add(task.session_id);
+    const ctx = await resolve(auth, admin, task, 'completa');
+    if (!ctx || await findGuide(admin, ctx)) continue;
+    const job = await lastJob(admin, ctx.key);
+    const { data: failed } = await admin.from('ai_jobs').select('id').eq('kind', 'study_guide').eq('status', 'failed').eq('input->>cacheKey', ctx.key)
+      .gte('created_at', new Date(Date.now() - PREPARE_RETRY_MS).toISOString()).limit(1);
+    if (isRunning(job) || failed?.length) continue;
+    const jobId = await claim(admin, auth.user.id, ctx, 'preparo');
+    if (!jobId) continue;
+    await generate(admin, auth.user.id, jobId, ctx);
+    made++;
+  }
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -14,49 +119,28 @@ Deno.serve(async (req) => {
   const auth = await requireUser(req);
   if (auth instanceof Response) return auth;
   const body = await req.json().catch(() => ({}));
-  const depth: GuideDepth = body.depth === 'revisao' ? 'revisao' : 'completa';
   const admin = adminClient();
-  const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash';
-  const started = Date.now();
   try {
-    const { data: task } = await auth.client.from('tasks').select('id, plan_id, subject_id, session_id, title').eq('id', String(body.taskId ?? '')).maybeSingle();
-    if (!task?.session_id || !task.subject_id) return json(400, { error: 'A apostila é gerada para tarefas de teoria (com sessão de conteúdo).' });
-    const [{ data: session }, { data: subject }] = await Promise.all([
-      auth.client.from('study_sessions').select('title, topic_ids').eq('id', task.session_id).single(),
-      auth.client.from('notice_subjects').select('name, notice_id').eq('id', task.subject_id).single(),
-    ]);
-    const { data: notice } = await auth.client.from('notices').select('board, role_name').eq('id', subject!.notice_id).single();
-    const { data: tt } = session?.topic_ids?.length ? await auth.client.from('notice_topics').select('id, text').in('id', session.topic_ids) : { data: [] };
-    const topics = (tt ?? []).sort((a, b) => session!.topic_ids.indexOf(a.id) - session!.topic_ids.indexOf(b.id)).map((t) => t.text);
-
-    const { articles, law } = await loadLawSources(admin, { title: session!.title, topics, subject: subject!.name });
-    const input = { depth, banca: notice?.board ?? '', subject: subject!.name, title: session!.title, topics, law };
-    const key = guideCacheKey(input);
-    const subjectKey = normalizeText(subject!.name), banca = normalizeText(input.banca), tKeys = topicKeys(topics), lKeys = lawKeys(law);
-
-    // 1) Apostila igual (mesmo conteúdo); 2) semelhante (mesma matéria/banca/profundidade, mesmos artigos e
-    // tópicos parecidos), de qualquer sessão ou estudante. Só gera com a IA quando não há nenhuma.
-    const { data: cached } = await admin.from('study_guides').select('*').eq('cache_key', key).maybeSingle();
-    if (cached) return json(200, { guide: cached, cached: true });
-    const { data: similar } = await admin.from('study_guides').select('*').eq('subject_key', subjectKey).eq('depth', depth)
-      .eq('banca', banca).eq('prompt_version', GUIDE_PROMPT_VERSION).order('created_at', { ascending: false }).limit(60);
-    const hit = pickSimilarGuide({ topics: tKeys, law: lKeys }, similar ?? []);
-    if (hit >= 0) return json(200, { guide: similar![hit], cached: true, similar: true });
-    const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: Guide, jsonSchema: guideJsonSchema(), temperature: 0.3,
-      parts: [{ text: guidePrompt({ ...input, cargo: notice?.role_name ?? '' }) }] });
-    const v = verifyGuide(r.data, articles, subject!.name);
-    const row = {
-      cache_key: key, depth, subject_name: subject!.name, subject_key: subjectKey, banca, topic_keys: tKeys, title: session!.title, content: v.guide,
-      sources: law.map((l) => l.ref), unlisted_sources: unlistedLaws([session!.title, ...topics].join('\n')), unverified: v.unverified,
-      model, prompt_version: GUIDE_PROMPT_VERSION, created_at: new Date().toISOString(),
-    };
-    const { data: saved, error } = await admin.from('study_guides').upsert(row, { onConflict: 'cache_key' }).select('*').single();
-    if (error) throw new Error(error.message);
-    await logUsage(admin, { ownerId: auth.user.id, operation: 'study_guide', model, promptVersion: GUIDE_PROMPT_VERSION, usage: r.usage, latencyMs: Date.now() - started, status: 'ok' });
-    return json(200, { guide: saved, cached: false });
+    if (body.action === 'prepare') {
+      EdgeRuntime.waitUntil(prepare(auth, admin, String(body.planId ?? '')).catch((e) => console.error('prepare:', e)));
+      return json(202, { ok: true });
+    }
+    const depth: GuideDepth = body.depth === 'revisao' ? 'revisao' : 'completa';
+    const { data: task } = await auth.client.from('tasks').select('subject_id, session_id').eq('id', String(body.taskId ?? '')).maybeSingle();
+    const ctx = task && await resolve(auth, admin, task, depth);
+    if (!ctx) return json(400, { error: 'A apostila é gerada para tarefas de teoria (com sessão de conteúdo).' });
+    const guide = await findGuide(admin, ctx);
+    if (guide) return json(200, { guide });
+    if (body.poll) {
+      const job = await lastJob(admin, ctx.key);
+      if (!isRunning(job) && job?.status !== 'succeeded') return json(502, { error: 'Não foi possível gerar a apostila agora.' });
+      return json(202, { pending: true });
+    }
+    const jobId = await claim(admin, auth.user.id, ctx, 'estudante');
+    if (jobId) EdgeRuntime.waitUntil(generate(admin, auth.user.id, jobId, ctx));
+    return json(202, { pending: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await logUsage(admin, { ownerId: auth.user.id, operation: 'study_guide', model, promptVersion: GUIDE_PROMPT_VERSION, usage: null, latencyMs: Date.now() - started, status: 'error', error: message }).catch(() => {});
     return json(502, { error: 'Não foi possível gerar a apostila agora.', detail: message.slice(0, 300) });
   }
 });

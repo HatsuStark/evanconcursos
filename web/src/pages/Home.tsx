@@ -1,4 +1,5 @@
 import { CalendarClock, CheckCircle2, FileUp, Layers, PenLine, RotateCcw, Sparkles } from 'lucide-react';
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ReplanBanner } from '../components/ReplanBanner.tsx';
 import { Shell } from '../components/Shell.tsx';
@@ -8,7 +9,7 @@ import { useAuth } from '../lib/auth.tsx';
 import { useDiscursiveRules, useLastDiscursive } from '../lib/discursive.ts';
 import { useNotices } from '../lib/notices.ts';
 import { useDueCounts } from '../lib/practice.ts';
-import { today, useActivePlan } from '../lib/plans.ts';
+import { prepareGuides, today, useActivePlan } from '../lib/plans.ts';
 
 const DISCURSIVE_NUDGE_DAYS = 7;
 
@@ -20,6 +21,8 @@ export function HomePage() {
   const due = useDueCounts();
   const discursive = useDiscursiveRules(active.data?.notice.id);
   const lastDiscursive = useLastDiscursive(active.data?.notice.id);
+  const planId = active.data?.plan.id;
+  useEffect(() => { if (planId) prepareGuides(planId); }, [planId]);
   const name = session?.user.email?.split('@')[0] ?? '';
   const subtitle = name ? `Olá, ${name}. Pronto para estudar?` : 'Pronto para estudar?';
   if (notices.isLoading || active.isLoading) return <Shell title="Hoje" subtitle={subtitle}><div className="spinner" /></Shell>;
