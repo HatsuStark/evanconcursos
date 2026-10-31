@@ -141,6 +141,12 @@ Perto da prova, a revisão é antecipada para a véspera, e nada novo é agendad
 
 Em **Hoje**, **Ver próximas tarefas** lista as tarefas pendentes dos próximos dias, e clicar em uma matéria de **Conteúdo estudado** abre todas as aulas dela. Qualquer uma pode ser estudada antes da data. A tarefa adiantada continua na data original, já marcada como feita, e as demais não mudam de dia; a revisão de teoria conta a partir do dia da conclusão.
 
+## Metas e constância
+
+As metas da semana (segunda a domingo) saem do cronograma, sem configuração: horas, questões e tarefas previstas contra o que foi feito na semana. Tarefa adiantada ou atrasada conta na semana em que foi feita, e questões de qualquer origem contam. A constância soma os dias seguidos com pelo menos 1 minuto de cronômetro, uma questão, uma tarefa concluída ou uma discursiva corrigida. Hoje ainda sem estudo e as folgas do questionário não quebram a sequência. Depois de reorganizar ou refazer o cronograma, valem as folgas da versão ativa.
+
+O cronômetro guarda o total por tarefa, então um gatilho soma o que ele avança em `study_days`, por dia no fuso de Brasília. O tempo estudado antes dessa tabela não entra nas horas. A conta fica em `shared/domain/goals.ts`.
+
 ## Apostilas em segundo plano
 
 A apostila é gerada no servidor, sem depender da tela: dá para sair e voltar, e a tela consulta a cada 4 s até ficar pronta. Uma trava em `ai_jobs` (índice único, com liberação depois de 3 min) impede pagar duas vezes pela mesma apostila, mesmo com estudantes diferentes.
@@ -189,7 +195,7 @@ Página **Questões**: resolver questões livres com filtros (matéria, assunto,
 | E5.1 | Apostilas em segundo plano e preparadas com antecedência (o mapeamento de PDFs já rodava assim) | feito |
 | E6.1 | Edital verticalizado: situação e desempenho por tópico | feito |
 | E6.2 | Revisão de teoria: tema estudado volta em 1, 7 e 30 dias | feito |
-| E6.3 | Metas semanais e constância na tela Hoje | |
+| E6.3 | Metas semanais e constância na tela Hoje | feito |
 | E7 | Publicação para convidados: login por convite, Netlify e CSP de produção | feito |
 
 O app estático original está na tag `v0-legado`.

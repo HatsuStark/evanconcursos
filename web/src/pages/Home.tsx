@@ -4,9 +4,11 @@ import { Link } from 'react-router-dom';
 import { ReplanBanner } from '../components/ReplanBanner.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { TaskCard } from '../components/TaskCard.tsx';
+import { WeekGoals } from '../components/WeekGoals.tsx';
 import { daysUntil, fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
 import { useAuth } from '../lib/auth.tsx';
 import { useDiscursiveRules, useLastDiscursive } from '../lib/discursive.ts';
+import { useStudyActivity } from '../lib/goals.ts';
 import { useNotices } from '../lib/notices.ts';
 import { useDueCounts } from '../lib/practice.ts';
 import { prepareGuides, today, useActivePlan } from '../lib/plans.ts';
@@ -26,6 +28,7 @@ export function HomePage() {
   const lastDiscursive = useLastDiscursive(active.data?.notice.id);
   const planId = active.data?.plan.id;
   const theoryReviews = useDueTheoryReviews(planId);
+  const activity = useStudyActivity(planId);
   useEffect(() => { if (planId) prepareGuides(planId); }, [planId]);
   const [nextShown, setNextShown] = useState(0);
   const name = session?.user.email?.split('@')[0] ?? '';
@@ -51,7 +54,7 @@ export function HomePage() {
     );
   }
 
-  const { notice, subjects, tasks } = active.data;
+  const { notice, subjects, tasks, version } = active.data;
   const t0 = today(), todays = tasks.filter((t) => t.date === t0), upcoming = tasks.find((t) => t.date > t0 && !t.done_at);
   const days = daysUntil(notice.exam_date);
   const theory = tasks.filter((t) => t.kind === 'theory');
@@ -66,6 +69,7 @@ export function HomePage() {
           <span className="muted">dias até {fmtDate(notice.exam_date)}</span>
         </div>
       </section>
+      {activity.data && <WeekGoals tasks={tasks} activity={activity.data} hours={version?.inputs.hours ?? []} />}
       <section>
         <h3>Conteúdo estudado</h3>
         <div className="grid" style={{ gap: 12 }}>

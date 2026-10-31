@@ -511,6 +511,13 @@ details.card summary { cursor: pointer; font-weight: 600; }
 .lesson-row:hover .lesson-title { color: var(--cyan); }
 .lesson-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 13px; line-height: 1.4; }
 
+/* Constância na tela Hoje */
+.week-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.week-day { display: grid; place-items: center; aspect-ratio: 1; border: 1px solid var(--line); border-radius: 50%; color: var(--muted); font-size: 12px; font-weight: 600; }
+.week-day.rest { border-style: dashed; color: var(--faint); }
+.week-day.today { border-color: var(--cyan); }
+.week-day.active { border-color: var(--lime); background: var(--lime); color: #0b1020; }
+
 /* Vídeos */
 .video-player { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 12px; background: #000; }
 .video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }

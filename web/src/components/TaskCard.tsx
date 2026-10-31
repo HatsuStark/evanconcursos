@@ -24,7 +24,10 @@ export function TaskCard({ task, subjects, showDate }: { task: TaskRow; subjects
 
   async function toggle() {
     setBusy(true);
-    try { await setTaskDone(task.id, !done); await qc.invalidateQueries({ queryKey: ['active-plan'] }); } finally { setBusy(false); }
+    try {
+      await setTaskDone(task.id, !done);
+      await Promise.all([qc.invalidateQueries({ queryKey: ['active-plan'] }), qc.invalidateQueries({ queryKey: ['study-activity'] })]);
+    } finally { setBusy(false); }
   }
 
   return (
