@@ -1,12 +1,14 @@
 import { FileUp, Lock } from 'lucide-react';
 import { useRef, useState, type DragEvent, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Shell } from '../components/Shell.tsx';
 import { Steps } from '../components/ui.tsx';
-import { MAX_PDF_BYTES, uploadNotice } from '../lib/notices.ts';
+import { MAX_PDF_BYTES, rememberUpdate, uploadNotice } from '../lib/notices.ts';
 
 export function NewNoticePage() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const updating = params.get('atualizar'); // edital do plano que o novo vai atualizar
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [role, setRole] = useState('');
@@ -29,6 +31,7 @@ export function NewNoticePage() {
     setBusy(true); setError('');
     try {
       const { noticeId, jobId } = await uploadNotice(file, role);
+      if (updating) await rememberUpdate(noticeId, updating);
       navigate(`/concursos/${noticeId}/leitura/${jobId}`);
     } catch (err) {
       setError((err as Error).message);
@@ -37,7 +40,7 @@ export function NewNoticePage() {
   }
 
   return (
-    <Shell title="Novo concurso" subtitle="Envie o edital em PDF. A IA lê e organiza tudo para você conferir.">
+    <Shell title={updating ? 'Novo edital' : 'Novo concurso'} subtitle={updating ? 'Envie o novo edital em PDF. Depois de conferir, você vê o que mudou antes de qualquer alteração no plano.' : 'Envie o edital em PDF. A IA lê e organiza tudo para você conferir.'}>
       <Steps current={0} />
       <form className="glass card" style={{ display: 'grid', gap: 18, maxWidth: 720 }} onSubmit={submit}>
         <div className={'dropzone' + (over ? ' over' : '')} role="button" tabIndex={0}

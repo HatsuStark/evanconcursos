@@ -153,6 +153,23 @@ Em **Cronograma**, o estudante alterna entre **Agenda** e **Ciclo** sem refazer 
 
 Metas semanais e folgas continuam vindo do plano, e o preparo antecipado de apostilas segue as datas: no ciclo, a apostila pode ser gerada só ao abrir a sessão.
 
+## Plano sem prazo
+
+Edital com a prova já realizada também é aceito. O questionário avisa que ele não está aberto, e o plano fica sem prazo, adaptando-se ao desempenho (`shared/domain/rounds.ts`, sem IA nas rodadas). Trocar a data na conferência por uma futura e refazer o cronograma volta ao plano com data.
+
+1. **Primeira volta:** todas as sessões, em fila, sem datas nem atrasos. O número de sessões vem do tamanho do conteúdo (cada tópico, com mínimo de 4 por matéria e teto de 180), e não do tempo até a prova.
+2. **Rodadas de 2 semanas:** com menos de 3 tarefas pendentes, o app grava sozinho uma nova rodada pela `replan_version`. Os dias vão para as matérias por `peso no edital × fraqueza`; dentro de cada matéria, vêm primeiro as sessões mais fracas e há mais tempo sem ver. Sessão fraca vira **Reforço**, e a boa ou ainda sem dados vira **Manutenção**, com 5 a 10 questões da própria sessão.
+3. **Equilíbrio:** nenhuma matéria passa de 40% da rodada, e toda matéria aparece; se faltarem dias, ficam as há mais tempo sem estudo. Há um simulado a cada 4 semanas e a revisão semanal, se foi pedida no questionário.
+4. **Edital dominado:** a tela Hoje troca a contagem regressiva por esse percentual, ponderado pelo peso das matérias. Uma sessão conta com 80% de acerto nas últimas 10 questões e estudo nos últimos 60 dias. Sem isso, deixa de contar.
+
+A revisão de teoria segue os intervalos normais de 1, 7 e 30 dias. Depois disso, os temas voltam pelas rodadas. Esses valores são pontos de partida, ainda sem medição com uso real.
+
+**Novo edital:** no plano sem prazo, **Saiu novo edital?** envia o PDF pelo fluxo normal de leitura e conferência e mostra o que mudou, sem alterar o plano (`shared/domain/notice-diff.ts`, sem IA). Cada tópico novo é comparado aos antigos: **igual**, **mudou um pouco** ou **novo**; na dúvida, conta como novo. Leis diferentes nunca casam, e artigo que o edital antigo não citava é apontado. Um tópico longo só conta como estudado com todas as suas sessões concluídas. Trocar banca, cargo ou órgão gera aviso.
+
+Ao confirmar, o plano do novo edital é gerado com o conteúdo novo primeiro em cada matéria; a sessão já estudada vira tarefa de **Revisão**, com a apostila curta. A `adopt_notice_update` arquiva o plano e o edital antigos, com o histórico, leva as apostilas, que são mapeadas de novo, e leva o desempenho das matérias equivalentes, salvo se a banca mudou. Ajustes manuais de páginas não vão junto, porque apontam para as sessões antigas. Excluir o concurso apaga também os editais antigos que ele substituiu. Edital novo sem data fica sem prazo.
+
+Avaliação com editais reais (`node --experimental-strip-types evals/notice-diff-run.ts <antigo.pdf> <novo.pdf>`): TJSP Escrevente 2023 → 2025 deu 32 iguais, 7 parecidos e 4 novos; TJSP × TJRJ, concursos diferentes, deu 0 coincidências em 70 tópicos.
+
 ## Metas e constância
 
 As metas da semana (segunda a domingo) saem do cronograma, sem configuração: horas, questões e tarefas previstas contra o que foi feito na semana. Tarefa adiantada ou atrasada conta na semana em que foi feita, e questões de qualquer origem contam. A constância soma os dias seguidos com pelo menos 1 minuto de cronômetro, uma questão, uma tarefa concluída ou uma discursiva corrigida. Hoje ainda sem estudo e as folgas do questionário não quebram a sequência. Depois de reorganizar ou refazer o cronograma, valem as folgas da versão ativa.
@@ -191,7 +208,7 @@ Na página **Concursos**, a lixeira de cada card apaga de vez o edital, os PDFs 
 
 ## Prática além do cronograma
 
-Página **Questões**: resolver questões livres com filtros (matéria, assunto, banca, ano, dificuldade, tipo — inclusive Certo/Errado —, órgão, cargo, só inéditas), **caderno de erros** (toda questão errada volta em 1, 7 e 30 dias), **flashcards** (Leitner; nascem das questões erradas e dos mnemônicos), **simulados** (do concurso, na estrutura de blocos e nota mínima do edital, completo ou reduzido, ou personalizados; com ou sem cronômetro; correção só na entrega) e **desempenho por contexto** (cronograma, livres, simulados, revisão). Os dias de simulado do cronograma abrem o simulado do concurso. No modo estudo, as questões são a última aba, a lei seca só aparece em assuntos de legislação, a explicação abre o artigo citado ("ver artigo") e cada bateria termina com resumo por assunto e tempo médio.
+Página **Questões**: resolver questões livres com filtros (matéria, assunto, banca, ano, dificuldade, tipo — inclusive Certo/Errado —, órgão, cargo, só inéditas) e 1, 5 ou 10 questões por página, buscando só o que a página mostra (`shared/qbank/materias.ts` põe as matérias principais no topo da busca, sem depender de acento, aceita abreviações como "proc penal" e troca nomes quase vazios da API pela versão cheia: "Direito Processual Civil" tem 7 questões, "Direito Processual Civil - CPC 2015" tem mais de 6 mil; o cronograma segue a mesma troca e liga "Português" a "Língua Portuguesa", não a "Alfabeto português"), **caderno de erros** (toda questão errada volta em 1, 7 e 30 dias), **flashcards** (Leitner; nascem das questões erradas e dos mnemônicos), **simulados** (do concurso, na estrutura de blocos e nota mínima do edital, completo ou reduzido, ou personalizados; com ou sem cronômetro; correção só na entrega) e **desempenho por contexto** (cronograma, livres, simulados, revisão). Os dias de simulado do cronograma abrem o simulado do concurso. No modo estudo, as questões são a última aba, a lei seca só aparece em assuntos de legislação, a explicação abre o artigo citado ("ver artigo") e cada bateria termina com resumo por assunto e tempo médio.
 
 ## Leitor de PDF e trechos
 

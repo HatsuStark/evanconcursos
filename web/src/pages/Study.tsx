@@ -3,6 +3,7 @@ import { BookOpen, Check, FileText, ListChecks, Maximize2, Minimize2, Pause, Pla
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { evaluate } from '../../../shared/domain/adaptive.ts';
+import { REVIEW_PREFIX } from '../../../shared/ai/plan-build.ts';
 import { videoQuery } from '../../../shared/domain/videos.ts';
 import { GuidePanel } from '../components/GuidePanel.tsx';
 import { LawReader } from '../components/LawReader.tsx';
@@ -178,7 +179,7 @@ function StudyView({ d }: { d: StudyData }) {
           {tab === 'videos' ? null
             : tab === 'questoes' ? <QuestionsPanel source={{ kind: 'task', taskId: d.task.id, planId: d.task.plan_id }} goal={d.task.goal_questions} answered={mine.length} />
             : tab === 'lei' ? <LawReader refs={lawRefs} />
-            : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={hasSession} initialDepth={params.has('revisao') ? 'revisao' : 'completa'} />
+            : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={hasSession} initialDepth={params.has('revisao') || d.task.title.startsWith(REVIEW_PREFIX) ? 'revisao' : 'completa'} />
             : <SessionMaterials sessionId={d.task.session_id} minutes={d.task.kind === 'theory' ? d.task.minutes : 0} />}
         </>
       )}

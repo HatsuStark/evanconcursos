@@ -1,12 +1,14 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Clock, Sparkles } from 'lucide-react';
+import { AlertTriangle, Clock, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { LEVEL_NAMES, type PlanInputs } from '../../../shared/ai/plan.ts';
 import { ymd } from '../../../shared/domain/dates.ts';
+import { subjectEquivalence } from '../../../shared/domain/notice-diff.ts';
+import { isOpenEnded } from '../../../shared/domain/rounds.ts';
 import { Shell } from '../components/Shell.tsx';
-import { Steps, SubjectIcon } from '../components/ui.tsx';
-import { generatePlan, useActivePlan, type GenProgress, type SubjectRow } from '../lib/plans.ts';
+import { fmtDate, Steps, SubjectIcon } from '../components/ui.tsx';
+import { generatePlan, updatePlanFromNotice, useActivePlan, type GenProgress, type SubjectRow } from '../lib/plans.ts';
 import { supabase } from '../lib/supabase.ts';
 
 const DAYS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
@@ -14,9 +16,12 @@ const DAYS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 // Questionário: disponibilidade, nível por matéria e perfil. Gera (ou refaz) o cronograma com IA.
 export function QuestionnairePage() {
   const { noticeId } = useParams();
+  const [params] = useSearchParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const previousId = params.get('de'); // novo edital: atualiza o plano do edital anterior
   const existing = useActivePlan(noticeId);
+  const previous = useActivePlan(previousId ?? noticeId);
   const subjects = useQuery({
     queryKey: ['subjects', noticeId],
     queryFn: async () => {
@@ -25,24 +30,38 @@ export function QuestionnairePage() {
       return data as SubjectRow[];
     },
   });
+  const notice = useQuery({
+    queryKey: ['notice-exam-date', noticeId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('notices').select('exam_date').eq('id', noticeId!).single();
+      if (error) throw new Error(error.message);
+      return data as { exam_date: string | null };
+    },
+  });
   const [inputs, setInputs] = useState<PlanInputs | null>(null);
   const [progress, setProgress] = useState<GenProgress | null>(null);
   const [error, setError] = useState('');
 
   // Respostas anteriores (ao refazer) ou padrão.
   useEffect(() => {
-    if (inputs || !subjects.data || existing.isLoading) return;
-    const prev = existing.data?.version?.inputs;
+    if (inputs || !subjects.data || existing.isLoading || previous.isLoading) return;
+    const source = existing.data ?? (previousId ? previous.data : null), prev = source?.version?.inputs;
+    // No novo edital, o nível de cada matéria vem da matéria equivalente do plano anterior.
+    const equivalent = source && !existing.data ? subjectEquivalence(source.subjects, subjects.data) : {};
+    const carried = Object.fromEntries(Object.entries(equivalent).map(([from, to]) => [to, prev?.levels[from]]));
     setInputs({
       hours: prev?.hours ?? [2, 2, 2, 2, 2, 4, 0], startDate: ymd(new Date()), weeklyReview: prev?.weeklyReview ?? true, profile: prev?.profile ?? '',
-      levels: Object.fromEntries(subjects.data.map((s) => [s.id, prev?.levels[s.id] ?? 1])),
+      levels: Object.fromEntries(subjects.data.map((s) => [s.id, prev?.levels[s.id] ?? carried[s.id] ?? 1])),
     });
-  }, [subjects.data, existing.isLoading, existing.data, inputs]);
+  }, [subjects.data, existing.isLoading, existing.data, previous.isLoading, previous.data, previousId, inputs]);
 
   if (!inputs || !subjects.data) return <Shell title="Questionário"><div className="spinner" /></Shell>;
   const weekly = inputs.hours.reduce((a, h) => a + h, 0);
   const set = (patch: Partial<PlanInputs>) => setInputs({ ...inputs, ...patch });
   const regenerate = !!existing.data;
+  const pastExam = isOpenEnded(notice.data?.exam_date, ymd(new Date()));
+  const openEnded = pastExam || (!!previousId && !!notice.data && !notice.data.exam_date);
+  const updating = !!previousId && !regenerate;
 
   async function submit() {
     if (!inputs || !noticeId) return;
@@ -50,8 +69,14 @@ export function QuestionnairePage() {
     if (regenerate && !confirm('Refazer o cronograma a partir de hoje? Tarefas concluídas e o histórico ficam guardados.')) return;
     setError('');
     try {
-      await generatePlan(noticeId, inputs, setProgress);
-      await qc.invalidateQueries();
+      if (updating) {
+        const failed = await updatePlanFromNotice(noticeId, inputs, setProgress);
+        await qc.invalidateQueries();
+        if (failed) alert(`${failed === 1 ? '1 apostila não foi mapeada' : `${failed} apostilas não foram mapeadas`} para o plano novo. Em Meus materiais, use "Mapear de novo".`);
+      } else {
+        await generatePlan(noticeId, inputs, setProgress);
+        await qc.invalidateQueries();
+      }
       navigate('/cronograma');
     } catch (e) {
       setError((e as Error).message);
@@ -64,6 +89,7 @@ export function QuestionnairePage() {
       { key: 'strategy', label: 'Definindo a estratégia e a prioridade de cada matéria' },
       { key: 'sessions', label: `Dividindo o conteúdo em sessões de estudo${progress.step === 'sessions' ? ` (${progress.done} de ${progress.total} matérias)` : ''}` },
       { key: 'saving', label: 'Montando o calendário e salvando' },
+      ...(updating ? [{ key: 'materials', label: `Mapeando suas apostilas para o novo plano${progress.step === 'materials' ? ` (${progress.done + 1} de ${progress.total})` : ''}` }] : []),
     ];
     const idx = steps.findIndex((s) => s.key === progress.step);
     return (
@@ -92,15 +118,25 @@ export function QuestionnairePage() {
         <h3>Como funciona</h3>
         <p className="muted small" style={{ margin: 0, lineHeight: 1.6 }}>
           A IA define a prioridade das matérias pelo peso no edital, seu nível e seu perfil, e divide o conteúdo em sessões na ordem de aprendizado.
-          O calendário (teoria, consolidação com questões, revisões semanais, simulados e véspera) é montado até a data da prova, respeitando suas horas.
+          {openEnded
+            ? ' Depois da primeira volta pelo conteúdo, o plano segue em rodadas de duas semanas, montadas pelo seu desempenho, respeitando suas horas.'
+            : ' O calendário (teoria, consolidação com questões, revisões semanais, simulados e véspera) é montado até a data da prova, respeitando suas horas.'}
         </p>
       </section>
     </>
   );
 
   return (
-    <Shell title="Questionário" subtitle={regenerate ? 'Ajuste suas respostas para refazer o cronograma a partir de hoje.' : 'Algumas perguntas para montar um plano do seu jeito.'} rail={rail}>
+    <Shell title="Questionário" subtitle={updating ? 'Confira suas respostas: o novo plano aproveita o que você já estudou.' : regenerate ? 'Ajuste suas respostas para refazer o cronograma a partir de hoje.' : 'Algumas perguntas para montar um plano do seu jeito.'} rail={rail}>
       <Steps current={2} />
+      {openEnded && (
+        <div className="warning-card" role="status" style={{ marginBottom: 16 }}>
+          <AlertTriangle />
+          <span>{pastExam
+            ? <><strong>Este edital não está aberto:</strong> a prova foi em {fmtDate(notice.data?.exam_date)}. Seu plano não terá prazo e vai se adaptando ao seu desempenho. O próximo edital pode mudar conteúdo e banca.</>
+            : <><strong>Este edital não informa a data da prova.</strong> Seu plano não terá prazo e vai se adaptando ao seu desempenho.</>}</span>
+        </div>
+      )}
       <div className="glass card" style={{ display: 'grid', gap: 16 }}>
         <h2 style={{ margin: 0, fontSize: 20 }}><Clock size={18} style={{ verticalAlign: -2, color: 'var(--cyan)' }} /> Quantas horas você pode estudar em cada dia?</h2>
         <div className="hours-grid">
@@ -139,7 +175,7 @@ export function QuestionnairePage() {
         placeholder="Ex.: trabalho 8h por dia; sou formado em Administração; nunca estudei Direito; já fiz provas da VUNESP; tenho dificuldade em Matemática." />
 
       <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', marginTop: 24 }}>
-        <button className="btn" onClick={submit}><Sparkles size={18} /> {regenerate ? 'Refazer cronograma com IA' : 'Gerar cronograma com IA'}</button>
+        <button className="btn" onClick={submit}><Sparkles size={18} /> {updating ? 'Atualizar meu plano com IA' : regenerate ? 'Refazer cronograma com IA' : 'Gerar cronograma com IA'}</button>
         {error && <span className="error" role="alert">{error}</span>}
       </div>
     </Shell>

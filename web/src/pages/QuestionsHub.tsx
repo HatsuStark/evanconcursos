@@ -3,12 +3,14 @@ import { BarChart3, Layers, ListChecks, Plus, RotateCcw, Search, Trash2, Trophy,
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ERROR_REASONS } from '../../../shared/domain/replan.ts';
+import { resolveMateria } from '../../../shared/qbank/materias.ts';
 import { QuestionsPanel } from '../components/QuestionsPanel.tsx';
+import { SearchSelect } from '../components/SearchSelect.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { SimuladoStarter } from '../components/SimuladoStarter.tsx';
 import { useActivePlan } from '../lib/plans.ts';
 import {
-  createSimulado, deleteCard, filterLists, reviewCard, useAttemptStats, useDueCounts, useFlashcards, useMappedMaterias, useSimulados,
+  createSimulado, deleteCard, filterLists, reviewCard, useAttemptStats, useDueCounts, useFlashcards, useMappedMaterias, useMateriaOptions, useSimulados,
   type Ctx, type FreeFilters,
 } from '../lib/practice.ts';
 
@@ -43,11 +45,16 @@ export function QuestionsHubPage() {
   );
 }
 
-// Lista com busca no servidor (matérias, bancas) ou carregada uma vez (assuntos da matéria).
 function useDebounced<T>(v: T, ms = 350) {
   const [d, setD] = useState(v);
   useEffect(() => { const t = setTimeout(() => setD(v), ms); return () => clearTimeout(t); }, [v, ms]);
   return d;
+}
+
+// Campo de matéria: ao sair, troca o que foi digitado pelo nome oficial, se bater ignorando acento e maiúscula.
+function MateriaField({ value, onChange, placeholder }: { value: string; onChange: (materia: string) => void; placeholder: string }) {
+  const { options, loading } = useMateriaOptions(value);
+  return <SearchSelect label="Matéria" value={value} options={options} loading={loading} placeholder={placeholder} onChange={onChange} onPick={onChange} onBlur={() => { if (value.trim()) onChange(resolveMateria(value, options)); }} />;
 }
 
 function FreePractice() {
@@ -55,12 +62,17 @@ function FreePractice() {
   const mapped = useMappedMaterias();
   const [f, setF] = useState<FreeFilters>({ materia: '', onlyNew: true });
   const [active, setActive] = useState<FreeFilters | null>(null);
-  const mq = useDebounced(f.materia), bq = useDebounced(f.banca ?? '');
-  const materias = useQuery({ queryKey: ['f-materias', mq], enabled: mq.length >= 3, queryFn: () => filterLists.materias(mq) });
+  const bq = useDebounced(f.banca ?? '');
+  const { options: materias } = useMateriaOptions(f.materia);
   const bancas = useQuery({ queryKey: ['f-bancas', bq], enabled: bq.length >= 2, queryFn: () => filterLists.bancas(bq) });
-  const assuntos = useQuery({ queryKey: ['f-assuntos', f.materia], enabled: !!materias.data?.items.includes(f.materia) || !!mapped.data?.includes(f.materia), queryFn: () => filterLists.assuntos(f.materia) });
-  const set = (p: Partial<FreeFilters>) => setF({ ...f, ...p });
+  const assuntos = useQuery({ queryKey: ['f-assuntos', f.materia], enabled: materias.includes(f.materia) || !!mapped.data?.includes(f.materia), queryFn: () => filterLists.assuntos(f.materia) });
+  const set = (p: Partial<FreeFilters>) => setF((cur) => ({ ...cur, ...p }));
   const g = geral.data?.data ?? {};
+  // Buscar com texto solto ("portugues") vale pela melhor opção, e o campo passa a mostrar o nome oficial.
+  function search() {
+    const materia = resolveMateria(f.materia, materias, true), next = { ...f, materia };
+    setF(next); setActive(next);
+  }
 
   return (
     <div className="grid" style={{ gap: 16 }}>
@@ -71,10 +83,9 @@ function FreePractice() {
           </div>
         )}
         <div className="row">
-          <label className="field">Matéria
-            <input className="input" list="dl-materias" value={f.materia} onChange={(e) => set({ materia: e.target.value, assunto: '' })} placeholder="Digite para buscar (ex.: Direito Penal)" />
-            <datalist id="dl-materias">{materias.data?.items.map((m) => <option key={m} value={m} />)}</datalist>
-          </label>
+          <div className="field"><span>Matéria</span>
+            <MateriaField value={f.materia} onChange={(materia) => set(materia === f.materia ? {} : { materia, assunto: '' })} placeholder="Digite para buscar (ex.: português, proc penal)" />
+          </div>
           <label className="field">Assunto
             <select className="select" value={f.assunto ?? ''} onChange={(e) => set({ assunto: e.target.value })} disabled={!assuntos.data}>
               <option value="">Todos</option>{assuntos.data?.items.map((a) => <option key={a} value={a}>{a}</option>)}
@@ -82,10 +93,9 @@ function FreePractice() {
           </label>
         </div>
         <div className="row">
-          <label className="field">Banca
-            <input className="input" list="dl-bancas" value={f.banca ?? ''} onChange={(e) => set({ banca: e.target.value })} placeholder="Qualquer" />
-            <datalist id="dl-bancas">{bancas.data?.items.map((b) => <option key={b} value={b} />)}</datalist>
-          </label>
+          <div className="field"><span>Banca</span>
+            <SearchSelect label="Banca" value={f.banca ?? ''} options={bancas.data?.items ?? []} loading={bancas.isFetching} placeholder="Qualquer" onChange={(banca) => set({ banca })} onPick={(banca) => set({ banca })} />
+          </div>
           <label className="field">Ano<select className="select" value={f.ano ?? ''} onChange={(e) => set({ ano: e.target.value })}><option value="">Qualquer</option>{(g.anos ?? []).map((a) => <option key={String(a)} value={String(a)}>{String(a)}</option>)}</select></label>
           <label className="field">Dificuldade<select className="select" value={f.dificuldade ?? ''} onChange={(e) => set({ dificuldade: e.target.value })}><option value="">Qualquer</option>{[1, 2, 3, 4, 5].map((d) => <option key={d} value={d}>{['Muito fácil', 'Fácil', 'Média', 'Difícil', 'Muito difícil'][d - 1]}</option>)}</select></label>
           <label className="field">Tipo<select className="select" value={f.tipo ?? ''} onChange={(e) => set({ tipo: e.target.value })}><option value="">Todos</option>{(g.tiposQuestao ?? ['multipla escolha', 'Certo ou errado']).map((t) => <option key={t} value={t}>{t}</option>)}</select></label>
@@ -95,9 +105,9 @@ function FreePractice() {
           <label className="field">Cargo (contém)<input className="input" value={f.cargo ?? ''} onChange={(e) => set({ cargo: e.target.value })} placeholder="Ex.: Escrevente" /></label>
           <label className="check"><input type="checkbox" checked={f.onlyNew !== false} onChange={(e) => set({ onlyNew: e.target.checked })} /> Só questões que nunca respondi</label>
         </div>
-        <button className="btn" style={{ justifySelf: 'start' }} disabled={!f.materia.trim()} onClick={() => setActive({ ...f })}><Search size={16} /> Buscar questões</button>
+        <button className="btn" style={{ justifySelf: 'start' }} disabled={!f.materia.trim()} onClick={search}><Search size={16} /> Buscar questões</button>
       </div>
-      {active && <QuestionsPanel key={JSON.stringify(active)} source={{ kind: 'free', filters: active }} />}
+      {active && <QuestionsPanel key={JSON.stringify(active)} source={{ kind: 'free', filters: active }} paged />}
       <p className="faint small" style={{ margin: 0 }}>Questões livres ficam num histórico próprio (aba Desempenho → Livres) e não alteram o desempenho do cronograma. As erradas entram no caderno de erros.</p>
     </div>
   );
@@ -105,7 +115,7 @@ function FreePractice() {
 
 function ReviewTab({ count }: { count: number }) {
   const [started, setStarted] = useState(false);
-  if (started) return <QuestionsPanel source={{ kind: 'review' }} />;
+  if (started) return <QuestionsPanel source={{ kind: 'review' }} paged />;
   return (
     <div className="glass card" style={{ display: 'grid', gap: 12 }}>
       <h3 style={{ margin: 0 }}>Caderno de erros</h3>
@@ -179,7 +189,6 @@ function CustomSimulado() {
   const [timed, setTimed] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const mapped = useMappedMaterias();
   const total = rows.reduce((a, r) => a + (r.materia ? r.count : 0), 0);
   async function start() {
     setBusy(true); setError('');
@@ -192,10 +201,9 @@ function CustomSimulado() {
     <details className="glass card">
       <summary style={{ cursor: 'pointer', fontWeight: 600 }}><Plus size={15} style={{ verticalAlign: -2 }} /> Simulado personalizado</summary>
       <div className="grid" style={{ gap: 12, marginTop: 14 }}>
-        <datalist id="dl-mapped">{mapped.data?.map((m) => <option key={m} value={m} />)}</datalist>
         {rows.map((r, i) => (
           <div key={i} className="row">
-            <label className="field">Matéria<input className="input" list="dl-mapped" value={r.materia} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, materia: e.target.value } : x)))} placeholder="Nome da matéria no banco de questões" /></label>
+            <div className="field"><span>Matéria</span><MateriaField value={r.materia} onChange={(materia) => setRows((cur) => cur.map((x, j) => (j === i ? { ...x, materia } : x)))} placeholder="Digite para buscar (ex.: português)" /></div>
             <label className="field" style={{ flex: '0 1 110px' }}>Questões<input className="input" type="number" min={1} max={50} value={r.count} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, count: Number(e.target.value) || 1 } : x)))} /></label>
             {rows.length > 1 && <button className="icon-btn" aria-label="Remover matéria" onClick={() => setRows(rows.filter((_, j) => j !== i))}><X size={16} /></button>}
           </div>

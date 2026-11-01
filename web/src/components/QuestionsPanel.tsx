@@ -31,21 +31,26 @@ interface QState {
 }
 const blank = (): QState => ({ chosen: null, struck: [], result: null, explanation: null, mnemonic: undefined, tab: null });
 
+const PAGE_SIZES = [1, 5, 10];
+const PAGE_KEY = 'questions-per-page';
+const storedPageSize = () => { try { const n = Number(localStorage.getItem(PAGE_KEY)); return PAGE_SIZES.includes(n) ? n : 1; } catch { return 1; } };
+
 // Resolução de questões: navegação livre, tachar, responder com botão, abas (explicação, mnemônico,
-// anotações) e resumo da bateria. Tempo só existe no simulado.
-export function QuestionsPanel({ source, goal = 0, answered = 0 }: { source: Source; goal?: number; answered?: number }) {
-  const qc = useQueryClient();
+// anotações) e resumo da bateria. Com `paged`, o estudante escolhe quantas ver por página. Tempo só existe no simulado.
+export function QuestionsPanel({ source, goal = 0, answered = 0, paged = false }: { source: Source; goal?: number; answered?: number; paged?: boolean }) {
   const taskId = source.kind === 'task' ? source.taskId : null;
   const [queue, setQueue] = useState<Question[]>([]);
   const [states, setStates] = useState<Record<string, QState>>({});
-  const [idx, setIdx] = useState(0);
+  const [idx, setIdx] = useState(0); // primeira questão da página
+  const [pageSize, setPageSize] = useState(() => (paged ? storedPageSize() : 1));
   const [assuntos, setAssuntos] = useState<string[]>([]);
   const [reason, setReason] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<'' | 'answer' | 'explain' | 'mnemonic'>('');
   const [error, setError] = useState('');
   const [summary, setSummary] = useState(false);
   const fetching = useRef(false);
+  const sizeRef = useRef(pageSize);
+  sizeRef.current = pageSize;
   // A busca depende do conteúdo da origem, não da identidade do objeto (que muda a cada renderização).
   const srcKey = JSON.stringify(source), srcRef = useRef(source);
   srcRef.current = source;
@@ -56,8 +61,9 @@ export function QuestionsPanel({ source, goal = 0, answered = 0 }: { source: Sou
     fetching.current = true;
     if (initial) setLoading(true);
     try {
+      // Cada questão nova custa créditos: a busca livre traz só o que a página vai mostrar.
       const r = source.kind === 'task' ? await nextQuestions(source.taskId, 5)
-        : source.kind === 'free' ? await searchFree(source.filters, 10)
+        : source.kind === 'free' ? await searchFree(source.filters, Math.max(sizeRef.current, 5))
         : { ...(await reviewDue(20)), reason: 'revisao' as string | null };
       setQueue((q) => [...q, ...r.questions.filter((n) => !q.some((o) => o.qid === n.qid))]);
       const filter = (r as { filter?: { assuntos: string[] } }).filter;
@@ -68,16 +74,93 @@ export function QuestionsPanel({ source, goal = 0, answered = 0 }: { source: Sou
     } catch (e) { setError((e as Error).message); } finally { setLoading(false); fetching.current = false; }
   }, [srcKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void load(true); }, [load]);
-  useEffect(() => { if (queue.length && idx >= queue.length - 2 && !reason) void load(); }, [idx, queue.length, reason, load]);
+  // Com uma por página, deixa folga para a próxima abrir na hora; com mais, só carrega ao faltar questão na página.
+  useEffect(() => { if (queue.length && queue.length < idx + pageSize + (pageSize === 1 ? 2 : 0) && !reason) void load(); }, [idx, pageSize, queue.length, reason, load]);
 
-  const q = queue[idx];
-  const st = (q && states[q.qid]) || blank();
-  const patch = (p: Partial<QState>) => q && setStates((s) => ({ ...s, [q.qid]: { ...(s[q.qid] ?? blank()), ...p } }));
+  // Avançar além do que já veio dispara a busca acima: a próxima página só gasta créditos se for aberta. Se não vier nada, volta.
+  useEffect(() => { if (reason && queue.length && idx >= queue.length) setIdx(Math.floor((queue.length - 1) / pageSize) * pageSize); }, [reason, idx, queue.length, pageSize]);
+
   const go = (i: number) => {
-    if (i < 0 || i >= queue.length) return;
-    const next = queue[i]!;
-    setIdx(i); setError(''); setSummary(false); window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (i < 0 || (i >= queue.length && (reason || i > idx + pageSize))) return;
+    setIdx(Math.floor(i / pageSize) * pageSize); setError(''); setSummary(false); window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+  function changeSize(n: number) {
+    setPageSize(n);
+    setIdx(Math.floor(idx / n) * n); // a questão atual continua na tela
+    try { localStorage.setItem(PAGE_KEY, String(n)); } catch { /* sem armazenamento */ }
+  }
+
+  if (loading) return <div className="glass card" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> Buscando questões…</div>;
+  if (!queue[idx] && queue.length && !reason && !error) return <div className="glass card" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> Buscando questões…</div>;
+  if (!queue[idx]) return <div className="glass card">{error ? <p className="error" style={{ margin: 0 }}>{error}</p> : <p style={{ margin: 0 }}>{source.kind === 'free' ? 'Nenhuma questão inédita com esses filtros. Tente outra matéria ou tire algum filtro.' : REASON[reason ?? ''] ?? 'Nenhuma questão encontrada.'}</p>}</div>;
+
+  const done = queue.filter((x) => states[x.qid]?.result);
+  if (summary) return <BatchSummary queue={queue} states={states} onBack={() => setSummary(false)} />;
+  const visible = queue.slice(idx, idx + pageSize), hasNext = idx + pageSize < queue.length || !reason;
+  const unit = pageSize === 1 ? 'Questão' : 'Página';
+  const pages = Array.from({ length: Math.ceil(queue.length / pageSize) }, (_, p) => queue.slice(p * pageSize, (p + 1) * pageSize));
+  return (
+    <div className="grid" style={{ gap: 14, gridTemplateColumns: 'minmax(0, 1fr)' }}>
+      {goal > 0 && answered >= goal && <div className="glass card goal-done"><CheckCircle2 size={18} /> Meta de {goal} questões atingida! Você pode concluir a tarefa ou continuar treinando.</div>}
+
+      {paged && (
+        <div className="q-page-size">
+          <span className="muted small" id="q-page-size-label">Questões por página</span>
+          <div className="segmented" role="group" aria-labelledby="q-page-size-label">
+            {PAGE_SIZES.map((n) => <button key={n} className={pageSize === n ? 'on' : ''} aria-pressed={pageSize === n} onClick={() => changeSize(n)}>{n}</button>)}
+          </div>
+        </div>
+      )}
+
+      <nav className="q-nav glass" aria-label={pageSize === 1 ? 'Navegação entre questões' : 'Navegação entre páginas'}>
+        <button className="icon-btn" onClick={() => go(idx - pageSize)} disabled={idx === 0} aria-label={`${unit} anterior`}><ChevronLeft size={18} /></button>
+        <div className="q-dots">
+          {pageSize === 1 ? queue.map((x, i) => {
+            const s = states[x.qid];
+            return <button key={x.qid} className={'q-dot' + (i === idx ? ' on' : '') + (s?.result ? (s.result.correct ? ' right' : ' wrong') : s?.chosen ? ' picked' : '')}
+              onClick={() => go(i)} aria-label={`Questão ${i + 1}${s?.result ? (s.result.correct ? ', certa' : ', errada') : ''}`}>{i + 1}</button>;
+          }) : pages.map((items, p) => {
+            // Uma página pode misturar acertos e erros: a cor diz só até onde foi respondida.
+            const n = items.filter((x) => states[x.qid]?.result).length;
+            return <button key={p} className={'q-dot' + (p * pageSize === idx ? ' on' : '') + (n === items.length ? ' done' : n || items.some((x) => states[x.qid]?.chosen) ? ' picked' : '')}
+              onClick={() => go(p * pageSize)} aria-label={`Página ${p + 1}, ${n} de ${items.length} respondidas`}>{p + 1}</button>;
+          })}
+          {!reason && <span className="faint small">…</span>}
+        </div>
+        {!!done.length && <button className="btn ghost sm" onClick={() => setSummary(true)}><BarChart3 size={15} /> Resumo</button>}
+        <button className="icon-btn" onClick={() => go(idx + pageSize)} disabled={!hasNext} aria-label={`Próxima ${unit.toLowerCase()}`}><ChevronRight size={18} /></button>
+      </nav>
+
+      {visible.map((q, i) => (
+        <QuestionCard key={q.qid} q={q} number={idx + i + 1} st={states[q.qid] ?? blank()} source={source} single={pageSize === 1} isLast={!hasNext}
+          onPatch={(p) => setStates((s) => ({ ...s, [q.qid]: { ...(s[q.qid] ?? blank()), ...p } }))}
+          onPrev={() => go(idx - 1)} onNext={() => go(idx + 1)} onSummary={() => setSummary(true)} />
+      ))}
+
+      {pageSize > 1 && (
+        <div className="q-page-nav">
+          <button className="btn ghost sm" disabled={idx === 0} onClick={() => go(idx - pageSize)}><ChevronLeft size={15} /> Página anterior</button>
+          {hasNext ? <button className="btn sm" onClick={() => go(idx + pageSize)}>Próxima página <ChevronRight size={15} /></button>
+            : !!done.length && <button className="btn sm" onClick={() => setSummary(true)}><BarChart3 size={15} /> Ver resumo</button>}
+        </div>
+      )}
+      {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
+      <p className="faint small" style={{ margin: 0 }}>Questões do banco Quest API{assuntos.length ? ` · assuntos desta sessão: ${assuntos.slice(0, 3).join(', ')}` : ''}.</p>
+    </div>
+  );
+}
+
+// Uma questão: alternativas, resposta, explicação, mnemônico, anotações e comentários. Os atalhos de teclado só valem
+// com uma questão na tela, porque com várias não dá para saber a qual delas a tecla se refere.
+function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, onNext, onSummary }: {
+  q: Question; number: number; st: QState; source: Source; single: boolean; isLast: boolean;
+  onPatch: (p: Partial<QState>) => void; onPrev: () => void; onNext: () => void; onSummary: () => void;
+}) {
+  const qc = useQueryClient();
+  const taskId = source.kind === 'task' ? source.taskId : null;
+  const [busy, setBusy] = useState<'' | 'answer' | 'explain' | 'mnemonic'>('');
+  const [error, setError] = useState('');
+  const patch = onPatch;
 
   const select = (letra: string) => { if (!st.result && !st.struck.includes(letra)) patch({ chosen: st.chosen === letra ? null : letra }); };
   const strike = (letra: string) => {
@@ -85,8 +168,8 @@ export function QuestionsPanel({ source, goal = 0, answered = 0 }: { source: Sou
     patch({ struck: st.struck.includes(letra) ? st.struck.filter((l) => l !== letra) : [...st.struck, letra], chosen: st.chosen === letra ? null : st.chosen });
   };
   async function answer() {
-    if (!q || !st.chosen || st.result) return;
-    setBusy('answer');
+    if (!st.chosen || st.result) return;
+    setBusy('answer'); setError('');
     try {
       const r = await answerQuestion(taskId, q.qid, st.chosen, source.kind === 'task' ? 'plan' : source.kind);
       patch({ result: r, tab: 'explicacao' });
@@ -95,72 +178,49 @@ export function QuestionsPanel({ source, goal = 0, answered = 0 }: { source: Sou
     } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
   }
   async function explain() {
-    if (!q) return;
-    setBusy('explain');
+    setBusy('explain'); setError('');
     try { patch({ explanation: (await explainQuestion(taskId, q.qid)).explanation }); } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
   }
   async function mnemonic() {
-    if (!q) return;
-    setBusy('mnemonic');
+    setBusy('mnemonic'); setError('');
     try { patch({ mnemonic: (await mnemonicFor(taskId, q.qid)).mnemonic }); } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
   }
 
   // Atalhos: letras escolhem, Enter responde, setas navegam (fora de campos de texto).
   useEffect(() => {
+    if (!single) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!q || summary || e.ctrlKey || e.metaKey || e.altKey || /^(TEXTAREA|INPUT|SELECT)$/.test((e.target as HTMLElement).tagName)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey || /^(TEXTAREA|INPUT|SELECT)$/.test((e.target as HTMLElement).tagName)) return;
       const opt = optionsOf(q).find((a) => a.letra.toLowerCase() === e.key.toLowerCase());
       if (opt) { e.preventDefault(); select(opt.letra); }
       else if (e.key === 'Enter') { e.preventDefault(); void answer(); }
-      else if (e.key === 'ArrowRight') go(idx + 1);
-      else if (e.key === 'ArrowLeft') go(idx - 1);
+      else if (e.key === 'ArrowRight') onNext();
+      else if (e.key === 'ArrowLeft') onPrev();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  if (loading) return <div className="glass card" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> Buscando questões…</div>;
-  if (!q) return <div className="glass card">{error ? <p className="error" style={{ margin: 0 }}>{error}</p> : <p style={{ margin: 0 }}>{REASON[reason ?? ''] ?? 'Nenhuma questão encontrada.'}</p>}</div>;
-
-  const done = queue.filter((x) => states[x.qid]?.result);
-  if (summary) return <BatchSummary queue={queue} states={states} onBack={() => setSummary(false)} />;
   // Aba Mnemônico só quando faz sentido: já existe, ou a questão tem cara de conteúdo memorizável (regra
   // gratuita). Se a IA avaliar que não cabe, some (e fica descartada para todos).
   const showMnemo = st.mnemonic !== null && mayHaveMnemonic(q);
   const tab: Tab = st.tab === 'mnemonico' && !showMnemo ? 'explicacao' : st.tab ?? 'anotacoes';
   return (
-    <div className="grid" style={{ gap: 14 }}>
-      {goal > 0 && answered >= goal && <div className="glass card goal-done"><CheckCircle2 size={18} /> Meta de {goal} questões atingida! Você pode concluir a tarefa ou continuar treinando.</div>}
-
-      <nav className="q-nav glass" aria-label="Navegação entre questões">
-        <button className="icon-btn" onClick={() => go(idx - 1)} disabled={idx === 0} aria-label="Questão anterior"><ChevronLeft size={18} /></button>
-        <div className="q-dots">
-          {queue.map((x, i) => {
-            const s = states[x.qid];
-            return <button key={x.qid} className={'q-dot' + (i === idx ? ' on' : '') + (s?.result ? (s.result.correct ? ' right' : ' wrong') : s?.chosen ? ' picked' : '')}
-              onClick={() => go(i)} aria-label={`Questão ${i + 1}${s?.result ? (s.result.correct ? ', certa' : ', errada') : ''}`}>{i + 1}</button>;
-          })}
-          {!reason && <span className="faint small">…</span>}
-        </div>
-        {!!done.length && <button className="btn ghost sm" onClick={() => setSummary(true)}><BarChart3 size={15} /> Resumo</button>}
-        <button className="icon-btn" onClick={() => go(idx + 1)} disabled={idx >= queue.length - 1} aria-label="Próxima questão"><ChevronRight size={18} /></button>
-      </nav>
-
       <article className="glass q-card">
         {source.kind === 'review' && <span className="badge orange" style={{ justifySelf: 'start' }}><RotateCcw size={12} /> Revisão do caderno de erros</span>}
-        <QuestionBody q={q} number={idx + 1} chosen={st.chosen} struck={st.struck} gabarito={st.result?.gabarito ?? null} locked={!!st.result} onSelect={select} onStrike={strike} />
+        <QuestionBody q={q} number={number} chosen={st.chosen} struck={st.struck} gabarito={st.result?.gabarito ?? null} locked={!!st.result} onSelect={select} onStrike={strike} />
 
         {st.result ? (
           <div className={'q-result ' + (st.result.correct ? 'ok' : 'bad')}>
             {st.result.correct ? <><CheckCircle2 size={20} /> Você acertou!</> : <><XCircle size={20} /> Resposta certa: {st.result.gabarito}</>}
             <div style={{ flex: 1 }} />
-            {idx < queue.length - 1 ? <button className="btn sm" onClick={() => go(idx + 1)}>Próxima <ChevronRight size={15} /></button>
-              : <button className="btn sm" onClick={() => setSummary(true)}><BarChart3 size={15} /> Ver resumo</button>}
+            {single && (!isLast ? <button className="btn sm" onClick={onNext}>Próxima <ChevronRight size={15} /></button>
+              : <button className="btn sm" onClick={onSummary}><BarChart3 size={15} /> Ver resumo</button>)}
           </div>
         ) : (
           <div className="q-actions">
             <button className="btn" disabled={!st.chosen || busy === 'answer'} onClick={answer}>{busy === 'answer' ? <><span className="spinner" /> Corrigindo…</> : 'Responder'}</button>
-            <span className="faint small">Atalhos: letras para escolher · Enter responde · ← → navega · <Scissors size={11} /> tacha</span>
+            {single && <span className="faint small">Atalhos: letras para escolher · Enter responde · ← → navega · <Scissors size={11} /> tacha</span>}
           </div>
         )}
 
@@ -180,8 +240,6 @@ export function QuestionsPanel({ source, goal = 0, answered = 0 }: { source: Sou
         {tab === 'comentarios' && st.result && <CommentsPanel qid={q.qid} />}
         {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
       </article>
-      <p className="faint small" style={{ margin: 0 }}>Questões do banco Quest API{assuntos.length ? ` · assuntos desta sessão: ${assuntos.slice(0, 3).join(', ')}` : ''}.</p>
-    </div>
   );
 }
 

@@ -1,7 +1,9 @@
 // Prática fora do cronograma: questões livres, caderno de erros, flashcards, simulados e desempenho por contexto.
 import { useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 import { ymd } from '../../../shared/domain/dates.ts';
 import type { ErrorReason } from '../../../shared/domain/replan.ts';
+import { rankMaterias } from '../../../shared/qbank/materias.ts';
 import type { Question } from './questions.ts';
 import { supabase } from './supabase.ts';
 
@@ -24,6 +26,15 @@ export const filterLists = {
   assuntos: (materia: string, q = '') => practice<{ items: string[] }>({ action: 'filters', kind: 'assuntos', materia, q }),
   bancas: (q: string) => practice<{ items: string[] }>({ action: 'filters', kind: 'bancas', q }),
 };
+export const useMateriaOptions = (text: string) => {
+  const q = useDebounced(text), found = useQuery({ queryKey: ['f-materias', q], enabled: q.trim().length >= 3, queryFn: () => filterLists.materias(q) });
+  return { options: rankMaterias(text, found.data?.items ?? []), loading: found.isFetching };
+};
+function useDebounced<T>(v: T, ms = 350) {
+  const [d, setD] = useState(v);
+  useEffect(() => { const t = setTimeout(() => setD(v), ms); return () => clearTimeout(t); }, [v, ms]);
+  return d;
+}
 export const searchFree = (filters: FreeFilters, count = 10) => practice<{ questions: Question[]; reason: string | null }>({ action: 'search', filters, count });
 export const reviewDue = (count = 15) => practice<{ questions: Question[]; stages: Record<string, { stage: number; wrong: number }> }>({ action: 'review', count });
 

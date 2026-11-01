@@ -35,7 +35,7 @@ export function ReviewPage() {
     try {
       await approveNotice(notice.id, extraction?.id ?? null, draft);
       await qc.invalidateQueries();
-      navigate(`/concursos/${notice.id}/questionario`);
+      navigate(notice.replaces_notice_id ? `/concursos/${notice.id}/comparar` : `/concursos/${notice.id}/questionario`);
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);

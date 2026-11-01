@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { theoryGoal } from '../domain/scheduler.ts';
-import { buildPlanPayload, theoryPlan, type PlanBase } from './plan-build.ts';
+import { buildPlanPayload, carryOverSessions, theoryPlan, type PlanBase } from './plan-build.ts';
 import { fallbackSessions, repairSessions, type SubjectSessions } from './plan.ts';
 
 function rng(seed: number) { return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32; }; }
@@ -40,6 +40,30 @@ describe('repairSessions: qualquer resposta da IA vira n sessões cobrindo todos
   });
   it('fallback sem IA também cumpre os invariantes', () => {
     for (const [T, n] of [[1, 1], [3, 10], [10, 3], [7, 7], [40, 1], [1, 25]] as const) assertValid(fallbackSessions(topicsOf(T), n), n, T);
+  });
+});
+
+describe('carryOverSessions', () => {
+  const s = (title: string, topics: number[]) => ({ title, keyword: '', topics });
+  it('põe o novo antes e marca como revisão só o que foi todo estudado', () => {
+    const r = carryOverSessions([s('A', [0]), s('B', [1]), s('C', [0, 1]), s('D', [])], ['t0', 't1'], new Set(['t0']));
+    expect(r.sessions.map((x) => x.title)).toEqual(['B', 'C', 'D', 'A']);
+    expect([...r.review]).toEqual([3]);
+  });
+  it('tópico inexistente não conta como estudado', () => {
+    expect(carryOverSessions([s('A', [9])], ['t0'], new Set(['t0'])).review.size).toBe(0);
+  });
+  it('a tarefa da sessão já estudada é de revisão, e a sessão guarda o título original', () => {
+    const base: PlanBase = { examDate: '2027-06-01', totalQuestions: 10, weights: {}, inputs: { hours: [2, 2, 2, 2, 2, 0, 0], startDate: '2026-11-02', weeklyReview: false, profile: '', levels: {} },
+      subjects: [{ id: 'a', name: 'A', core: true, questions: 5, weight: 3, topics: [{ id: 't0', text: 'x' }, { id: 't1', text: 'y' }] }] };
+    const n = theoryPlan(base).a!.days;
+    const list = Array.from({ length: n }, (_, i) => s(`Sessão ${i}`, [i === 0 ? 0 : 1]));
+    const { sessions, review } = carryOverSessions(list, ['t0', 't1'], new Set(['t0']));
+    const p = buildPlanPayload(base, { a: sessions }, { a: review });
+    const theory = p.tasks.filter((t) => t.kind === 'theory');
+    expect(theory[0]!.title).toBe('Sessão 1');
+    expect(theory[theory.length - 1]!.title).toBe('Revisão: Sessão 0');
+    expect(p.sessions[n - 1]!.title).toBe('Sessão 0');
   });
 });
 

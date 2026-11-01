@@ -108,7 +108,7 @@ export function topicInText(topic: string, haystack: string): boolean {
 export function checkNotice(e: NoticeExtraction, pdfText: string | null, today = new Date()): NoticeWarning[] {
   const out: NoticeWarning[] = [];
   if (!e.examDate) out.push({ code: 'exam_date_missing', message: 'O edital não informa a data da prova (ou ela não foi encontrada). Defina a data para gerar o cronograma.' });
-  else if (new Date(e.examDate + 'T12:00:00') < today) out.push({ code: 'exam_date_past', message: `A data da prova (${e.examDate.split('-').reverse().join('/')}) já passou.` });
+  else if (new Date(e.examDate + 'T12:00:00') < today) out.push({ code: 'exam_date_past', message: `A prova (${e.examDate.split('-').reverse().join('/')}) já foi realizada: este edital não está aberto. Você pode continuar, e o plano não terá prazo, adaptando-se ao seu desempenho.` });
   const names = new Set<string>();
   for (const s of e.subjects) {
     const key = normalizeText(s.name);

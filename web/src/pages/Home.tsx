@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cycleProgress, cycleQueue } from '../../../shared/domain/cycle.ts';
 import { groupReviews } from '../../../shared/domain/theory-reviews.ts';
+import { OpenPlanCard } from '../components/OpenPlanCard.tsx';
 import { ReplanBanner } from '../components/ReplanBanner.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { TaskCard } from '../components/TaskCard.tsx';
@@ -57,7 +58,7 @@ export function HomePage() {
     );
   }
 
-  const { plan, notice, subjects, tasks, version } = active.data;
+  const { plan, notice, subjects, tasks, version, openEnded } = active.data;
   const isCycle = plan.pacing === 'ciclo';
   const t0 = today(), todays = tasks.filter((t) => t.date === t0), upcoming = tasks.find((t) => t.date > t0 && !t.done_at);
   const days = daysUntil(notice.exam_date);
@@ -68,13 +69,15 @@ export function HomePage() {
 
   const rail = (
     <>
-      <section>
-        <h3>Prova</h3>
-        <div className="glass card" style={{ display: 'grid', gap: 6 }}>
-          <strong style={{ fontSize: 34, color: 'var(--cyan)', textShadow: '0 0 18px rgba(42,212,232,.5)' }}>{days != null ? Math.max(0, days) : '—'}</strong>
-          <span className="muted">dias até {fmtDate(notice.exam_date)}</span>
-        </div>
-      </section>
+      {!openEnded && (
+        <section>
+          <h3>Prova</h3>
+          <div className="glass card" style={{ display: 'grid', gap: 6 }}>
+            <strong style={{ fontSize: 34, color: 'var(--cyan)', textShadow: '0 0 18px rgba(42,212,232,.5)' }}>{days != null ? Math.max(0, days) : '—'}</strong>
+            <span className="muted">dias até {fmtDate(notice.exam_date)}</span>
+          </div>
+        </section>
+      )}
       {activity.data && <WeekGoals tasks={tasks} activity={activity.data} hours={version?.inputs.hours ?? []} />}
       <section>
         <h3>Conteúdo estudado</h3>
@@ -122,11 +125,12 @@ export function HomePage() {
         <h2 style={{ fontSize: 28, margin: '14px 0 4px' }}>{notice.role_name}</h2>
         <p className="muted" style={{ margin: '0 0 18px' }}>{[notice.organization, notice.board].filter(Boolean).join(' · ')}</p>
         <div className="meta-row">
-          <span className="chip" style={{ color: 'var(--cyan)' }}><CalendarClock /> Prova {fmtDate(notice.exam_date)}</span>
+          <span className="chip" style={{ color: 'var(--cyan)' }}><CalendarClock /> {openEnded ? 'Sem prazo' : `Prova ${fmtDate(notice.exam_date)}`}</span>
           <span className="chip" style={{ color: 'var(--blue)' }}><Layers /> {subjects.length} matérias</span>
           <span className="chip" style={{ color: 'var(--lime)' }}><CheckCircle2 /> {tasks.filter((t) => t.done_at).length} tarefas feitas</span>
         </div>
       </div>
+      <OpenPlanCard active={active.data} />
       <ReplanBanner active={active.data} />
       {!!(due.data?.errors || due.data?.cards) && (
         <div className="glass card review-today">
@@ -167,12 +171,14 @@ export function HomePage() {
       )}
       {isCycle ? (
         <>
-          <div className="section-title"><h2>Próximas do ciclo</h2><span className="badge cyan">{pace.done} de {pace.total} tarefas</span></div>
-          <p className="muted small" style={{ margin: '0 0 12px' }}>
-            {pace.behind ? `${pace.behind} ${pace.behind === 1 ? 'tarefa' : 'tarefas'} atrás do ritmo para terminar antes da prova.` : pace.ahead ? `${pace.ahead} ${pace.ahead === 1 ? 'tarefa' : 'tarefas'} à frente do ritmo.` : 'No ritmo para terminar antes da prova.'}
-          </p>
+          <div className="section-title"><h2>{openEnded ? 'Próximas tarefas' : 'Próximas do ciclo'}</h2><span className="badge cyan">{pace.done} de {pace.total} tarefas</span></div>
+          {!openEnded && (
+            <p className="muted small" style={{ margin: '0 0 12px' }}>
+              {pace.behind ? `${pace.behind} ${pace.behind === 1 ? 'tarefa' : 'tarefas'} atrás do ritmo para terminar antes da prova.` : pace.ahead ? `${pace.ahead} ${pace.ahead === 1 ? 'tarefa' : 'tarefas'} à frente do ritmo.` : 'No ritmo para terminar antes da prova.'}
+            </p>
+          )}
           {queue.length ? <div className="grid" style={{ gap: 12 }}>{queue.slice(0, cycleShown).map((t) => <TaskCard key={t.id} task={t} subjects={subjects} />)}</div>
-            : <div className="glass card"><p style={{ margin: 0 }}>Você concluiu todas as tarefas do ciclo.</p></div>}
+            : <div className="glass card"><p style={{ margin: 0 }}>{openEnded ? 'Montando sua próxima rodada…' : 'Você concluiu todas as tarefas do ciclo.'}</p></div>}
           {queue.length > cycleShown && <button className="btn ghost sm" style={{ marginTop: 12 }} onClick={() => setNextShown(nextShown + NEXT_TASKS_STEP)}>Ver mais</button>}
         </>
       ) : (

@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cycleProgress, cycleQueue } from '../../../shared/domain/cycle.ts';
 import { parseYmd, ymd } from '../../../shared/domain/dates.ts';
+import { OpenPlanCard } from '../components/OpenPlanCard.tsx';
 import { PacingSwitch } from '../components/PacingSwitch.tsx';
 import { ReplanBanner } from '../components/ReplanBanner.tsx';
 import { Shell } from '../components/Shell.tsx';
@@ -35,7 +36,7 @@ export function SchedulePage() {
       </Shell>
     );
   }
-  const { plan, notice, version, subjects, tasks } = active.data;
+  const { plan, notice, version, subjects, tasks, openEnded } = active.data;
   const isCycle = plan.pacing === 'ciclo';
   const done = tasks.filter((t) => t.done_at).length, studyTasks = tasks.filter((t) => t.kind !== 'exam');
 
@@ -56,7 +57,7 @@ export function SchedulePage() {
         <div className="glass card" style={{ display: 'grid', gap: 8 }}>
           <strong style={{ fontSize: 30, color: 'var(--lime)', textShadow: '0 0 16px rgba(181,229,80,.4)' }}>{done}<span className="muted" style={{ fontSize: 16 }}> / {studyTasks.length}</span></strong>
           <div className="bar"><span style={{ width: `${(done / Math.max(1, studyTasks.length)) * 100}%`, background: 'var(--lime)', boxShadow: '0 0 10px var(--lime)' }} /></div>
-          <span className="muted small">tarefas concluídas · prova em {fmtDate(notice.exam_date)}</span>
+          <span className="muted small">tarefas concluídas{openEnded ? ' · sem prazo' : ` · prova em ${fmtDate(notice.exam_date)}`}</span>
         </div>
       </section>
       {!!version?.strategy.advice.length && (
@@ -85,7 +86,7 @@ export function SchedulePage() {
         </div>
       </section>
       <section>
-        <p className="faint small" style={{ margin: '0 0 10px' }}>Versão {version?.number}{version?.reason === 'adaptive' ? ' (reorganizada)' : ''} · {version && new Date(version.created_at).toLocaleDateString('pt-BR')}</p>
+        <p className="faint small" style={{ margin: '0 0 10px' }}>Versão {version?.number}{version?.reason === 'adaptive' ? (openEnded ? ' (rodada adaptativa)' : ' (reorganizada)') : ''} · {version && new Date(version.created_at).toLocaleDateString('pt-BR')}</p>
         <Link className="btn ghost sm" to={`/concursos/${notice.id}/questionario`}><RefreshCw size={15} /> Refazer cronograma</Link>
       </section>
     </>
@@ -95,11 +96,11 @@ export function SchedulePage() {
     const queue = cycleQueue(tasks), pace = cycleProgress(tasks, today());
     return (
       <Shell title="Cronograma" subtitle={[notice.role_name, notice.board].filter(Boolean).join(' · ')} rail={rail}>
-        <PacingSwitch planId={plan.id} pacing={plan.pacing} />
-        <div className="section-title"><h2>Fila do ciclo</h2><span className="badge cyan">{queue.length} {queue.length === 1 ? 'pendente' : 'pendentes'}</span></div>
-        {!!pace.behind && <p className="muted small" style={{ margin: '0 0 12px' }}>{pace.behind} {pace.behind === 1 ? 'tarefa' : 'tarefas'} atrás do ritmo para terminar antes da prova.</p>}
+        {openEnded ? <OpenPlanCard active={active.data} /> : <PacingSwitch planId={plan.id} pacing={plan.pacing} />}
+        <div className="section-title"><h2>{openEnded ? 'Sua fila' : 'Fila do ciclo'}</h2><span className="badge cyan">{queue.length} {queue.length === 1 ? 'pendente' : 'pendentes'}</span></div>
+        {!openEnded && !!pace.behind && <p className="muted small" style={{ margin: '0 0 12px' }}>{pace.behind} {pace.behind === 1 ? 'tarefa' : 'tarefas'} atrás do ritmo para terminar antes da prova.</p>}
         {queue.length ? <div className="grid" style={{ gap: 12 }}>{queue.slice(0, queueShown).map((t) => <TaskCard key={t.id} task={t} subjects={subjects} />)}</div>
-          : <div className="glass card muted">Você concluiu todas as tarefas do ciclo.</div>}
+          : <div className="glass card muted">{openEnded ? 'Montando sua próxima rodada…' : 'Você concluiu todas as tarefas do ciclo.'}</div>}
         {queue.length > queueShown && <button className="btn ghost sm" style={{ marginTop: 12 }} onClick={() => setQueueShown(queueShown + QUEUE_STEP)}>Ver mais</button>}
       </Shell>
     );

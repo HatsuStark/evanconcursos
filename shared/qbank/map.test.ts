@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { theoryGoal } from '../domain/scheduler.ts';
-import { equalIncidence, measureIncidence, planPicks, searchFilters } from './map.ts';
+import { equalIncidence, mapSession, mapSubject, measureIncidence, planPicks, searchFilters, type MapDeps } from './map.ts';
 
 const tally = (picks: string[]) => picks.reduce<Record<string, number>>((m, a) => ({ ...m, [a]: (m[a] ?? 0) + 1 }), {});
 
@@ -52,6 +52,34 @@ describe('measureIncidence', () => {
     const r = await measureIncidence(async () => { calls++; return 1; }, { ...filter, materia: 'Atualidades' }, 'FGV');
     expect(r).toEqual(equalIncidence(['a', 'b']));
     expect(calls).toBe(0);
+  });
+});
+
+describe('matéria quase vazia', () => {
+  const deps = (found: string[], pick = ''): MapDeps => ({
+    materias: async () => found,
+    assuntosOf: async (m) => (m === 'Atualidades' ? ['a', 'b', 'c', 'd', 'e'] : Array.from({ length: 200 }, (_, i) => `${m} ${i}`)),
+    ai: (async () => ({ materia: pick, assuntos: ['Atualidades e Conhecimentos Gerais 1'] })) as MapDeps['ai'],
+  });
+  it('a disciplina fica com a versão cheia, mesmo com o nome igual ao da vazia', async () => {
+    const r = await mapSubject(deps(['Atualidades', 'Atualidades do Mercado Financeiro', 'Atualidades e Conhecimentos Gerais']), { name: 'Atualidades', topics: [] });
+    expect(r.materia).toBe('Atualidades e Conhecimentos Gerais');
+  });
+  it('a sessão sem assunto na disciplina também não cai na vazia', async () => {
+    const r = await mapSession(deps(['Atualidades'], 'Atualidades e Conhecimentos Gerais'), null, { subject: 'Conhecimentos', title: 'Atualidades', keyword: 'atualidades', topics: [] });
+    expect(r.materia).toBe('Atualidades e Conhecimentos Gerais');
+    expect(r.assuntos).toEqual(['Atualidades e Conhecimentos Gerais 1']);
+  });
+});
+
+describe('disciplina com nome que não bate pelas palavras', () => {
+  const deps: MapDeps = { materias: async () => ['Alfabeto português'], assuntosOf: async () => ['a', 'b', 'c'], ai: (async () => { throw new Error('não deveria chamar a IA'); }) as MapDeps['ai'] };
+  it('"Português" vai para Língua Portuguesa, não para "Alfabeto português"', async () => {
+    for (const name of ['Português', 'PORTUGUÊS', 'Noções de Português', 'Português e Redação']) expect((await mapSubject(deps, { name, topics: [] })).materia).toBe('Língua Portuguesa');
+  });
+  it('raciocínio lógico e inglês têm nome certo sem gastar IA', async () => {
+    expect((await mapSubject(deps, { name: 'Raciocínio Lógico-Matemático', topics: [] })).materia).toBe('Raciocínio Lógico');
+    expect((await mapSubject(deps, { name: 'Inglês', topics: [] })).materia).toBe('Língua Inglesa');
   });
 });
 

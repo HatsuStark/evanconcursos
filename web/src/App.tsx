@@ -6,6 +6,7 @@ import { DiscursivePage } from './pages/Discursive.tsx';
 import { HomePage } from './pages/Home.tsx';
 import { MaterialsPage } from './pages/Materials.tsx';
 import { NewNoticePage } from './pages/NewNotice.tsx';
+import { NoticeComparePage } from './pages/NoticeCompare.tsx';
 import { NoticesPage } from './pages/Notices.tsx';
 import { QuestionsHubPage } from './pages/QuestionsHub.tsx';
 import { SimuladoPage } from './pages/Simulado.tsx';
@@ -31,6 +32,7 @@ export function App() {
       <Route path="/concursos/:noticeId/leitura/:jobId" element={<ReadingPage />} />
       <Route path="/concursos/:noticeId/conferencia" element={<ReviewPage />} />
       <Route path="/concursos/:noticeId/questionario" element={<QuestionnairePage />} />
+      <Route path="/concursos/:noticeId/comparar" element={<NoticeComparePage />} />
       <Route path="/cronograma" element={<SchedulePage />} />
       <Route path="/edital" element={<VerticalizedPage />} />
       <Route path="/revisoes" element={<ReviewsPage />} />

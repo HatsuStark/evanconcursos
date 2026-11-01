@@ -11,7 +11,8 @@ export const WEAK_MARK = '*fracos*';
 export const theoryGoal = (minutes: number) => Math.min(10, Math.max(5, Math.round(minutes / 12)));
 
 export interface SubjectInput { name: string; core: boolean }
-export interface ScheduleInput { startDate: string; examDate: string; subjects: SubjectInput[] }
+// openEnded: plano sem prazo. examDate é só o fim da primeira volta, e o calendário tem apenas teoria e revisão semanal.
+export interface ScheduleInput { startDate: string; examDate: string; subjects: SubjectInput[]; openEnded?: boolean }
 export interface SubjectConfig { weight: number; level: number; topics: string[] }
 export interface ScheduleConfig { hours: number[]; weeklyReview: boolean; subjects: Record<string, SubjectConfig> }
 
@@ -125,16 +126,17 @@ export function generateSchedule(input: ScheduleInput, rawConfig: unknown): Sche
   const slots: Slot[] = [];
   for (const d = new Date(monday); d <= exam || slots.length % 7; d.setDate(d.getDate() + 1)) {
     const wd = (d.getDay() + 6) % 7, inRange = d >= start && d < exam, hours = inRange ? cfg.hours[wd]! : 0;
+    const isExam = d.getTime() === exam.getTime() && !input.openEnded;
     slots.push({
       date: new Date(d), week: Math.floor(slots.length / 7), hours, phase: '',
-      text: d.getTime() === exam.getTime() ? 'PROVA' : !inRange ? '' : hours ? '' : 'Descanso', subject: '', keyword: '', goal: 0,
-      kind: d.getTime() === exam.getTime() ? 'exam' : inRange && !hours ? 'rest' : '', item: -1,
+      text: isExam ? 'PROVA' : !inRange ? '' : hours ? '' : 'Descanso', subject: '', keyword: '', goal: 0,
+      kind: isExam ? 'exam' : inRange && !hours ? 'rest' : '', item: -1,
     });
   }
   let study = slots.filter((s) => s.hours > 0);
   if (study.length < input.subjects.length + 1) throw Error('Pouco tempo até a prova para cobrir todas as matérias com essas horas.');
   // Véspera da prova: revisão leve.
-  Object.assign(study.pop()!, { text: 'Revisão leve e descanso', phase: 'final', kind: 'eve' });
+  if (!input.openEnded) Object.assign(study.pop()!, { text: 'Revisão leve e descanso', phase: 'final', kind: 'eve' });
   // Revisão semanal: último dia de estudo de cada semana com 4 ou mais dias de estudo.
   if (cfg.weeklyReview) {
     const byWeek = new Map<number, Slot[]>();
@@ -144,8 +146,8 @@ export function generateSchedule(input: ScheduleInput, rawConfig: unknown): Sche
   }
   const N = study.length, names = input.subjects.map((s) => s.name);
   if (N < names.length) throw Error('Pouco tempo até a prova para cobrir todas as matérias com essas horas.');
-  const finalN = N >= 40 ? Math.round(N * 0.15) : N >= 15 ? Math.round(N * 0.1) : 0;
-  const consolN = N >= 30 ? Math.round(N * 0.15) : 0;
+  const finalN = input.openEnded ? 0 : N >= 40 ? Math.round(N * 0.15) : N >= 15 ? Math.round(N * 0.1) : 0;
+  const consolN = input.openEnded ? 0 : N >= 30 ? Math.round(N * 0.15) : 0;
   const theoryN = Math.max(names.length, N - finalN - consolN);
   const theory = study.slice(0, theoryN), consol = study.slice(theoryN, theoryN + consolN), final = study.slice(theoryN + consolN);
   // Peso efetivo: importância no edital × reforço para quem tem menos domínio (iniciante pesa 2×, avançado 1×).

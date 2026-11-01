@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { normalizeText } from '../ai/notice.ts';
 import { findLawRefs } from '../legal/refs.ts';
 import { lawByKey } from '../legal/registry.ts';
+import { fullMaterias, subjectMateria } from './materias.ts';
 
 export const QMAP_PROMPT_VERSION = 'qmap-v3';
 
@@ -82,12 +83,14 @@ export interface SessionFilter { materia: string | null; assuntos: string[]; how
 
 async function candidates(d: MapDeps, q: string) {
   const parts = q.split(' ').filter((w) => w.length > 3);
-  return [...new Set([...(await d.materias(q)), ...(parts.length > 1 ? await d.materias(parts[parts.length - 1]!) : [])])];
+  return fullMaterias([...(await d.materias(q)), ...(parts.length > 1 ? await d.materias(parts[parts.length - 1]!) : [])]);
 }
 
 // Matéria da disciplina: pontuação pelo nome, mas matéria "vazia" (≤ 2 assuntos) perde para a versão cheia
 // (ex.: "Direito Processual Civil" × "Direito Processual Civil - CPC 2015"). IA só nos casos ambíguos.
 export async function mapSubject(d: MapDeps, subject: { name: string; topics: string[] }): Promise<{ materia: string | null; how: string }> {
+  const known = subjectMateria(subject.name);
+  if (known) return { materia: known, how: 'nome' };
   const q = subject.name.replace(/^(noções|nocoes) (de|do|da|dos|das) /i, '');
   const cands = await candidates(d, q);
   const ranked = cands.map((c) => ({ c, s: scoreMateria(subject.name, c) })).sort((x, y) => y.s - x.s).slice(0, 5);
@@ -124,7 +127,7 @@ export async function mapSession(d: MapDeps, subjectMateria: string | null,
   const laws = findLawRefs(text, s.subject).map((r) => lawByKey(r.law)?.name).filter((n): n is string => !!n);
   const found: string[] = [];
   for (const q of [...new Set([s.keyword, head, ...laws].filter(Boolean))].slice(0, 4)) found.push(...(await d.materias(q)));
-  const cands = [...new Set(found)].filter((c) => c !== subjectMateria).slice(0, 12);
+  const cands = fullMaterias(found).filter((c) => c !== subjectMateria).slice(0, 12);
   if (!cands.length) return { materia: null, assuntos: [], how: 'sem matéria' };
   const pick = await d.ai(MateriaChoice, materiaJsonSchema(), materiaPrompt(`${s.subject} — sessão "${s.title}"`, s.topics, cands));
   const materia = cands.find((c) => normalizeText(c) === normalizeText(pick.materia));

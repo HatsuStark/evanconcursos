@@ -5,6 +5,7 @@
 // O calendário é montado no app pelo scheduler determinístico e gravado por create_plan_version.
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { PLAN_PROMPT_VERSION, PlanInputs, PlanStrategy, repairSessions, sessionsJsonSchema, sessionsPrompt, strategyJsonSchema, strategyPrompt, SubjectSessions } from '../../../shared/ai/plan.ts';
+import { isOpenEnded } from '../../../shared/domain/rounds.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 
 const int = (v: unknown, min: number, max: number) => Math.max(min, Math.min(max, Math.round(Number(v) || 0)));
@@ -35,7 +36,7 @@ Deno.serve(async (req) => {
       }));
       const r = await generateJson({
         apiKey, model, schema: PlanStrategy, jsonSchema: strategyJsonSchema(),
-        parts: [{ text: strategyPrompt({ role: notice.role_name, board: notice.board, examDate: notice.exam_date ?? '', weeks: int(body.weeks, 1, 260), hours: int(body.hours, 1, 20000), profile: inputs.data.profile, notes: notice.notes ?? [], subjects: refs }) }],
+        parts: [{ text: strategyPrompt({ role: notice.role_name, board: notice.board, examDate: isOpenEnded(notice.exam_date, new Date().toISOString().slice(0, 10)) ? '' : notice.exam_date ?? '', weeks: int(body.weeks, 1, 260), hours: int(body.hours, 1, 20000), profile: inputs.data.profile, notes: notice.notes ?? [], subjects: refs }) }],
       });
       usage = r.usage; latencyMs = r.latencyMs;
       await logUsage(admin, { ownerId: auth.user.id, operation, model, promptVersion: PLAN_PROMPT_VERSION, usage, latencyMs, status: 'ok' });
