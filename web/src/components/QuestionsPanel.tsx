@@ -7,6 +7,7 @@ import {
   answerQuestion, explainQuestion, loadNote, mnemonicFor, nextQuestions, optionsOf, saveNote,
   type Explanation, type Mnemonic, type Question,
 } from '../lib/questions.ts';
+import { questionScore } from '../../../shared/domain/adaptive.ts';
 import { mayHaveMnemonic } from '../../../shared/qbank/mnemonic.ts';
 import { ArticleChips } from './ArticlePeek.tsx';
 import { CommentsPanel } from './CommentsPanel.tsx';
@@ -277,22 +278,30 @@ export function MnemonicView({ m, busy, onLoad }: { m: Mnemonic | null | undefin
 function BatchSummary({ queue, states, onBack }: { queue: Question[]; states: Record<string, QState>; onBack: () => void }) {
   const done = queue.filter((x) => states[x.qid]?.result);
   const right = done.filter((x) => states[x.qid]!.result!.correct).length;
-  const by = new Map<string, { t: number; c: number }>();
-  for (const x of done) { const e = by.get(x.assunto || 'Sem assunto') ?? { t: 0, c: 0 }; e.t++; if (states[x.qid]!.result!.correct) e.c++; by.set(x.assunto || 'Sem assunto', e); }
+  // Por assunto, conta também as questões da bateria ainda sem resposta (t); a = respondidas, c = certas.
+  const by = new Map<string, { t: number; a: number; c: number }>();
+  for (const x of queue) {
+    const k = x.assunto || 'Sem assunto', e = by.get(k) ?? { t: 0, a: 0, c: 0 }, result = states[x.qid]?.result;
+    e.t++;
+    if (result) { e.a++; if (result.correct) e.c++; }
+    by.set(k, e);
+  }
   const rows = [...by].sort((a, b) => a[1].c / a[1].t - b[1].c / b[1].t);
-  const pct = done.length ? Math.round((right / done.length) * 100) : 0;
+  const score = questionScore(right, done.length, queue.length);
+  // Reforço só pelo que foi respondido: pendência não é erro.
+  const weakest = rows.filter(([, e]) => e.a).sort((a, b) => a[1].c / a[1].a - b[1].c / b[1].a)[0];
   return (
     <div className="glass card summary">
       <h2 style={{ margin: 0 }}>Resumo da bateria</h2>
       <div className="stats">
-        <div className="stat"><strong style={{ color: 'var(--violet)' }}>{done.length}</strong><span>respondidas</span></div>
-        <div className="stat"><strong style={{ color: pct >= 75 ? 'var(--lime)' : 'var(--orange)' }}>{pct}%</strong><span>de acerto</span></div>
+        <div className="stat"><strong style={{ color: 'var(--violet)' }}>{done.length}</strong><span>de {score.total} respondidas</span></div>
+        <div className="stat"><strong style={{ color: score.pending ? 'var(--cyan)' : score.pct >= 75 ? 'var(--lime)' : 'var(--orange)' }}>{score.pct}%</strong><span>da bateria</span></div>
         <div className="stat"><strong style={{ color: 'var(--cyan)' }}>{by.size}</strong><span>assuntos</span></div>
       </div>
       <table className="sum-table"><thead><tr><th>Assunto</th><th>Acertos</th><th /></tr></thead><tbody>
-        {rows.map(([a, e]) => <tr key={a}><td>{a}</td><td>{e.c}/{e.t}</td><td style={{ width: '40%' }}><div className="bar"><span style={{ width: `${(e.c / e.t) * 100}%`, background: e.c / e.t >= 0.75 ? 'var(--lime)' : 'var(--orange)' }} /></div></td></tr>)}
+        {rows.map(([a, e]) => <tr key={a}><td>{a}</td><td>{e.c}/{e.t}{e.t > e.a ? ` · ${e.t - e.a} ${e.t - e.a === 1 ? 'pendente' : 'pendentes'}` : ''}</td><td style={{ width: '40%' }}><div className="bar"><span style={{ width: `${(e.c / e.t) * 100}%`, background: e.t > e.a ? 'var(--violet)' : e.c / e.t >= 0.75 ? 'var(--lime)' : 'var(--orange)' }} /></div></td></tr>)}
       </tbody></table>
-      {rows[0] && rows[0][1].c / rows[0][1].t < 0.75 && <p className="muted" style={{ margin: 0 }}>Ponto a reforçar: <b>{rows[0][0]}</b>. As questões erradas já estão no seu caderno de erros e voltam amanhã.</p>}
+      {weakest && weakest[1].c / weakest[1].a < 0.75 && <p className="muted" style={{ margin: 0 }}>Ponto a reforçar: <b>{weakest[0]}</b>. As questões erradas já estão no seu caderno de erros e voltam amanhã.</p>}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <button className="btn" onClick={onBack}>Continuar resolvendo</button>
         <Link className="btn ghost" to="/questoes?aba=revisar">Caderno de erros</Link>

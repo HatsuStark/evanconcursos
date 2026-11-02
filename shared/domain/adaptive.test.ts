@@ -1,5 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { analyze, difficultyFor, evaluate, reviewQueue, type ThemedRecord } from './adaptive.ts';
+import { analyze, difficultyFor, evaluate, latestAnswers, questionScore, reviewQueue, type ThemedRecord } from './adaptive.ts';
+
+describe('latestAnswers', () => {
+  it('questão refeita conta uma vez, pela última resposta, em qualquer ordem', () => {
+    const attempts = [
+      { qid: 'a', correct: false, created_at: '2026-10-01T10:00:00Z' },
+      { qid: 'b', correct: false, created_at: '2026-10-02T10:00:00Z' },
+      { qid: 'a', correct: true, created_at: '2026-10-03T10:00:00Z' },
+    ];
+    const expected = [{ qid: 'a', correct: true }, { qid: 'b', correct: false }];
+    expect(latestAnswers(attempts)).toMatchObject(expected);
+    expect(latestAnswers([...attempts].reverse()).sort((x, y) => x.qid.localeCompare(y.qid))).toMatchObject(expected);
+  });
+});
+
+describe('questionScore', () => {
+  it('conta as questões pendentes na porcentagem', () => {
+    expect(questionScore(1, 1, 20)).toEqual({ total: 20, pending: 19, pct: 5 });
+    expect(questionScore(15, 20, 20)).toEqual({ total: 20, pending: 0, pct: 75 });
+  });
+  it('responder além da meta não deixa pendência; sem meta, vale o respondido', () => {
+    expect(questionScore(20, 25, 20)).toEqual({ total: 25, pending: 0, pct: 80 });
+    expect(questionScore(1, 1, 0)).toEqual({ total: 1, pending: 0, pct: 100 });
+    expect(questionScore(0, 0, 0)).toEqual({ total: 0, pending: 0, pct: 0 });
+  });
+});
 import { DAY_MS } from './dates.ts';
 
 const NOW = new Date(2027, 0, 20, 12).getTime();

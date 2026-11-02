@@ -26,7 +26,7 @@ export const useVerticalized = (active: ActivePlan | null | undefined) => useQue
       readAll<VTopic>((a, b) => supabase.from('notice_topics').select('id, subject_id, text').in('subject_id', ids).order('position').order('id').range(a, b)),
       // Todas as versões: questões e tarefas feitas em cronogramas anteriores continuam contando.
       readAll<VSession>((a, b) => supabase.from('study_sessions').select('id, subject_id, plan_version_id, topic_ids').in('subject_id', ids).order('id').range(a, b)),
-      readAll<VTask>((a, b) => supabase.from('tasks').select('id, session_id, date, done_at, superseded_in_version').eq('plan_id', plan.id).not('session_id', 'is', null).order('id').range(a, b)),
+      readAll<VTask>((a, b) => supabase.from('tasks').select('id, session_id, date, done_at, superseded_in_version, goal_questions').eq('plan_id', plan.id).not('session_id', 'is', null).order('id').range(a, b)),
       readAll<VStat>((a, b) => supabase.rpc('session_attempt_stats', { p_notice: notice.id }).range(a, b)),
     ]);
     return buildVerticalized({ subjects, topics, sessions, tasks, stats, activeVersionId: plan.active_version_id });

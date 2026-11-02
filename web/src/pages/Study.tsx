@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Check, FileText, ListChecks, Maximize2, Minimize2, Pause, Play, Scale, Video } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { evaluate } from '../../../shared/domain/adaptive.ts';
+import { evaluate, latestAnswers, questionScore } from '../../../shared/domain/adaptive.ts';
 import { REVIEW_PREFIX } from '../../../shared/ai/plan-build.ts';
 import { videoQuery } from '../../../shared/domain/videos.ts';
 import { GuidePanel } from '../components/GuidePanel.tsx';
@@ -71,9 +71,10 @@ function StudyView({ d }: { d: StudyData }) {
   const [tab, setTab] = useState<TabKey>(tabs[0]!.key);
   const [videosOpened, setVideosOpened] = useState(false);
   const color = d.subjectIndex >= 0 ? subjectColor(d.subjectIndex) : 'var(--magenta)';
-  const mine = d.attempts.filter((a) => a.task_id === d.task.id);
+  const mine = latestAnswers(d.attempts.filter((a) => a.task_id === d.task.id));
   const right = mine.filter((a) => a.correct).length;
   const subjectAcc = accuracy(d.attempts), verdict = evaluate(mine.length ? right / mine.length : null);
+  const score = questionScore(right, mine.length, d.task.goal_questions);
 
   const canFocus = d.task.kind !== 'simulado';
   const [focus, setFocus] = useState(false);
@@ -120,11 +121,13 @@ function StudyView({ d }: { d: StudyData }) {
         <h3>Questões</h3>
         <div className="stats">
           <div className="stat"><strong style={{ color: 'var(--violet)' }}>{mine.length}</strong><span>de {d.task.goal_questions || '—'}</span></div>
-          <div className="stat"><strong style={{ color: 'var(--lime)' }}>{mine.length ? Math.round((right / mine.length) * 100) + '%' : '—'}</strong><span>acerto hoje</span></div>
+          <div className="stat"><strong style={{ color: score.pending ? 'var(--cyan)' : 'var(--lime)' }}>{mine.length ? score.pct + '%' : '—'}</strong><span>no tema</span></div>
           <div className="stat"><strong style={{ color: 'var(--orange)' }}>{subjectAcc != null ? Math.round(subjectAcc * 100) + '%' : '—'}</strong><span>na matéria</span></div>
         </div>
         {d.task.goal_questions > 0 && <div className="bar" style={{ marginTop: 12 }}><span style={{ width: `${Math.min(100, (mine.length / d.task.goal_questions) * 100)}%`, background: 'var(--violet)', boxShadow: '0 0 10px var(--violet)' }} /></div>}
-        {!!mine.length && <p className="small" style={{ margin: '10px 0 0' }}><span className={'badge ' + (verdict.level === 'ok' ? 'lime' : 'orange')}>{verdict.text}</span></p>}
+        {!!mine.length && <p className="small" style={{ margin: '10px 0 0' }}>{score.pending
+          ? <span className="badge violet">Tema incompleto: {score.pending} {score.pending === 1 ? 'pendente' : 'pendentes'}</span>
+          : <span className={'badge ' + (verdict.level === 'ok' ? 'lime' : 'orange')}>{verdict.text}</span>}</p>}
       </section>
       <section>
         <button className={'btn' + (d.task.done_at ? ' ghost' : ' light')} style={{ width: '100%' }} onClick={toggleDone}>

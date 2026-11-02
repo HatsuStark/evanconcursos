@@ -26,14 +26,16 @@ insert into public.study_sessions (id, owner_id, plan_version_id, subject_id, po
 insert into public.question_attempts (owner_id, plan_id, session_id, subject_id, qid, chosen, correct, created_at) values
   ('00000000-0000-4000-8000-0000000000ab', 'a2000000-0000-4000-8000-000000000001', 'a4000000-0000-4000-8000-000000000001', 'a1000000-0000-4000-8000-000000000001', 'q1', 'A', true, '2026-10-01'),
   ('00000000-0000-4000-8000-0000000000ab', 'a2000000-0000-4000-8000-000000000001', 'a4000000-0000-4000-8000-000000000001', 'a1000000-0000-4000-8000-000000000001', 'q2', 'B', false, '2026-10-05'),
+  ('00000000-0000-4000-8000-0000000000ab', 'a2000000-0000-4000-8000-000000000001', 'a4000000-0000-4000-8000-000000000001', 'a1000000-0000-4000-8000-000000000001', 'q5', 'C', false, '2026-10-02'),
+  ('00000000-0000-4000-8000-0000000000ab', 'a2000000-0000-4000-8000-000000000001', 'a4000000-0000-4000-8000-000000000001', 'a1000000-0000-4000-8000-000000000001', 'q5', 'A', true, '2026-10-03'),
   ('00000000-0000-4000-8000-0000000000ab', 'a2000000-0000-4000-8000-000000000002', 'a4000000-0000-4000-8000-000000000002', 'a1000000-0000-4000-8000-000000000002', 'q3', 'A', true, '2026-10-05'),
   ('00000000-0000-4000-8000-0000000000ab', null, null, null, 'q4', 'A', true, '2026-10-06');
 
 select pg_temp.as_user('00000000-0000-4000-8000-0000000000ab');
 select results_eq(
   $$select session_id, total, correct, last_at from public.session_attempt_stats('a0000000-0000-4000-8000-000000000001')$$,
-  $$values ('a4000000-0000-4000-8000-000000000001'::uuid, 2, 1, '2026-10-05'::timestamptz)$$,
-  'soma por sessão, só deste concurso e sem as questões livres');
+  $$values ('a4000000-0000-4000-8000-000000000001'::uuid, 3, 2, '2026-10-05'::timestamptz)$$,
+  'soma por sessão, só deste concurso, sem as questões livres e com a questão refeita uma vez, pela última resposta');
 
 select pg_temp.as_user('00000000-0000-4000-8000-0000000000bb');
 select is((select count(*) from public.session_attempt_stats('a0000000-0000-4000-8000-000000000001')), 0::bigint, 'outro usuário não vê as somas');

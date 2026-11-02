@@ -4,7 +4,7 @@ import { buildVerticalized, type VSession, type VStat, type VSubject, type VTask
 const subject = (id: string, over: Partial<VSubject> = {}): VSubject => ({ id, name: id, is_core: false, weight: 2, questions: 10, ...over });
 const topic = (id: string, subject_id = 'penal'): VTopic => ({ id, subject_id, text: id });
 const session = (id: string, topic_ids: string[], over: Partial<VSession> = {}): VSession => ({ id, subject_id: 'penal', plan_version_id: 'v2', topic_ids, ...over });
-const task = (id: string, session_id: string, date: string, done = false, over: Partial<VTask> = {}): VTask => ({ id, session_id, date, done_at: done ? `${date}T12:00:00Z` : null, superseded_in_version: null, ...over });
+const task = (id: string, session_id: string, date: string, done = false, over: Partial<VTask> = {}): VTask => ({ id, session_id, date, done_at: done ? `${date}T12:00:00Z` : null, superseded_in_version: null, goal_questions: 0, ...over });
 const stat = (session_id: string, total: number, correct: number, last_at = '2026-10-01T10:00:00Z'): VStat => ({ session_id, total, correct, last_at });
 const build = (over: { subjects?: VSubject[]; topics?: VTopic[]; sessions?: VSession[]; tasks?: VTask[]; stats?: VStat[] }) =>
   buildVerticalized({ subjects: [subject('penal')], topics: [topic('t1')], sessions: [], tasks: [], stats: [], activeVersionId: 'v2', ...over });
@@ -70,6 +70,26 @@ describe('desempenho', () => {
     expect(row(r, 't2').attempts).toBe(10);
     expect(r.subjects[0]).toMatchObject({ attempts: 10, correct: 8, acc: 0.8 });
     expect(r.summary).toMatchObject({ attempts: 10, correct: 8, acc: 0.8 });
+  });
+  it('questões não respondidas ficam pendentes e entram na porcentagem do tópico', () => {
+    const sessions = [session('s1', ['t1'])], tasks = [task('a', 's1', '2026-10-01', false, { goal_questions: 20 })];
+    const r = build({ sessions, tasks, stats: [stat('s1', 1, 1)] });
+    expect(row(r)).toMatchObject({ attempts: 1, correct: 1, acc: 1, total: 20, pending: 19, score: 5 });
+    expect(r.subjects[0]!.pending).toBe(19);
+    expect(r.summary.pending).toBe(19);
+  });
+  it('pendência não vira ponto fraco', () => {
+    const sessions = [session('s1', ['t1'])], tasks = [task('a', 's1', '2026-10-01', false, { goal_questions: 20 })];
+    expect(row(build({ sessions, tasks, stats: [stat('s1', 5, 4)] }))).toMatchObject({ score: 20, weak: false });
+  });
+  it('tarefa substituída e cronograma antigo não somam na meta', () => {
+    const sessions = [session('velha', ['t1'], { plan_version_id: 'v1' }), session('s1', ['t1'])];
+    const tasks = [
+      task('antiga', 'velha', '2026-09-01', false, { goal_questions: 50 }),
+      task('trocada', 's1', '2026-09-01', false, { goal_questions: 30, superseded_in_version: 'v2' }),
+      task('atual', 's1', '2026-10-01', false, { goal_questions: 10 }),
+    ];
+    expect(row(build({ sessions, tasks, stats: [stat('s1', 2, 2)] }))).toMatchObject({ total: 10, pending: 8, score: 20 });
   });
   it('resumo sem dados não divide por zero', () => {
     expect(build({}).summary).toMatchObject({ total: 1, studied: 0, inProgress: 0, weak: 0, attempts: 0, acc: null });

@@ -41,6 +41,22 @@ export function evaluate(acc: number | null): Verdict {
   return acc >= 0.6 ? { text: 'Atenção: entrou no reforço', level: 'warning' } : { text: 'Reforçar: entrou no reforço', level: 'bad' };
 }
 
+// Nota do tema: as questões ainda não respondidas ficam pendentes e contam na conta, para o tema não parecer completo.
+export function questionScore(correct: number, answered: number, planned: number) {
+  const total = Math.max(planned, answered);
+  return { total, pending: total - answered, pct: total ? Math.round((correct / total) * 100) : 0 };
+}
+
+// Questão refeita conta uma vez, pela resposta mais recente.
+export function latestAnswers<T extends { qid: string; created_at: string }>(attempts: T[]): T[] {
+  const byQuestion = new Map<string, T>();
+  for (const a of attempts) {
+    const seen = byQuestion.get(a.qid);
+    if (!seen || a.created_at > seen.created_at) byQuestion.set(a.qid, a);
+  }
+  return [...byQuestion.values()];
+}
+
 // Acerto baixo → questões médias; acerto alto → questões mais difíceis (escala 1–5 do QConcursos).
 export const difficultyFor = (acc: number): string[] => (acc < 0.6 ? ['2', '3'] : acc < 0.8 ? ['3', '4'] : ['4', '5']);
 

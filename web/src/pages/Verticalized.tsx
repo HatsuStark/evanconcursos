@@ -24,6 +24,7 @@ const STATUS: Record<TopicStatus, { label: string; icon: typeof Check; color: st
 };
 const accBadge = (acc: number) => (acc >= GOOD ? 'lime' : acc >= WEAK ? 'cyan' : 'orange');
 const pct = (acc: number) => `${Math.round(acc * 100)}%`;
+const plural = (n: number) => `${n} ${n === 1 ? 'pendente' : 'pendentes'}`;
 
 function TopicItem({ t }: { t: TopicRow }) {
   const [open, setOpen] = useState(false);
@@ -35,7 +36,8 @@ function TopicItem({ t }: { t: TopicRow }) {
         <button className={'vert-text' + (open ? ' open' : '')} onClick={() => setOpen(!open)} title={open ? undefined : t.text}>{t.text}</button>
         <div className="vert-meta muted small">
           <span>{s.label}{t.sessionsTotal > 1 ? ` · ${t.sessionsDone} de ${t.sessionsTotal} sessões` : ''}</span>
-          {t.attempts > 0 && <span className={'badge ' + accBadge(t.acc!)}>{t.correct}/{t.attempts} · {pct(t.acc!)}</span>}
+          {t.attempts > 0 && <span className={'badge ' + (t.pending ? 'violet' : accBadge(t.acc!))}>{t.correct}/{t.total} · {t.score}%</span>}
+          {t.attempts > 0 && t.pending > 0 && <span className="faint">{plural(t.pending)}</span>}
           {t.weak && <span className="badge orange">ponto fraco</span>}
           {t.noQuestions && <span className="badge violet">sem questões</span>}
           {t.lastSeen && <span className="faint">visto em {fmtDate(t.lastSeen.slice(0, 10))}</span>}
@@ -78,6 +80,7 @@ export function VerticalizedPage() {
           <div className="stat"><strong style={{ color: summary.acc != null && summary.acc >= WEAK ? 'var(--lime)' : 'var(--orange)' }}>{summary.acc != null ? pct(summary.acc) : '—'}</strong><span>acerto</span></div>
           <div className="stat"><strong style={{ color: 'var(--orange)' }}>{summary.weak}</strong><span>fracos</span></div>
         </div>
+        {summary.pending > 0 && <p className="muted small" style={{ margin: '10px 0 0' }}>{plural(summary.pending)} nas metas do cronograma.</p>}
       </section>
       {!!focus.length && (
         <section>
@@ -110,7 +113,7 @@ export function VerticalizedPage() {
                 <div>{s.name}{s.is_core && <span className="badge violet" style={{ marginLeft: 8 }}>específica</span>}</div>
                 <div className="bar" style={{ marginTop: 6 }}><span style={{ width: `${s.topics.length ? (s.studied / s.topics.length) * 100 : 0}%`, background: subjectColor(i) }} /></div>
                 <div className="muted small" style={{ marginTop: 6, fontWeight: 400 }}>
-                  {s.studied} de {s.topics.length} tópicos{s.questions ? ` · ${s.questions} questões na prova` : ''}{s.attempts ? ` · ${pct(s.acc!)} de acerto em ${s.attempts}` : ''}
+                  {s.studied} de {s.topics.length} tópicos{s.questions ? ` · ${s.questions} questões na prova` : ''}{s.attempts ? ` · ${pct(s.acc!)} de acerto em ${s.attempts}` : ''}{s.attempts && s.pending ? ` · ${plural(s.pending)}` : ''}
                 </div>
               </div>
             </summary>
@@ -118,7 +121,7 @@ export function VerticalizedPage() {
           </details>
         ))}
       </div>
-      <p className="faint small" style={{ marginTop: 14 }}>Contam as questões feitas nas sessões do cronograma; simulados, revisão de erros e questões livres ficam na aba Desempenho. Uma sessão com vários tópicos conta suas questões para todos eles.</p>
+      <p className="faint small" style={{ marginTop: 14 }}>Contam as questões feitas nas sessões do cronograma; simulados, revisão de erros e questões livres ficam na aba Desempenho. Uma sessão com vários tópicos conta suas questões para todos eles. A porcentagem de cada tópico inclui as questões pendentes da meta; "de acerto" considera só as respondidas.</p>
     </Shell>
   );
 }
