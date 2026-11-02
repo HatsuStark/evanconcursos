@@ -3,7 +3,7 @@ import { HF_BASE, PATH_MAP, TtsSession } from '@mintplex-labs/piper-tts-web';
 import { joinWav } from './wav.ts';
 
 const VOICE_ID = 'pt_BR-cadu-medium', MODEL_FILE = `${VOICE_ID}.onnx`;
-const MODEL_URL = import.meta.env.VITE_VOICE_MODEL_URL ?? `https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR/cadu/medium/${MODEL_FILE}`;
+const MODEL_URL = import.meta.env.VITE_VOICE_MODEL_URL ?? `https://pub-ae61f920a48b4547a8828321051899d4.r2.dev/${MODEL_FILE}`;
 // Locução mais pausada e com mais variação que o padrão do modelo (0,667 / 1 / 0,8), para lembrar um professor explicando.
 const CONFIG = {
   audio: { sample_rate: 22050 },
