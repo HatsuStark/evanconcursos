@@ -8,9 +8,10 @@ export interface Question {
   prova: { banca: string; ano: number; orgao: string; cargo: string } | null;
   materia: string; assunto: string;
   mnemo?: 'yes' | 'no' | 'maybe';   // mnemônico já existe, foi descartado ou ainda não avaliado
+  revisao?: boolean;   // veio do caderno de erros no meio da sessão: não conta na meta nem no tema
 }
 export interface Explanation { resumo: string; alternativas: { letra: string; comentario: string }[]; artigos: string[]; dica: string; fontes: string[]; geradoEm: string }
-export interface NextResult { questions: Question[]; filter?: { materia: string | null; assuntos: string[]; how: string }; reason: 'sem-materia' | 'sem-assunto' | 'esgotado' | 'esgotado-dificeis' | null }
+export interface NextResult { questions: Question[]; filter?: { materia: string | null; assuntos: string[]; how: string }; reason: 'sem-materia' | 'sem-assunto' | 'esgotado' | 'esgotado-dificeis' | 'demorou' | null }
 
 async function call<T>(body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke('questions', { body });
@@ -22,7 +23,7 @@ async function call<T>(body: Record<string, unknown>): Promise<T> {
   return data as T;
 }
 
-export const nextQuestions = (taskId: string, count = 5) => call<NextResult>({ action: 'next', taskId, count });
+export const nextQuestions = (taskId: string, count = 5, shownReviews: string[] = []) => call<NextResult>({ action: 'next', taskId, count, shownReviews });
 // Resposta corrigida direto no banco (answer_question): uma ida e volta, sem passar pela Edge Function.
 export async function answerQuestion(taskId: string | null, qid: string, chosen: string, context: 'plan' | 'free' | 'review' = 'plan') {
   const { data, error } = await supabase.rpc('answer_question', { p_qid: qid, p_chosen: chosen, p_task: taskId, p_context: context });

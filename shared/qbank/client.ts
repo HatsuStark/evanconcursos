@@ -59,6 +59,17 @@ export class QuestClient {
     this.credits += r.items.length * 6;
     return { items: r.items, next: r.next_cursor ?? null, hasMore: !!r.has_more };
   }
+  // Total com os mesmos filtros de `questoesPage`. A API ordena da questão mais antiga para a mais nova.
+  async usableTotal(params: Record<string, string | number | boolean | undefined>) {
+    const r = await this.get<Page<QuestQuestion>>('/questoes', { ...params, per_page: 1, include_total: true, anulada: false, tem_gabarito: true });
+    this.credits += r.items.length * 3;
+    return r.total ?? 0;
+  }
+  async questoesPage(params: Record<string, string | number | boolean | undefined>, page: number, perPage: number) {
+    const r = await this.get<Page<QuestQuestion>>('/questoes', { ...params, page, per_page: perPage, include_gabarito: true, include_total: false, anulada: false, tem_gabarito: true });
+    this.credits += r.items.length * 6;
+    return r.items;
+  }
   // Uma questão pelo id da API; null se não existir.
   async questao(id: string) {
     try {

@@ -11,7 +11,7 @@ import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import { interleave, mapSubject, MEDIUM_OR_HARD, QMAP_PROMPT_VERSION, SESSION_DIFFICULTIES } from '../../../shared/qbank/map.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-import { cacheQuestions, mapDeps, publicQuestion, recordAnswer, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
+import { cacheQuestions, mapDeps, publicQuestion, questFailure, recordAnswer, takeNewest, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
 
 const str = (v: unknown, n = 160) => String(v ?? '').trim().slice(0, n);
 const hash = (s: string) => { let h = 0; for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) >>> 0; return h.toString(36); };
@@ -31,23 +31,9 @@ Deno.serve(async (req) => {
     usage: usage.inputTokens ? usage : null, latencyMs: Date.now() - started, status, error, credits: quest.credits,
   });
 
-  // Busca `count` questões inéditas para o estudante, girando um cursor por escopo/filtro (não repete entre sessões).
-  async function fetchFresh(scope: string, params: Record<string, string>, count: number, seen: Set<string>) {
-    const out: QuestQuestion[] = [];
-    const key = hash(JSON.stringify(params));
-    const { data: cur } = await admin.from('qbank_cursors').select('after_id, exhausted').eq('owner_id', auth.user.id).eq('scope', scope).eq('filter_key', key).maybeSingle();
-    if (cur?.exhausted) return out;
-    let after = cur?.after_id ?? undefined, exhausted = false;
-    for (let round = 0; round < 4 && out.length < count && !exhausted; round++) {
-      const r = await quest.questoes(params, Math.min(20, count - out.length), after);
-      await cacheQuestions(admin, r.items);
-      out.push(...r.items.filter((q) => q.gabarito && !seen.has(q.id) && !out.some((o) => o.id === q.id)));
-      after = r.next ?? r.items[r.items.length - 1]?.id ?? after;
-      exhausted = !r.hasMore || !r.items.length;
-    }
-    await admin.from('qbank_cursors').upsert({ owner_id: auth.user.id, scope, filter_key: key, after_id: after ?? null, exhausted, updated_at: new Date().toISOString() });
-    return out.slice(0, count);
-  }
+  // Busca `count` questões inéditas para o estudante, das mais recentes para as mais antigas (não repete entre sessões).
+  const fetchFresh = (scope: string, params: Record<string, string>, count: number, seen: Set<string>) =>
+    takeNewest(admin, quest, auth.user.id, scope, hash(JSON.stringify(params)), params, count, (q) => !seen.has(q.id));
   const seenQids = async () => new Set(((await admin.from('question_attempts').select('qid').eq('owner_id', auth.user.id).limit(20000)).data ?? []).map((d) => d.qid as string));
 
   try {
@@ -236,6 +222,6 @@ Deno.serve(async (req) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await log('qbank_practice', 'error', message).catch(() => {});
-    return json(502, { error: 'Não foi possível concluir agora.', detail: message.slice(0, 300) });
+    return json(502, { error: questFailure(message, 'Não foi possível concluir agora.'), detail: message.slice(0, 300) });
   }
 });

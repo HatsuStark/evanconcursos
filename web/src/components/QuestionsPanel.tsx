@@ -22,6 +22,7 @@ const REASON: Record<string, string> = {
   'sem-assunto': 'Não encontramos no banco de questões assuntos que correspondam a esta sessão. Estude pela apostila e pela lei seca.',
   esgotado: 'Não há mais questões inéditas com esses filtros. Ótimo trabalho!',
   'esgotado-dificeis': 'Não há mais questões inéditas de dificuldade média ou alta para esta sessão. Para treinar outras, use a aba Questões → Resolver.',
+  demorou: 'A busca demorou mais que o normal. Abra a aba de novo para continuar de onde parou.',
   revisao: 'Nada para revisar hoje. As questões que você errar voltam aqui em 1, 7 e 30 dias.',
   'id-inexistente': 'Nenhuma questão com esse ID. Confira o número e tente de novo.',
   'id-indisponivel': 'Essa questão existe, mas foi anulada ou não tem gabarito, então não dá para resolvê-la aqui.',
@@ -53,6 +54,7 @@ export function QuestionsPanel({ source, goal = 0, answered = 0, paged = false }
   const [error, setError] = useState('');
   const [summary, setSummary] = useState(false);
   const fetching = useRef(false);
+  const shownReviews = useRef<string[]>([]);
   const sizeRef = useRef(pageSize);
   sizeRef.current = pageSize;
   // A busca depende do conteúdo da origem, não da identidade do objeto (que muda a cada renderização).
@@ -66,10 +68,11 @@ export function QuestionsPanel({ source, goal = 0, answered = 0, paged = false }
     if (initial) setLoading(true);
     try {
       // Cada questão nova custa créditos: a busca livre traz só o que a página vai mostrar.
-      const r = source.kind === 'task' ? await nextQuestions(source.taskId, 5)
+      const r = source.kind === 'task' ? await nextQuestions(source.taskId, 5, shownReviews.current)
         : source.kind === 'free' ? await searchFree(source.filters, Math.max(sizeRef.current, 5))
         : source.kind === 'id' ? await questionById(source.qid)
         : { ...(await reviewDue(20)), reason: 'revisao' as string | null };
+      shownReviews.current.push(...r.questions.filter((n) => n.revisao).map((n) => n.qid));
       setQueue((q) => [...q, ...r.questions.filter((n) => !q.some((o) => o.qid === n.qid))]);
       const filter = (r as { filter?: { assuntos: string[] } }).filter;
       if (filter) setAssuntos(filter.assuntos);
@@ -176,7 +179,7 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
     if (!st.chosen || st.result) return;
     setBusy('answer'); setError('');
     try {
-      const r = await answerQuestion(taskId, q.qid, st.chosen, source.kind === 'task' ? 'plan' : source.kind === 'review' ? 'review' : 'free');
+      const r = await answerQuestion(q.revisao ? null : taskId, q.qid, st.chosen, q.revisao || source.kind === 'review' ? 'review' : source.kind === 'task' ? 'plan' : 'free');
       patch({ result: r, tab: 'explicacao' });
       void qc.invalidateQueries({ queryKey: ['study'] });
       void qc.invalidateQueries({ queryKey: ['due-counts'] });
@@ -213,6 +216,7 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
   return (
       <article className="glass q-card">
         {source.kind === 'review' && <span className="badge orange" style={{ justifySelf: 'start' }}><RotateCcw size={12} /> Revisão do caderno de erros</span>}
+        {q.revisao && <p className="small" style={{ margin: '0 0 10px' }}><span className="badge violet">Revisão de erro</span> <span className="faint">Assunto anterior; não conta na meta desta sessão.</span></p>}
         <QuestionBody q={q} number={number} chosen={st.chosen} struck={st.struck} gabarito={st.result?.gabarito ?? null} locked={!!st.result} onSelect={select} onStrike={strike} />
 
         {st.result ? (

@@ -154,20 +154,46 @@ export function interleave<T>(lists: T[][]): T[] {
 
 export interface SearchFilter { key: string; assunto: string; tier: number; turn: number; params: Record<string, string> }
 
-// Busca da mais à menos específica: faltando questões, solta a banca e depois a escolaridade, nunca a dificuldade.
-export function searchFilters(f: SessionFilter, banca: string, level = '', now = new Date()): SearchFilter[] {
+// Formato predominante da banca, para treinar igual ao que ela cobra mesmo em questões de outras bancas.
+export const QUESTION_FORMATS = ['multipla escolha', 'certo e errado'];
+const FORMAT_SHARE = 0.6;
+export function dominantFormat(counts: Record<string, number>) {
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  const [best, n] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0] ?? ['', 0];
+  return total && n / total >= FORMAT_SHARE ? best : '';
+}
+
+// Nome do cargo para o filtro `cargo` da API, que busca por parte do texto: sem área nem especialidade.
+export function roleKeyword(role: string) {
+  const head = role.split(/\s[-–—]\s|[(:,/]/)[0]!.trim();
+  return head.length >= 4 ? head : '';
+}
+
+// Busca da mais à menos específica: mesmo cargo, depois escolaridade do edital, depois qualquer uma; em cada etapa, a banca e
+// depois as outras no formato dela. Nunca solta a dificuldade.
+export function searchFilters(f: SessionFilter, banca: string, o: { level?: string; role?: string; format?: string } = {}, now = new Date()): SearchFilter[] {
   if (!f.materia || !f.assuntos.length) return [];
-  const m = f.materia;
+  const m = f.materia, format: Record<string, string> = o.format ? { tipo: o.format } : {};
   const places: { tag: string; params: Record<string, string> }[] = /atualidade/i.test(m)
-    ? [now.getFullYear(), now.getFullYear() - 1].map((ano) => ({ tag: String(ano), params: { ano: String(ano) } }))
-    : [{ tag: 'b', params: { banca } }, { tag: '*', params: {} }];
+    ? [now.getFullYear(), now.getFullYear() - 1].map((ano) => ({ tag: String(ano), params: { ano: String(ano), ...format } }))
+    : [{ tag: 'b', params: { banca } }, { tag: '*', params: format }];
+  const narrowed = (tag: string, extra: Record<string, string>) => places.map((p) => ({ tag: `${tag}|${p.tag}`, params: { ...p.params, ...extra } }));
   const tiers = [
-    ...(level ? places.map((p) => ({ tag: `${level}|${p.tag}`, params: { ...p.params, nivel_escolaridade: level } })) : []),
+    ...(o.role ? narrowed(`c:${o.role}`, { cargo: o.role }) : []),
+    ...(o.level ? narrowed(o.level, { nivel_escolaridade: o.level }) : []),
     ...places,
   ];
   return tiers.flatMap((t, tier) => f.assuntos.flatMap((assunto) => SESSION_DIFFICULTIES.map((dificuldade, turn) => ({
     key: `${t.tag}:${assunto}:d${dificuldade}`, assunto, tier, turn, params: { ...t.params, materia: m, assunto, dificuldade },
   }))));
+}
+
+// A API ordena da mais antiga para a mais nova: para vir das mais novas, anda de trás para frente. `position` é a posição da
+// próxima questão a buscar, contada da mais antiga. O tamanho da página divide a posição, para terminar nela sem pular nenhuma.
+export function newestPage(position: number, want: number) {
+  let perPage = Math.min(want, position);
+  while (position % perPage) perPage--;
+  return { page: position / perPage, perPage };
 }
 
 // Ordem de busca de uma questão: alterna a dificuldade a cada vez, para não esgotar só a primeira.

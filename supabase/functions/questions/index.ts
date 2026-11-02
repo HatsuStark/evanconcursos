@@ -11,11 +11,16 @@ import { lawByKey } from '../../../shared/legal/registry.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import {
   equalIncidence, EXPLAIN_PROMPT_VERSION, Explanation, explainPrompt, explanationJsonSchema, inTurn, measureIncidence, planPicks,
-  QMAP_PROMPT_VERSION, searchFilters, type Incidence, type SessionFilter,
+  QMAP_PROMPT_VERSION, roleKeyword, searchFilters, type Incidence, type SessionFilter,
 } from '../../../shared/qbank/map.ts';
 import { conceptKey, MNEMONIC_PROMPT_VERSION, MnemonicChoice, mnemonicJsonSchema, mnemonicPrompt, pickExisting } from '../../../shared/qbank/mnemonic.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-import { cacheQuestions, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, recordAnswer, upsertFlashcard, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
+import { ensureBoardFormat, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, questFailure, recordAnswer, takeNewest, upsertFlashcard, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
+
+// Com alguma questão pronta, não faz o estudante esperar por mais; sem nenhuma, desiste antes do limite da função.
+const SOFT_LIMIT_MS = 15_000, HARD_LIMIT_MS = 90_000;
+// Uma em cada 5 questões é de revisão do caderno de erros, para intercalar assuntos antigos com o da sessão.
+const REVIEW_EVERY = 5;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -161,8 +166,10 @@ Deno.serve(async (req) => {
       }
       filter = { materia: sm.materia, assuntos: weak, how: 'reforço' };
     }
-    const { data: level } = await auth.client.from('notices').select('education_level').eq('id', subject.notice_id).single();
-    const filters = searchFilters(filter, sm.banca, String(level?.education_level ?? ''));
+    const { data: notice } = await auth.client.from('notices').select('education_level, role_name').eq('id', subject.notice_id).single();
+    const filters = searchFilters(filter, sm.banca, {
+      level: String(notice?.education_level ?? ''), role: roleKeyword(String(notice?.role_name ?? '')), format: await ensureBoardFormat(admin, quest, subject.id, sm),
+    });
     if (!filters.length) { await log('qbank_fetch', 'ok'); return json(200, { questions: [], reason: 'sem-assunto' }); }
 
     // Peso de cada assunto: medido uma vez por sessão. Se a medição falhar, divide igual e tenta de novo na próxima busca.
@@ -181,25 +188,25 @@ Deno.serve(async (req) => {
     const served = new Map<string, number>();
     for (const d of done ?? []) if (task.session_id && d.session_id === task.session_id) served.set(normalizeText(d.assunto), (served.get(normalizeText(d.assunto)) ?? 0) + 1);
     const out: QuestQuestion[] = [];
-    // Traz até `limit` questões no total, com um cursor por filtro.
+    // Revisões vencidas vêm do cache, sem créditos, e são respondidas fora da sessão: não contam na meta nem no tema.
+    const shown = Array.isArray(body.shownReviews) ? (body.shownReviews as unknown[]).map(String) : [];
+    const { data: due } = await admin.from('error_book').select('qid').eq('owner_id', auth.user.id).eq('resolved', false)
+      .lte('due_on', new Date().toISOString().slice(0, 10)).order('due_on').limit(shown.length + 5);
+    const reviewIds = (due ?? []).map((d) => d.qid as string).filter((id) => !shown.includes(id)).slice(0, Math.floor(count / REVIEW_EVERY));
+    const { data: reviewRows } = reviewIds.length ? await admin.from('qbank_questions').select('payload').in('qid', reviewIds) : { data: [] };
+    const reviews = (reviewRows ?? []).map((r) => r.payload as PublicQuestion);
+    const wantedTotal = count - reviews.length;
+    // Traz até `limit` questões no total, das mais recentes para as mais antigas.
+    let timedOut = false;
     const take = async (f: (typeof filters)[number], limit: number) => {
       if (out.length >= limit) return;
-      const { data: cur } = await admin.from('qbank_cursors').select('after_id, exhausted').eq('owner_id', auth.user.id).eq('scope', scope).eq('filter_key', f.key).maybeSingle();
-      if (cur?.exhausted) return;
-      let after = cur?.after_id ?? undefined, exhausted = false;
-      for (let round = 0; round < 3 && out.length < limit && !exhausted; round++) {
-        const r = await quest.questoes(f.params, limit - out.length, after);
-        const fresh = r.items.filter((q) => q.gabarito && !seen.has(q.id) && !out.some((o) => o.id === q.id));
-        await cacheQuestions(admin, r.items);
-        out.push(...fresh);
-        after = r.next ?? r.items[r.items.length - 1]?.id ?? after;
-        exhausted = !r.hasMore || !r.items.length;
-      }
-      await admin.from('qbank_cursors').upsert({ owner_id: auth.user.id, scope, filter_key: f.key, after_id: after ?? null, exhausted, updated_at: new Date().toISOString() });
+      const elapsed = Date.now() - started;
+      if (elapsed > HARD_LIMIT_MS || (out.length && elapsed > SOFT_LIMIT_MS)) { timedOut = true; return; }
+      out.push(...await takeNewest(admin, quest, auth.user.id, scope, f.key, f.params, limit - out.length, (q) => !seen.has(q.id) && !out.some((o) => o.id === q.id)));
     };
     // Cada assunto busca a sua parte (banca e, se faltar, outras bancas); o que sobrar vem de qualquer assunto com questões.
     const wanted = new Map<string, number>();
-    for (const a of planPicks(incidence, served, count)) wanted.set(a, (wanted.get(a) ?? 0) + 1);
+    for (const a of planPicks(incidence, served, wantedTotal)) wanted.set(a, (wanted.get(a) ?? 0) + 1);
     // A dificuldade alterna a cada questão e continua de onde parou na sessão.
     let turn = [...served.values()].reduce((a, b) => a + b, 0);
     for (const [assunto, n] of wanted) {
@@ -209,14 +216,16 @@ Deno.serve(async (req) => {
         turn++;
       }
     }
-    for (const f of inTurn(filters, turn)) await take(f, count);
+    for (const f of inTurn(filters, turn)) await take(f, wantedTotal);
     await log('qbank_fetch', 'ok');
-    // Dentro do lote, primeiro as questões que caíram em mais provas.
+    // Dentro do lote, primeiro as questões que caíram em mais provas; a revisão entra no meio.
     out.sort((a, b) => (b.provas?.length ?? 0) - (a.provas?.length ?? 0));
-    return json(200, { questions: await withMnemo(admin, out.slice(0, count).map(publicQuestion)), filter: { materia: filter.materia, assuntos: filter.assuntos, how: filter.how }, reason: out.length ? null : 'esgotado-dificeis' });
+    const fresh = await withMnemo(admin, out.slice(0, wantedTotal).map(publicQuestion));
+    const batch = [...fresh.slice(0, 2), ...(await withMnemo(admin, reviews)).map((q) => ({ ...q, revisao: true })), ...fresh.slice(2)];
+    return json(200, { questions: batch, filter: { materia: filter.materia, assuntos: filter.assuntos, how: filter.how }, reason: batch.length ? null : timedOut ? 'demorou' : 'esgotado-dificeis' });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await log(body.action === 'explain' ? 'qbank_explain' : body.action === 'mnemonic' ? 'qbank_mnemonic' : 'qbank_fetch', 'error', message).catch(() => {});
-    return json(502, { error: 'Não foi possível buscar as questões agora.', detail: message.slice(0, 300) });
+    return json(502, { error: questFailure(message, 'Não foi possível buscar as questões agora.'), detail: message.slice(0, 300) });
   }
 });

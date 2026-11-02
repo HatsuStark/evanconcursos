@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
-import { mapSession, mapSubject, QMAP_PROMPT_VERSION, type Incidence, type MapDeps, type SessionFilter } from '../../../shared/qbank/map.ts';
+import { dominantFormat, mapSession, mapSubject, newestPage, QMAP_PROMPT_VERSION, QUESTION_FORMATS, type Incidence, type MapDeps, type SessionFilter } from '../../../shared/qbank/map.ts';
 
 export const plain = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -25,6 +25,29 @@ export async function cacheQuestions(admin: SupabaseClient, items: QuestQuestion
     qid: q.id, materia: q.classificacao?.materia ?? '', assunto: q.classificacao?.assunto ?? '', payload: publicQuestion(q), gabarito: String(q.gabarito),
   }));
   if (rows.length) await admin.from('qbank_questions').upsert(rows, { onConflict: 'qid', ignoreDuplicates: true });
+}
+
+// Mensagem ao estudante quando a busca falha: a cota do banco de questões acabar não se resolve tentando de novo.
+export const questFailure = (message: string, fallback: string) => (/Quest API .*: 402\b/.test(message)
+  ? 'A cota mensal do banco de questões acabou. Questões já respondidas e o caderno de erros continuam disponíveis.'
+  : fallback);
+
+// Questões novas para o estudante, das provas mais recentes para as mais antigas, com uma posição guardada por escopo e filtro.
+// O prefixo separa estas posições dos cursores antigos, que apontavam para ids.
+export async function takeNewest(admin: SupabaseClient, quest: QuestClient, ownerId: string, scope: string, key: string, params: Record<string, string>, want: number, isNew: (q: QuestQuestion) => boolean) {
+  const out: QuestQuestion[] = [], filterKey = `n:${key}`;
+  const { data: cur } = await admin.from('qbank_cursors').select('after_id, exhausted').eq('owner_id', ownerId).eq('scope', scope).eq('filter_key', filterKey).maybeSingle();
+  if (cur?.exhausted) return out;
+  let position = cur ? Number(cur.after_id) : await quest.usableTotal(params);
+  for (let round = 0; round < 4 && out.length < want && position > 0; round++) {
+    const { page, perPage } = newestPage(position, want - out.length);
+    const items = await quest.questoesPage(params, page, perPage);
+    await cacheQuestions(admin, items);
+    out.push(...[...items].reverse().filter((q) => q.gabarito && isNew(q) && !out.some((o) => o.id === q.id)));
+    position -= perPage;
+  }
+  await admin.from('qbank_cursors').upsert({ owner_id: ownerId, scope, filter_key: filterKey, after_id: String(position), exhausted: position <= 0, updated_at: new Date().toISOString() });
+  return out;
 }
 
 // Dependências do mapeamento (Quest API + Gemini + cache de assuntos), acumulando o consumo da IA.
@@ -49,14 +72,26 @@ export function mapDeps(admin: SupabaseClient, quest: QuestClient, usage: Gemini
 
 // Matéria da disciplina (uma vez) e banca do edital. Os dados só são lidos se ainda não houver mapeamento.
 export async function ensureSubjectMap(admin: SupabaseClient, quest: QuestClient, deps: MapDeps, ownerId: string, subjectId: string, load: () => Promise<{ name: string; board: string; topics: string[] }>) {
-  const { data: sm } = await admin.from('qbank_subject_maps').select('materia, banca').eq('subject_id', subjectId).maybeSingle();
-  if (sm) return sm as { materia: string | null; banca: string };
+  const { data: sm } = await admin.from('qbank_subject_maps').select('materia, banca, banca_tipo').eq('subject_id', subjectId).maybeSingle();
+  if (sm) return sm as { materia: string | null; banca: string; banca_tipo: string | null };
   const s = await load();
   const bancas = s.board ? await quest.bancas(s.board.split(/[\s/-]/)[0]!) : [];
   const banca = bancas.find((b) => normalizeText(b) === normalizeText(s.board)) ?? bancas[0] ?? '';
   const r = await mapSubject(deps, { name: s.name, topics: s.topics });
   await admin.from('qbank_subject_maps').upsert({ subject_id: subjectId, owner_id: ownerId, materia: r.materia, banca, how: r.how, prompt_version: QMAP_PROMPT_VERSION });
-  return { materia: r.materia, banca };
+  return { materia: r.materia, banca, banca_tipo: null };
+}
+
+// Formato predominante da banca na matéria (uma vez por disciplina, 3 créditos por formato). Se a medição falhar, tenta na próxima busca.
+export async function ensureBoardFormat(admin: SupabaseClient, quest: QuestClient, subjectId: string, sm: { materia: string | null; banca: string; banca_tipo: string | null }) {
+  if (sm.banca_tipo !== null || !sm.materia || !sm.banca) return sm.banca_tipo ?? '';
+  try {
+    const counts: Record<string, number> = {};
+    for (const tipo of QUESTION_FORMATS) counts[tipo] = await quest.count({ banca: sm.banca, materia: sm.materia, tipo });
+    const format = dominantFormat(counts);
+    await admin.from('qbank_subject_maps').update({ banca_tipo: format }).eq('subject_id', subjectId);
+    return format;
+  } catch { return ''; }
 }
 
 // Assuntos da sessão (uma vez por sessão).

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { theoryGoal } from '../domain/scheduler.ts';
-import { equalIncidence, interleave, inTurn, mapSession, mapSubject, measureIncidence, planPicks, searchFilters, type MapDeps } from './map.ts';
+import { dominantFormat, equalIncidence, interleave, inTurn, mapSession, mapSubject, measureIncidence, newestPage, planPicks, roleKeyword, searchFilters, type MapDeps } from './map.ts';
 
 const tally = (picks: string[]) => picks.reduce<Record<string, number>>((m, a) => ({ ...m, [a]: (m[a] ?? 0) + 1 }), {});
 
@@ -87,22 +87,68 @@ describe('searchFilters', () => {
   const filter = { materia: 'M', assuntos: ['a'], how: '' };
   it('só busca dificuldade média ou maior, em todas as etapas', () => {
     for (const level of ['', 'Superior']) {
-      expect(new Set(searchFilters(filter, 'FGV', level).map((f) => f.params.dificuldade))).toEqual(new Set(['3', '4', '5']));
-      expect(searchFilters(filter, 'FGV', level).every((f) => f.params.dificuldade)).toBe(true);
+      expect(new Set(searchFilters(filter, 'FGV', { level }).map((f) => f.params.dificuldade))).toEqual(new Set(['3', '4', '5']));
+      expect(searchFilters(filter, 'FGV', { level }).every((f) => f.params.dificuldade)).toBe(true);
     }
   });
   it('sem escolaridade: banca antes das outras', () => {
     expect(searchFilters(filter, 'FGV').map((f) => f.key)).toEqual(['b:a:d3', 'b:a:d4', 'b:a:d5', '*:a:d3', '*:a:d4', '*:a:d5']);
   });
   it('com escolaridade: solta a banca e depois a escolaridade', () => {
-    const steps = [...new Map(searchFilters(filter, 'FGV', 'Médio').map((f) => [f.tier, [f.params.nivel_escolaridade, f.params.banca]])).values()];
+    const steps = [...new Map(searchFilters(filter, 'FGV', { level: 'Médio' }).map((f) => [f.tier, [f.params.nivel_escolaridade, f.params.banca]])).values()];
     expect(steps).toEqual([['Médio', 'FGV'], ['Médio', undefined], [undefined, 'FGV'], [undefined, undefined]]);
   });
+  it('mesmo cargo vem antes de tudo', () => {
+    const steps = [...new Map(searchFilters(filter, 'FGV', { level: 'Médio', role: 'Oficial de Justiça' }).map((f) => [f.tier, [f.params.cargo, f.params.nivel_escolaridade, f.params.banca]])).values()];
+    expect(steps).toEqual([['Oficial de Justiça', undefined, 'FGV'], ['Oficial de Justiça', undefined, undefined], [undefined, 'Médio', 'FGV'], [undefined, 'Médio', undefined], [undefined, undefined, 'FGV'], [undefined, undefined, undefined]]);
+  });
+  it('o formato da banca vale só nas outras bancas: na própria, vem o que ela cobra', () => {
+    for (const f of searchFilters(filter, 'CESPE', { level: 'Superior', role: 'Analista', format: 'certo e errado' })) {
+      expect(f.params.tipo).toBe(f.params.banca ? undefined : 'certo e errado');
+    }
+  });
   it('atualidades: só provas recentes, com os mesmos filtros', () => {
-    const r = searchFilters({ materia: 'Atualidades', assuntos: ['a'], how: '' }, 'FGV', 'Superior', new Date('2026-06-01T12:00:00Z'));
+    const r = searchFilters({ materia: 'Atualidades', assuntos: ['a'], how: '' }, 'FGV', { level: 'Superior', format: 'multipla escolha' }, new Date('2026-06-01T12:00:00Z'));
     expect(new Set(r.map((f) => f.params.ano))).toEqual(new Set(['2026', '2025']));
-    expect(r.every((f) => !f.params.banca && f.params.dificuldade)).toBe(true);
+    expect(r.every((f) => !f.params.banca && f.params.dificuldade && f.params.tipo)).toBe(true);
     expect(r[0]!.params.nivel_escolaridade).toBe('Superior');
+  });
+});
+
+describe('dominantFormat', () => {
+  it('só escolhe com 60% ou mais', () => {
+    expect(dominantFormat({ 'multipla escolha': 581, 'certo e errado': 0 })).toBe('multipla escolha');
+    expect(dominantFormat({ 'multipla escolha': 321, 'certo e errado': 701 })).toBe('certo e errado');
+    expect(dominantFormat({ 'multipla escolha': 50, 'certo e errado': 50 })).toBe('');
+    expect(dominantFormat({ 'multipla escolha': 0, 'certo e errado': 0 })).toBe('');
+  });
+});
+
+describe('roleKeyword', () => {
+  it('fica só com o nome do cargo', () => {
+    expect(roleKeyword('Oficial de Justiça')).toBe('Oficial de Justiça');
+    expect(roleKeyword('Analista Judiciário - Área Judiciária')).toBe('Analista Judiciário');
+    expect(roleKeyword('Técnico (Administrativo)')).toBe('Técnico');
+    expect(roleKeyword('')).toBe('');
+  });
+});
+
+describe('newestPage', () => {
+  // Percorre como a busca: cada página precisa terminar na posição atual, sem pular nem repetir.
+  const walk = (total: number, want: number) => {
+    const out: number[] = [];
+    for (let position = total; position > 0;) {
+      const { page, perPage } = newestPage(position, want);
+      expect(perPage).toBeLessThanOrEqual(want);
+      for (let i = page * perPage; i > (page - 1) * perPage; i--) out.push(i);
+      position -= perPage;
+    }
+    return out;
+  };
+  it('vem da mais nova para a mais antiga, sem pular nenhuma', () => {
+    for (const [total, want] of [[1, 5], [7, 3], [10, 5], [13, 4], [100, 20], [97, 1]] as const) {
+      expect(walk(total, want)).toEqual(Array.from({ length: total }, (_, i) => total - i));
+    }
   });
 });
 
