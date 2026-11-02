@@ -1,6 +1,7 @@
 // Edge Function "practice": prática fora do cronograma.
 //   {action:'filters', kind:'geral'|'materias'|'assuntos'|'bancas', q?, materia?} → listas de filtros (gratuitas)
 //   {action:'search', filters:{materia, assunto?, banca?, ano?, dificuldade?, orgao?, cargo?, tipo?, onlyNew?}, count}
+//   {action:'by_id', qid}              → uma questão pelo id da API (do cache, se já veio; sem gabarito)
 //   {action:'review', count}           → questões do caderno de erros que vencem hoje (do cache, sem créditos)
 //   {action:'simulado_create', kind:'concurso'|'custom', planId?, taskId?, size?, subjects?, banca?, tipo?, timed, minutes?}
 //   {action:'simulado_get', id} · {action:'simulado_finish', id}
@@ -75,6 +76,20 @@ Deno.serve(async (req) => {
       const items = await fetchFresh('free', params, count, seen);
       await log('qbank_free', 'ok');
       return json(200, { questions: await withMnemo(admin, items.map(publicQuestion)), reason: items.length ? null : 'esgotado' });
+    }
+
+    if (body.action === 'by_id') {
+      const qid = str(body.qid, 40);
+      if (!/^[\w-]+$/.test(qid)) return json(200, { questions: [], reason: 'id-inexistente' });
+      const { data: cached } = await admin.from('qbank_questions').select('payload').eq('qid', qid).maybeSingle();
+      if (cached) return json(200, { questions: await withMnemo(admin, [cached.payload as PublicQuestion]), reason: null });
+      const q = await quest.questao(qid);
+      await log('qbank_free', 'ok');
+      if (!q) return json(200, { questions: [], reason: 'id-inexistente' });
+      // Sem gabarito não há como corrigir; anulada fica de fora como nas demais buscas.
+      if (!q.gabarito || q.anulada) return json(200, { questions: [], reason: 'id-indisponivel' });
+      await cacheQuestions(admin, [q]);
+      return json(200, { questions: await withMnemo(admin, [publicQuestion(q)]), reason: null });
     }
 
     if (body.action === 'review') {

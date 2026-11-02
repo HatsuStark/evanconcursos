@@ -59,4 +59,15 @@ export class QuestClient {
     this.credits += r.items.length * 6;
     return { items: r.items, next: r.next_cursor ?? null, hasMore: !!r.has_more };
   }
+  // Uma questão pelo id da API; null se não existir.
+  async questao(id: string) {
+    try {
+      const q = await this.get<QuestQuestion>(`/questoes/${encodeURIComponent(id)}`, { include_gabarito: true });
+      this.credits += 6;
+      return q;
+    } catch (e) {
+      if (e instanceof Error && /: 404\b/.test(e.message)) return null;
+      throw e;
+    }
+  }
 }

@@ -14,6 +14,7 @@ export function QuestionBody({ q, number, chosen, struck, gabarito, locked, onSe
     <>
       <header className="q-meta">
         <strong>Questão {number}</strong>
+        <span className="faint small">ID {q.qid}</span>
         {q.assunto && <span className="badge violet">{q.assunto}</span>}
         {q.prova && <span className="muted small">{[q.prova.banca, q.prova.ano, q.prova.orgao, q.prova.cargo].filter(Boolean).join(' · ')}</span>}
       </header>

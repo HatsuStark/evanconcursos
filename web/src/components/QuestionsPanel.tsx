@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { BarChart3, BookOpenCheck, Brain, CheckCircle2, ChevronLeft, ChevronRight, Lightbulb, MessageCircle, NotebookPen, RotateCcw, Scissors, Sparkles, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { reviewDue, searchFree, type FreeFilters } from '../lib/practice.ts';
+import { questionById, reviewDue, searchFree, type FreeFilters } from '../lib/practice.ts';
 import {
   answerQuestion, explainQuestion, loadNote, mnemonicFor, nextQuestions, optionsOf, saveNote,
   type Explanation, type Mnemonic, type Question,
@@ -13,14 +13,16 @@ import { CommentsPanel } from './CommentsPanel.tsx';
 import { ErrorReasonPicker } from './ErrorReason.tsx';
 import { QuestionBody } from './QuestionBody.tsx';
 
-// De onde vêm as questões: tarefa do cronograma, busca livre ou revisão do caderno de erros.
-export type Source = { kind: 'task'; taskId: string; planId: string } | { kind: 'free'; filters: FreeFilters } | { kind: 'review' };
+// De onde vêm as questões: tarefa do cronograma, busca livre, uma questão pelo ID ou revisão do caderno de erros.
+export type Source = { kind: 'task'; taskId: string; planId: string } | { kind: 'free'; filters: FreeFilters } | { kind: 'id'; qid: string } | { kind: 'review' };
 
 const REASON: Record<string, string> = {
   'sem-materia': 'Esta tarefa não tem matéria para buscar questões.',
   'sem-assunto': 'Não encontramos no banco de questões assuntos que correspondam a esta sessão. Estude pela apostila e pela lei seca.',
   esgotado: 'Não há mais questões inéditas com esses filtros. Ótimo trabalho!',
   revisao: 'Nada para revisar hoje. As questões que você errar voltam aqui em 1, 7 e 30 dias.',
+  'id-inexistente': 'Nenhuma questão com esse ID. Confira o número e tente de novo.',
+  'id-indisponivel': 'Essa questão existe, mas foi anulada ou não tem gabarito, então não dá para resolvê-la aqui.',
 };
 
 type Tab = 'explicacao' | 'mnemonico' | 'anotacoes' | 'comentarios';
@@ -64,12 +66,13 @@ export function QuestionsPanel({ source, goal = 0, answered = 0, paged = false }
       // Cada questão nova custa créditos: a busca livre traz só o que a página vai mostrar.
       const r = source.kind === 'task' ? await nextQuestions(source.taskId, 5)
         : source.kind === 'free' ? await searchFree(source.filters, Math.max(sizeRef.current, 5))
+        : source.kind === 'id' ? await questionById(source.qid)
         : { ...(await reviewDue(20)), reason: 'revisao' as string | null };
       setQueue((q) => [...q, ...r.questions.filter((n) => !q.some((o) => o.qid === n.qid))]);
       const filter = (r as { filter?: { assuntos: string[] } }).filter;
       if (filter) setAssuntos(filter.assuntos);
-      // Revisão vem num lote só; nas demais, lista vazia significa fim.
-      if (!r.questions.length || source.kind === 'review') setReason(r.reason ?? 'esgotado');
+      // Revisão e busca por ID vêm num lote só; nas demais, lista vazia significa fim.
+      if (!r.questions.length || source.kind === 'review' || source.kind === 'id') setReason(r.reason ?? 'esgotado');
       setError('');
     } catch (e) { setError((e as Error).message); } finally { setLoading(false); fetching.current = false; }
   }, [srcKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -171,7 +174,7 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
     if (!st.chosen || st.result) return;
     setBusy('answer'); setError('');
     try {
-      const r = await answerQuestion(taskId, q.qid, st.chosen, source.kind === 'task' ? 'plan' : source.kind);
+      const r = await answerQuestion(taskId, q.qid, st.chosen, source.kind === 'task' ? 'plan' : source.kind === 'review' ? 'review' : 'free');
       patch({ result: r, tab: 'explicacao' });
       void qc.invalidateQueries({ queryKey: ['study'] });
       void qc.invalidateQueries({ queryKey: ['due-counts'] });

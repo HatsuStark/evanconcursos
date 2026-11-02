@@ -83,6 +83,8 @@ A chave fica só no servidor (segredo `QUEST_API_KEY`) e o gabarito nunca vai ao
 
 **Meta e distribuição:** a sessão de teoria pede de 5 a 10 questões (`theoryGoal`, 1 a cada 12 minutos); é só meta, e o estudante pode continuar. Primeiro, todos os assuntos da sessão recebem uma questão, do mais ao menos cobrado. Depois, cada questão vai para o assunto mais abaixo da sua parte na cobrança da banca (`planPicks`). A cobrança é o total de questões da banca em cada assunto, medido uma vez por sessão com 3 créditos por assunto (`qbank_session_maps.incidence`); sem nenhuma na banca, vale o total das outras. Dias de consolidação mantêm a meta maior. A API não mostra ordenação por repetição: só dentro de cada lote vêm antes as questões que caíram em mais provas.
 
+**ID da questão:** cada questão mostra o id da Quest API, e a aba Questões → Resolver abre uma questão por esse id (`action: 'by_id'`). Questão já em cache não gasta créditos; as outras custam 6. Anuladas ou sem gabarito não abrem. A resposta entra no histórico de questões livres.
+
 `scripts/e2e-questions.ts` testa a função ponta a ponta com um usuário temporário (exige incluir `e2e@evanconcursos.test` em `ALLOWED_EMAILS`).
 
 ## Reorganizar depois de atrasos

@@ -36,6 +36,7 @@ function useDebounced<T>(v: T, ms = 350) {
   return d;
 }
 export const searchFree = (filters: FreeFilters, count = 10) => practice<{ questions: Question[]; reason: string | null }>({ action: 'search', filters, count });
+export const questionById = (qid: string) => practice<{ questions: Question[]; reason: string | null }>({ action: 'by_id', qid });
 export const reviewDue = (count = 15) => practice<{ questions: Question[]; stages: Record<string, { stage: number; wrong: number }> }>({ action: 'review', count });
 
 // Matérias do concurso já ligadas ao banco de questões (atalhos nos filtros).

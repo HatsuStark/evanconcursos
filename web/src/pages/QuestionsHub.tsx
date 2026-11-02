@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ERROR_REASONS } from '../../../shared/domain/replan.ts';
 import { resolveMateria } from '../../../shared/qbank/materias.ts';
-import { QuestionsPanel } from '../components/QuestionsPanel.tsx';
+import { QuestionsPanel, type Source } from '../components/QuestionsPanel.tsx';
 import { SearchSelect } from '../components/SearchSelect.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { SimuladoStarter } from '../components/SimuladoStarter.tsx';
@@ -61,7 +61,8 @@ function FreePractice() {
   const geral = useQuery({ queryKey: ['filtros-geral'], queryFn: () => filterLists.geral(), staleTime: Infinity });
   const mapped = useMappedMaterias();
   const [f, setF] = useState<FreeFilters>({ materia: '', onlyNew: true });
-  const [active, setActive] = useState<FreeFilters | null>(null);
+  const [qid, setQid] = useState('');
+  const [active, setActive] = useState<Source | null>(null);
   const bq = useDebounced(f.banca ?? '');
   const { options: materias } = useMateriaOptions(f.materia);
   const bancas = useQuery({ queryKey: ['f-bancas', bq], enabled: bq.length >= 2, queryFn: () => filterLists.bancas(bq) });
@@ -70,8 +71,9 @@ function FreePractice() {
   const g = geral.data?.data ?? {};
   // Buscar com texto solto ("portugues") vale pela melhor opção, e o campo passa a mostrar o nome oficial.
   function search() {
+    if (qid.trim()) { setActive({ kind: 'id', qid: qid.trim() }); return; }
     const materia = resolveMateria(f.materia, materias, true), next = { ...f, materia };
-    setF(next); setActive(next);
+    setF(next); setActive({ kind: 'free', filters: next });
   }
 
   return (
@@ -105,9 +107,13 @@ function FreePractice() {
           <label className="field">Cargo (contém)<input className="input" value={f.cargo ?? ''} onChange={(e) => set({ cargo: e.target.value })} placeholder="Ex.: Escrevente" /></label>
           <label className="check"><input type="checkbox" checked={f.onlyNew !== false} onChange={(e) => set({ onlyNew: e.target.checked })} /> Só questões que nunca respondi</label>
         </div>
-        <button className="btn" style={{ justifySelf: 'start' }} disabled={!f.materia.trim()} onClick={search}><Search size={16} /> Buscar questões</button>
+        <div className="row">
+          <label className="field">ID da questão<input className="input" inputMode="numeric" value={qid} onChange={(e) => setQid(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && qid.trim()) search(); }} placeholder="Ex.: 1700999322" /></label>
+        </div>
+        {!!qid.trim() && <p className="faint small" style={{ margin: 0 }}>Com o ID preenchido, os outros filtros são ignorados.</p>}
+        <button className="btn" style={{ justifySelf: 'start' }} disabled={!f.materia.trim() && !qid.trim()} onClick={search}><Search size={16} /> Buscar questões</button>
       </div>
-      {active && <QuestionsPanel key={JSON.stringify(active)} source={{ kind: 'free', filters: active }} paged />}
+      {active && <QuestionsPanel key={JSON.stringify(active)} source={active} paged={active.kind === 'free'} />}
       <p className="faint small" style={{ margin: 0 }}>Questões livres ficam num histórico próprio (aba Desempenho → Livres) e não alteram o desempenho do cronograma. As erradas entram no caderno de erros.</p>
     </div>
   );
