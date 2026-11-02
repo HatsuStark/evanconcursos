@@ -9,7 +9,7 @@
 import type { GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
-import { mapSubject, QMAP_PROMPT_VERSION } from '../../../shared/qbank/map.ts';
+import { interleave, mapSubject, MEDIUM_OR_HARD, QMAP_PROMPT_VERSION, SESSION_DIFFICULTIES } from '../../../shared/qbank/map.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { cacheQuestions, mapDeps, publicQuestion, recordAnswer, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
 
@@ -73,7 +73,19 @@ Deno.serve(async (req) => {
       if (!params.materia) return json(400, { error: 'Escolha ao menos a matéria.' });
       const count = Math.max(1, Math.min(20, Number(body.count) || 10));
       const seen = f.onlyNew === false ? new Set<string>() : await seenQids();
-      const items = await fetchFresh('free', params, count, seen);
+      let items: QuestQuestion[];
+      if (f.dificuldade === MEDIUM_OR_HARD) {
+        // A API só aceita uma dificuldade por busca: divide o pedido entre elas, e a que faltar passa para as seguintes.
+        const lists: QuestQuestion[][] = [];
+        let left = count;
+        for (const [i, dificuldade] of SESSION_DIFFICULTIES.entries()) {
+          const got = await fetchFresh('free', { ...params, dificuldade }, Math.ceil(left / (SESSION_DIFFICULTIES.length - i)), seen);
+          lists.push(got);
+          left -= got.length;
+          if (left <= 0) break;
+        }
+        items = interleave(lists);
+      } else items = await fetchFresh('free', params, count, seen);
       await log('qbank_free', 'ok');
       return json(200, { questions: await withMnemo(admin, items.map(publicQuestion)), reason: items.length ? null : 'esgotado' });
     }
@@ -105,13 +117,14 @@ Deno.serve(async (req) => {
     if (body.action === 'simulado_create') {
       const tipo = str(body.tipo, 60);
       const blocks: { name: string; minPct: number; subjects: { name: string; materia: string | null; count: number }[] }[] = [];
-      let banca = str(body.banca, 80), planId: string | null = null, title = 'Simulado';
+      let banca = str(body.banca, 80), planId: string | null = null, title = 'Simulado', level = '';
       if (body.kind === 'concurso') {
         // Estrutura da prova do edital: blocos (com nota mínima) e questões por disciplina.
         const { data: plan } = await auth.client.from('study_plans').select('id, notice_id').eq('id', str(body.planId, 40)).maybeSingle();
         if (!plan) return json(404, { error: 'Plano não encontrado.' });
         planId = plan.id;
-        const { data: notice } = await auth.client.from('notices').select('board, role_name, total_questions, structure').eq('id', plan.notice_id).single();
+        const { data: notice } = await auth.client.from('notices').select('board, role_name, total_questions, structure, education_level').eq('id', plan.notice_id).single();
+        level = String(notice?.education_level ?? '');
         const { data: subs } = await auth.client.from('notice_subjects').select('id, name, block, questions, weight, notice_topics(text)').eq('notice_id', plan.notice_id).order('position');
         const deps = mapDeps(admin, quest, usage);
         if (!banca && notice?.board) {
@@ -149,14 +162,20 @@ Deno.serve(async (req) => {
       }
       const totalQ = blocks.reduce((a, b) => a + b.subjects.reduce((x, s) => x + s.count, 0), 0);
       if (totalQ > 120) return json(400, { error: 'Simulado limitado a 120 questões.' });
-      // Sorteio: banca primeiro (questões inéditas para o estudante); completa com outras bancas.
+      // Sorteio de questões inéditas: escolaridade do edital e banca primeiro; completa com outras bancas e, faltando, outras escolaridades.
+      // A dificuldade fica livre, para o simulado ter a mistura de uma prova real.
       const seen = await seenQids(), chosen: { qid: string; block: string; subject: string }[] = [];
       const missing: string[] = [];
       for (const b of blocks) for (const s of b.subjects) {
         if (!s.materia) { missing.push(s.name); continue; }
         const base: Record<string, string> = { materia: s.materia, ...(tipo ? { tipo } : {}), ...('assunto' in s && (s as { assunto?: string }).assunto ? { assunto: (s as { assunto: string }).assunto } : {}) };
-        let got = banca ? await fetchFresh('simulado', { ...base, banca }, s.count, seen) : [];
-        if (got.length < s.count) got = [...got, ...(await fetchFresh('simulado', base, s.count - got.length, new Set([...seen, ...got.map((q) => q.id)])))];
+        const places = banca ? [{ ...base, banca }, base] : [base];
+        const steps = level ? [...places.map((p) => ({ ...p, nivel_escolaridade: level })), ...places] : places;
+        let got: QuestQuestion[] = [];
+        for (const params of steps) {
+          if (got.length >= s.count) break;
+          got = [...got, ...(await fetchFresh('simulado', params, s.count - got.length, new Set([...seen, ...got.map((q) => q.id)])))];
+        }
         for (const q of got) { seen.add(q.id); chosen.push({ qid: q.id, block: b.name, subject: s.name }); }
         if (got.length < s.count) missing.push(`${s.name} (${got.length}/${s.count})`);
       }

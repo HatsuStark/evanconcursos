@@ -16,7 +16,7 @@ export interface JobRow { id: string; status: 'pending' | 'running' | 'succeeded
 export interface DraftTopic { text: string; page: number }
 export interface DraftSubject { name: string; block: string; questions: number; core: boolean; weight: number; topics: DraftTopic[] }
 export interface Draft {
-  title: string; organization: string; role: string; board: string; examDate: string; totalQuestions: number;
+  title: string; organization: string; role: string; educationLevel: NoticeExtraction['educationLevel']; board: string; examDate: string; totalQuestions: number;
   notes: string[]; structure: { blocks: NoticeExtraction['blocks']; stages: NoticeExtraction['stages']; otherRoles: string[] };
   subjects: DraftSubject[];
 }
@@ -84,7 +84,7 @@ export const useJob = (jobId: string | undefined) => useQuery({
 });
 
 export interface ReviewData {
-  notice: NoticeRow & { notes: string[]; structure: Partial<Draft['structure']>; replaces_notice_id: string | null };
+  notice: NoticeRow & { education_level: Draft['educationLevel']; notes: string[]; structure: Partial<Draft['structure']>; replaces_notice_id: string | null };
   extraction: { id: string; model: string; prompt_version: string; warnings: NoticeWarning[]; created_at: string } | null;
   usage: { cost_usd: number | null; latency_ms: number | null } | null;
   draft: Draft;
@@ -96,7 +96,7 @@ export const useReview = (noticeId: string | undefined) => useQuery({
   queryKey: ['review', noticeId],
   enabled: !!noticeId,
   queryFn: async (): Promise<ReviewData> => {
-    const notice = must(await supabase.from('notices').select('id, title, organization, role_name, board, exam_date, status, total_questions, created_at, notes, structure, replaces_notice_id').eq('id', noticeId!).single()) as ReviewData['notice'];
+    const notice = must(await supabase.from('notices').select('id, title, organization, role_name, education_level, board, exam_date, status, total_questions, created_at, notes, structure, replaces_notice_id').eq('id', noticeId!).single()) as ReviewData['notice'];
     const ex = must(await supabase.from('notice_extractions').select('id, model, prompt_version, warnings, result, created_at')
       .eq('notice_id', noticeId!).eq('status', 'succeeded').order('created_at', { ascending: false }).limit(1)) as (ReviewData['extraction'] & { result: unknown })[];
     const extraction = ex[0] ?? null;
@@ -110,17 +110,18 @@ export const useReview = (noticeId: string | undefined) => useQuery({
       const subs = must(await supabase.from('notice_subjects').select('id, name, block, questions, is_core, weight, position').eq('notice_id', notice.id).order('position')) as { id: string; name: string; block: string; questions: number; is_core: boolean; weight: number }[];
       const tops = subs.length ? must(await supabase.from('notice_topics').select('subject_id, text, source_page, position').in('subject_id', subs.map((s) => s.id)).order('position')) as { subject_id: string; text: string; source_page: number | null }[] : [];
       draft = {
-        title: notice.title, organization: notice.organization, role: notice.role_name, board: notice.board, examDate: notice.exam_date ?? '',
+        title: notice.title, organization: notice.organization, role: notice.role_name, educationLevel: notice.education_level, board: notice.board, examDate: notice.exam_date ?? '',
         totalQuestions: notice.total_questions, notes: notice.notes ?? [],
         structure: { blocks: notice.structure.blocks ?? [], stages: notice.structure.stages ?? [], otherRoles: notice.structure.otherRoles ?? [] },
         subjects: subs.map((s) => ({ name: s.name, block: s.block, questions: s.questions, core: s.is_core, weight: s.weight,
           topics: tops.filter((t) => t.subject_id === s.id).map((t) => ({ text: t.text, page: t.source_page ?? 0 })) })),
       };
     } else if (extraction) {
-      const e = NoticeExtraction.parse(extraction.result), weights = subjectWeights(e);
+      // Leituras anteriores ao campo de escolaridade não o trazem.
+      const e = NoticeExtraction.parse({ educationLevel: '', ...(extraction.result as object) }), weights = subjectWeights(e);
       draft = {
         title: [e.role, e.organization].filter(Boolean).join(' · ') || notice.title,
-        organization: e.organization, role: e.role, board: e.board, examDate: e.examDate, totalQuestions: e.totalQuestions, notes: e.notes,
+        organization: e.organization, role: e.role, educationLevel: e.educationLevel, board: e.board, examDate: e.examDate, totalQuestions: e.totalQuestions, notes: e.notes,
         structure: { blocks: e.blocks, stages: e.stages, otherRoles: e.otherRoles },
         subjects: e.subjects.map((s, i) => ({ name: s.name, block: s.block, questions: s.questions, core: s.core, weight: weights[i] ?? 2, topics: s.topics })),
       };
@@ -164,6 +165,11 @@ export async function deleteNotice(noticeId: string) {
     if (error) throw new Error(error.message);
     id = previous;
   }
+}
+
+// Escolaridade também vale depois de conferido: editais antigos não a têm, e ela só afeta as próximas buscas de questões.
+export async function saveEducationLevel(noticeId: string, level: Draft['educationLevel']) {
+  must(await supabase.from('notices').update({ education_level: level }).eq('id', noticeId));
 }
 
 // Edital novo enviado para atualizar um plano: liga ao edital antigo, para a comparação valer em qualquer aparelho.

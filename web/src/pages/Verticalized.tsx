@@ -1,10 +1,13 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { Check, Circle, CircleDashed, CircleOff } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { EDUCATION_LEVELS } from '../../../shared/ai/notice.ts';
 import { GOOD, WEAK } from '../../../shared/domain/adaptive.ts';
 import type { TopicRow, TopicStatus } from '../../../shared/domain/verticalized.ts';
 import { Shell } from '../components/Shell.tsx';
 import { fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
+import { saveEducationLevel, type Draft } from '../lib/notices.ts';
 import { useActivePlan } from '../lib/plans.ts';
 import { useVerticalized } from '../lib/verticalized.ts';
 
@@ -52,6 +55,7 @@ function TopicItem({ t }: { t: TopicRow }) {
 export function VerticalizedPage() {
   const active = useActivePlan();
   const data = useVerticalized(active.data);
+  const qc = useQueryClient();
   const [filter, setFilter] = useState<FilterKey>('todos');
   const subtitle = 'Tudo o que cai na prova, tópico por tópico.';
 
@@ -63,8 +67,21 @@ export function VerticalizedPage() {
   const test = FILTERS.find((f) => f.key === filter)!.test;
   const visible = subjects.map((s, i) => ({ s, i, topics: s.topics.filter(test) })).filter((x) => x.topics.length);
 
+  async function changeLevel(level: Draft['educationLevel']) {
+    await saveEducationLevel(active.data!.notice.id, level);
+    await qc.invalidateQueries();
+  }
+
   const rail = (
     <>
+      <section>
+        <h3>Escolaridade do edital</h3>
+        <select className="select" aria-label="Escolaridade do edital" value={active.data.notice.education_level} onChange={(e) => void changeLevel(e.target.value as Draft['educationLevel'])}>
+          <option value="">Não informada</option>
+          {EDUCATION_LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+        </select>
+        <p className="faint small" style={{ margin: '8px 0 0' }}>As questões das sessões seguem este nível, sempre com dificuldade média ou alta.</p>
+      </section>
       <section>
         <h3>Edital estudado</h3>
         <div className="glass card" style={{ display: 'grid', gap: 8 }}>

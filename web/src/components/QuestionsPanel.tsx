@@ -21,6 +21,7 @@ const REASON: Record<string, string> = {
   'sem-materia': 'Esta tarefa não tem matéria para buscar questões.',
   'sem-assunto': 'Não encontramos no banco de questões assuntos que correspondam a esta sessão. Estude pela apostila e pela lei seca.',
   esgotado: 'Não há mais questões inéditas com esses filtros. Ótimo trabalho!',
+  'esgotado-dificeis': 'Não há mais questões inéditas de dificuldade média ou alta para esta sessão. Para treinar outras, use a aba Questões → Resolver.',
   revisao: 'Nada para revisar hoje. As questões que você errar voltam aqui em 1, 7 e 30 dias.',
   'id-inexistente': 'Nenhuma questão com esse ID. Confira o número e tente de novo.',
   'id-indisponivel': 'Essa questão existe, mas foi anulada ou não tem gabarito, então não dá para resolvê-la aqui.',

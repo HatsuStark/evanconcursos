@@ -15,7 +15,9 @@ end $$;
 select pg_temp.as_user('00000000-0000-4000-8000-0000000000a1');
 insert into public.notices (id, title) values ('20000000-0000-4000-8000-000000000001', 'Edital A');
 select public.approve_notice('20000000-0000-4000-8000-000000000001', null,
-  '{"title":"TJ","examDate":"2030-03-14","subjects":[{"name":"Penal","topics":[{"text":"Dolo"},{"text":"Culpa"}]}]}');
+  '{"title":"TJ","examDate":"2030-03-14","educationLevel":"Médio","subjects":[{"name":"Penal","topics":[{"text":"Dolo"},{"text":"Culpa"}]}]}');
+select is((select education_level from public.notices where id = '20000000-0000-4000-8000-000000000001'), 'Médio', 'conferência grava a escolaridade');
+select throws_ok($$update public.notices set education_level = 'Doutorado' where id = '20000000-0000-4000-8000-000000000001'$$, '23514', null, 'só aceita os níveis da API');
 create temp table ids as
   select s.id as subject_id, array_agg(t.id order by t.position) as topics
   from public.notice_subjects s join public.notice_topics t on t.subject_id = s.id group by s.id;

@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { EDUCATION_LEVELS } from '../../../shared/ai/notice.ts';
 import { Shell } from '../components/Shell.tsx';
 import { Steps, SubjectIcon } from '../components/ui.tsx';
 import { approveNotice, useReview, type Draft, type DraftSubject } from '../lib/notices.ts';
@@ -97,6 +98,12 @@ export function ReviewPage() {
         <div className="row">
           <label className="field">Órgão<input className="input" value={draft.organization} onChange={(e) => set({ organization: e.target.value })} /></label>
           <label className="field">Cargo<input className="input" value={draft.role} onChange={(e) => set({ role: e.target.value })} /></label>
+          <label className="field">Escolaridade
+            <select className="select" value={draft.educationLevel} onChange={(e) => set({ educationLevel: e.target.value as Draft['educationLevel'] })}>
+              <option value="">Não informada</option>
+              {EDUCATION_LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </label>
         </div>
         <div className="row">
           <label className="field">Banca<input className="input" value={draft.board} onChange={(e) => set({ board: e.target.value })} /></label>

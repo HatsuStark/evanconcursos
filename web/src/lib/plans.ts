@@ -6,7 +6,7 @@ import { isOpenEnded, openEndDate, type RoundAttempt, type RoundSummary } from '
 import { buildPlanPayload, calendarSummary, carryOverSessions, GENERATOR_VERSION, theoryPlan, type PlanBase } from '../../../shared/ai/plan-build.ts';
 import { fallbackSessions, PLAN_PROMPT_VERSION, type PlanInputs, type Session } from '../../../shared/ai/plan.ts';
 import { remapMaterial, type Material } from './materials.ts';
-import { loadNoticeUpdate } from './notices.ts';
+import { loadNoticeUpdate, type Draft } from './notices.ts';
 import { supabase } from './supabase.ts';
 
 const must = <T,>(r: { data: T | null; error: { message: string } | null }): T => {
@@ -128,7 +128,7 @@ export async function updatePlanFromNotice(noticeId: string, inputs: PlanInputs,
 export type Pacing = 'agenda' | 'ciclo';
 export interface ActivePlan {
   plan: { id: string; name: string; notice_id: string; active_version_id: string | null; pacing: Pacing };
-  notice: { id: string; role_name: string; organization: string; board: string; exam_date: string | null; total_questions: number };
+  notice: { id: string; role_name: string; organization: string; board: string; exam_date: string | null; total_questions: number; education_level: Draft['educationLevel'] };
   version: { id: string; number: number; reason: string; inputs: PlanInputs; strategy: Strategy; summary: { weeks?: number; hours?: number; perSubject?: { subjectId: string; name: string; days: number }[]; replan?: { round?: RoundSummary }; openEnded?: boolean }; created_at: string } | null;
   subjects: SubjectRow[];
   tasks: TaskRow[];
@@ -144,7 +144,7 @@ export const useActivePlan = (noticeId?: string) => useQuery({
     const plan = (must(await q) as ActivePlan['plan'][])[0];
     if (!plan) return null;
     const [notice, version, subjects, tasks] = await Promise.all([
-      supabase.from('notices').select('id, role_name, organization, board, exam_date, total_questions').eq('id', plan.notice_id).single(),
+      supabase.from('notices').select('id, role_name, organization, board, exam_date, total_questions, education_level').eq('id', plan.notice_id).single(),
       plan.active_version_id ? supabase.from('plan_versions').select('id, number, reason, inputs, strategy, summary, created_at').eq('id', plan.active_version_id).single() : Promise.resolve({ data: null, error: null }),
       supabase.from('notice_subjects').select('id, name, position, is_core, questions, weight').eq('notice_id', plan.notice_id).order('position'),
       supabase.from('tasks').select('id, date, minutes, kind, subject_id, session_id, title, keyword, goal_questions, done_at')

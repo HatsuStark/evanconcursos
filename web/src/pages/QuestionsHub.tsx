@@ -3,6 +3,7 @@ import { BarChart3, Layers, ListChecks, Plus, RotateCcw, Search, Trash2, Trophy,
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ERROR_REASONS } from '../../../shared/domain/replan.ts';
+import { MEDIUM_OR_HARD } from '../../../shared/qbank/map.ts';
 import { resolveMateria } from '../../../shared/qbank/materias.ts';
 import { QuestionsPanel, type Source } from '../components/QuestionsPanel.tsx';
 import { SearchSelect } from '../components/SearchSelect.tsx';
@@ -60,7 +61,7 @@ function MateriaField({ value, onChange, placeholder }: { value: string; onChang
 function FreePractice() {
   const geral = useQuery({ queryKey: ['filtros-geral'], queryFn: () => filterLists.geral(), staleTime: Infinity });
   const mapped = useMappedMaterias();
-  const [f, setF] = useState<FreeFilters>({ materia: '', onlyNew: true });
+  const [f, setF] = useState<FreeFilters>({ materia: '', onlyNew: true, dificuldade: MEDIUM_OR_HARD });
   const [qid, setQid] = useState('');
   const [active, setActive] = useState<Source | null>(null);
   const bq = useDebounced(f.banca ?? '');
@@ -99,7 +100,7 @@ function FreePractice() {
             <SearchSelect label="Banca" value={f.banca ?? ''} options={bancas.data?.items ?? []} loading={bancas.isFetching} placeholder="Qualquer" onChange={(banca) => set({ banca })} onPick={(banca) => set({ banca })} />
           </div>
           <label className="field">Ano<select className="select" value={f.ano ?? ''} onChange={(e) => set({ ano: e.target.value })}><option value="">Qualquer</option>{(g.anos ?? []).map((a) => <option key={String(a)} value={String(a)}>{String(a)}</option>)}</select></label>
-          <label className="field">Dificuldade<select className="select" value={f.dificuldade ?? ''} onChange={(e) => set({ dificuldade: e.target.value })}><option value="">Qualquer</option>{[1, 2, 3, 4, 5].map((d) => <option key={d} value={d}>{['Muito fácil', 'Fácil', 'Média', 'Difícil', 'Muito difícil'][d - 1]}</option>)}</select></label>
+          <label className="field">Dificuldade<select className="select" value={f.dificuldade ?? ''} onChange={(e) => set({ dificuldade: e.target.value })}><option value={MEDIUM_OR_HARD}>Média ou difícil</option><option value="">Qualquer</option>{[1, 2, 3, 4, 5].map((d) => <option key={d} value={d}>{['Muito fácil', 'Fácil', 'Média', 'Difícil', 'Muito difícil'][d - 1]}</option>)}</select></label>
           <label className="field">Tipo<select className="select" value={f.tipo ?? ''} onChange={(e) => set({ tipo: e.target.value })}><option value="">Todos</option>{(g.tiposQuestao ?? ['multipla escolha', 'Certo ou errado']).map((t) => <option key={t} value={t}>{t}</option>)}</select></label>
         </div>
         <div className="row">

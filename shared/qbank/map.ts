@@ -138,18 +138,43 @@ export async function mapSession(d: MapDeps, subjectMateria: string | null,
 
 // Ordem de busca: banca nos assuntos (do mais relevante) e, se esgotar, os mesmos assuntos em outras bancas.
 // Atualidades: só provas recentes (este ano e o anterior), senão os fatos estão desatualizados.
-export function searchFilters(f: SessionFilter, banca: string, now = new Date()): { key: string; assunto: string; params: Record<string, string> }[] {
+// Dificuldade das questões das sessões: média, difícil e muito difícil. A API só aceita um valor por busca.
+// Sem a muito difícil faltariam questões: em amostra real, a escala 4 tinha 3 das 193 questões de um assunto, e a 5, 39.
+export const SESSION_DIFFICULTIES = ['3', '4', '5'];
+
+// Opção das questões livres que busca essas mesmas dificuldades.
+export const MEDIUM_OR_HARD = 'media-dificil';
+
+// Alterna os itens das listas: um de cada, até acabarem.
+export function interleave<T>(lists: T[][]): T[] {
+  const out: T[] = [];
+  for (let i = 0; i < Math.max(0, ...lists.map((l) => l.length)); i++) for (const l of lists) if (i < l.length) out.push(l[i]!);
+  return out;
+}
+
+export interface SearchFilter { key: string; assunto: string; tier: number; turn: number; params: Record<string, string> }
+
+// Busca da mais à menos específica: faltando questões, solta a banca e depois a escolaridade, nunca a dificuldade.
+export function searchFilters(f: SessionFilter, banca: string, level = '', now = new Date()): SearchFilter[] {
   if (!f.materia || !f.assuntos.length) return [];
   const m = f.materia;
-  if (/atualidade/i.test(m)) {
-    const years = [now.getFullYear(), now.getFullYear() - 1].map(String);
-    return years.flatMap((ano) => f.assuntos.map((assunto) => ({ key: `${ano}:${assunto}`, assunto, params: { materia: m, assunto, ano } })));
-  }
-  return [
-    ...f.assuntos.map((assunto) => ({ key: `b:${assunto}`, assunto, params: { banca, materia: m, assunto } })),
-    ...f.assuntos.map((assunto) => ({ key: `*:${assunto}`, assunto, params: { materia: m, assunto } })),
+  const places: { tag: string; params: Record<string, string> }[] = /atualidade/i.test(m)
+    ? [now.getFullYear(), now.getFullYear() - 1].map((ano) => ({ tag: String(ano), params: { ano: String(ano) } }))
+    : [{ tag: 'b', params: { banca } }, { tag: '*', params: {} }];
+  const tiers = [
+    ...(level ? places.map((p) => ({ tag: `${level}|${p.tag}`, params: { ...p.params, nivel_escolaridade: level } })) : []),
+    ...places,
   ];
+  return tiers.flatMap((t, tier) => f.assuntos.flatMap((assunto) => SESSION_DIFFICULTIES.map((dificuldade, turn) => ({
+    key: `${t.tag}:${assunto}:d${dificuldade}`, assunto, tier, turn, params: { ...t.params, materia: m, assunto, dificuldade },
+  }))));
 }
+
+// Ordem de busca de uma questão: alterna a dificuldade a cada vez, para não esgotar só a primeira.
+export const inTurn = (filters: SearchFilter[], turn: number) => {
+  const n = SESSION_DIFFICULTIES.length, place = (f: SearchFilter) => (((f.turn - turn) % n) + n) % n;
+  return [...filters].sort((a, b) => a.tier - b.tier || place(a) - place(b));
+};
 
 // ---------- distribuição das questões entre os assuntos da sessão ----------
 export interface Incidence { assunto: string; total: number }

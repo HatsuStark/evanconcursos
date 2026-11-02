@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { theoryGoal } from '../domain/scheduler.ts';
-import { equalIncidence, mapSession, mapSubject, measureIncidence, planPicks, searchFilters, type MapDeps } from './map.ts';
+import { equalIncidence, interleave, inTurn, mapSession, mapSubject, measureIncidence, planPicks, searchFilters, type MapDeps } from './map.ts';
 
 const tally = (picks: string[]) => picks.reduce<Record<string, number>>((m, a) => ({ ...m, [a]: (m[a] ?? 0) + 1 }), {});
 
@@ -84,7 +84,39 @@ describe('disciplina com nome que não bate pelas palavras', () => {
 });
 
 describe('searchFilters', () => {
-  it('cada filtro aponta para o seu assunto, banca antes das outras', () => {
-    expect(searchFilters({ materia: 'M', assuntos: ['a'], how: '' }, 'FGV').map((f) => [f.key, f.assunto])).toEqual([['b:a', 'a'], ['*:a', 'a']]);
+  const filter = { materia: 'M', assuntos: ['a'], how: '' };
+  it('só busca dificuldade média ou maior, em todas as etapas', () => {
+    for (const level of ['', 'Superior']) {
+      expect(new Set(searchFilters(filter, 'FGV', level).map((f) => f.params.dificuldade))).toEqual(new Set(['3', '4', '5']));
+      expect(searchFilters(filter, 'FGV', level).every((f) => f.params.dificuldade)).toBe(true);
+    }
+  });
+  it('sem escolaridade: banca antes das outras', () => {
+    expect(searchFilters(filter, 'FGV').map((f) => f.key)).toEqual(['b:a:d3', 'b:a:d4', 'b:a:d5', '*:a:d3', '*:a:d4', '*:a:d5']);
+  });
+  it('com escolaridade: solta a banca e depois a escolaridade', () => {
+    const steps = [...new Map(searchFilters(filter, 'FGV', 'Médio').map((f) => [f.tier, [f.params.nivel_escolaridade, f.params.banca]])).values()];
+    expect(steps).toEqual([['Médio', 'FGV'], ['Médio', undefined], [undefined, 'FGV'], [undefined, undefined]]);
+  });
+  it('atualidades: só provas recentes, com os mesmos filtros', () => {
+    const r = searchFilters({ materia: 'Atualidades', assuntos: ['a'], how: '' }, 'FGV', 'Superior', new Date('2026-06-01T12:00:00Z'));
+    expect(new Set(r.map((f) => f.params.ano))).toEqual(new Set(['2026', '2025']));
+    expect(r.every((f) => !f.params.banca && f.params.dificuldade)).toBe(true);
+    expect(r[0]!.params.nivel_escolaridade).toBe('Superior');
+  });
+});
+
+describe('interleave', () => {
+  it('alterna as listas, mesmo com tamanhos diferentes', () => {
+    expect(interleave([[1, 2, 3], [4], [5, 6]])).toEqual([1, 4, 5, 2, 6, 3]);
+    expect(interleave([])).toEqual([]);
+  });
+});
+
+describe('inTurn', () => {
+  const filters = searchFilters({ materia: 'M', assuntos: ['a'], how: '' }, 'FGV');
+  it('alterna a dificuldade a cada vez, sem sair da etapa', () => {
+    expect([0, 1, 2, 3, 4].map((turn) => inTurn(filters, turn)[0]!.params.dificuldade)).toEqual(['3', '4', '5', '3', '4']);
+    expect(inTurn(filters, 1).map((f) => f.tier)).toEqual([0, 0, 0, 1, 1, 1]);
   });
 });

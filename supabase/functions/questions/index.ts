@@ -10,7 +10,7 @@ import { findLawRefs, inRanges, type LawRef } from '../../../shared/legal/refs.t
 import { lawByKey } from '../../../shared/legal/registry.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import {
-  equalIncidence, EXPLAIN_PROMPT_VERSION, Explanation, explainPrompt, explanationJsonSchema, measureIncidence, planPicks,
+  equalIncidence, EXPLAIN_PROMPT_VERSION, Explanation, explainPrompt, explanationJsonSchema, inTurn, measureIncidence, planPicks,
   QMAP_PROMPT_VERSION, searchFilters, type Incidence, type SessionFilter,
 } from '../../../shared/qbank/map.ts';
 import { conceptKey, MNEMONIC_PROMPT_VERSION, MnemonicChoice, mnemonicJsonSchema, mnemonicPrompt, pickExisting } from '../../../shared/qbank/mnemonic.ts';
@@ -161,7 +161,8 @@ Deno.serve(async (req) => {
       }
       filter = { materia: sm.materia, assuntos: weak, how: 'reforço' };
     }
-    const filters = searchFilters(filter, sm.banca);
+    const { data: level } = await auth.client.from('notices').select('education_level').eq('id', subject.notice_id).single();
+    const filters = searchFilters(filter, sm.banca, String(level?.education_level ?? ''));
     if (!filters.length) { await log('qbank_fetch', 'ok'); return json(200, { questions: [], reason: 'sem-assunto' }); }
 
     // Peso de cada assunto: medido uma vez por sessão. Se a medição falhar, divide igual e tenta de novo na próxima busca.
@@ -199,15 +200,20 @@ Deno.serve(async (req) => {
     // Cada assunto busca a sua parte (banca e, se faltar, outras bancas); o que sobrar vem de qualquer assunto com questões.
     const wanted = new Map<string, number>();
     for (const a of planPicks(incidence, served, count)) wanted.set(a, (wanted.get(a) ?? 0) + 1);
+    // A dificuldade alterna a cada questão e continua de onde parou na sessão.
+    let turn = [...served.values()].reduce((a, b) => a + b, 0);
     for (const [assunto, n] of wanted) {
-      const limit = out.length + n;
-      for (const f of filters.filter((x) => x.assunto === assunto)) await take(f, limit);
+      for (let i = 0; i < n; i++) {
+        const limit = out.length + 1;
+        for (const f of inTurn(filters.filter((x) => x.assunto === assunto), turn)) await take(f, limit);
+        turn++;
+      }
     }
-    for (const f of filters) await take(f, count);
+    for (const f of inTurn(filters, turn)) await take(f, count);
     await log('qbank_fetch', 'ok');
     // Dentro do lote, primeiro as questões que caíram em mais provas.
     out.sort((a, b) => (b.provas?.length ?? 0) - (a.provas?.length ?? 0));
-    return json(200, { questions: await withMnemo(admin, out.slice(0, count).map(publicQuestion)), filter: { materia: filter.materia, assuntos: filter.assuntos, how: filter.how }, reason: out.length ? null : 'esgotado' });
+    return json(200, { questions: await withMnemo(admin, out.slice(0, count).map(publicQuestion)), filter: { materia: filter.materia, assuntos: filter.assuntos, how: filter.how }, reason: out.length ? null : 'esgotado-dificeis' });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await log(body.action === 'explain' ? 'qbank_explain' : body.action === 'mnemonic' ? 'qbank_mnemonic' : 'qbank_fetch', 'error', message).catch(() => {});

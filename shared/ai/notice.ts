@@ -2,7 +2,10 @@
 // Usado pela Edge Function notice-extract e pela avaliação (evals/run.ts).
 import { z } from 'zod';
 
-export const NOTICE_PROMPT_VERSION = 'notice-v2';
+export const NOTICE_PROMPT_VERSION = 'notice-v3';
+
+// Mesmos valores do filtro nivel_escolaridade da Quest API; vazio se o edital não informar.
+export const EDUCATION_LEVELS = ['Fundamental', 'Médio', 'Superior'] as const;
 
 const text = (max: number) => z.string().trim().max(max);
 
@@ -34,6 +37,7 @@ export const NoticeExtraction = z.object({
   organization: text(160).describe('Órgão (ex.: "Tribunal de Justiça do Estado de São Paulo").'),
   role: text(160).describe('Cargo escolhido, com área/especialidade.'),
   otherRoles: z.array(text(160)).describe('Demais cargos do edital, se houver.'),
+  educationLevel: z.enum(['', ...EDUCATION_LEVELS]).describe('Escolaridade exigida para o cargo escolhido; vazio se o edital não informar.'),
   board: text(80).describe('Banca organizadora (ex.: "VUNESP", "FGV", "Cebraspe").'),
   examDate: z.string().regex(/^(\d{4}-\d{2}-\d{2})?$/).describe('Data da prova objetiva (AAAA-MM-DD); vazio se o edital não informar.'),
   totalQuestions: z.number().int().min(0).max(1000),
@@ -74,6 +78,7 @@ export function noticePrompt(roleHint: string, retry = false): string {
 Cargo: ${role ? `use o cargo "${role}" (ou o mais próximo dele)` : 'se houver um só cargo, use-o; se houver vários, use o primeiro e liste os demais em otherRoles'}.
 Regras:
 - Considere somente a prova e o conteúdo programático do cargo escolhido.
+- educationLevel: escolaridade exigida para o cargo escolhido. Ensino técnico conta como "Médio"; graduação ou pós-graduação, como "Superior".
 - examDate: data prevista da prova objetiva. Se o texto remeter ao cronograma, procure a data no cronograma/anexo. Vazio se não houver.
 - blocks: os blocos/provas objetivas como o edital define (ex.: "Bloco I – Língua Portuguesa", "P1 – Conhecimentos Gerais"), com o número de questões e a regra mínima de aprovação.
 - subjects: uma entrada por disciplina. Quando um bloco agrupa várias disciplinas, cada disciplina com título próprio no conteúdo programático (inclusive títulos em MAIÚSCULAS como "ENGENHARIA DE SOFTWARE", "BANCOS DE DADOS") é uma entrada separada, com "block" indicando o bloco. Nunca crie uma disciplina com o nome do bloco (ex.: "Conhecimentos Específicos") quando o bloco tem títulos internos.
