@@ -1,18 +1,18 @@
-// Leitor por voz da apostila: voz Faber (Piper, gerada no aparelho) ou voz do navegador. Ambas sem custo por uso.
+// Leitor por voz da apostila: voz Cadu (Piper, gerada no aparelho) ou voz do navegador. Ambas sem custo por uso.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { speechParts, type SpeechSection } from '../../../shared/ai/speech.ts';
 import { clearLocalAudio, localPartUrl, localVoiceSupported } from './piper.ts';
 
 export const voiceSupported = () => typeof window !== 'undefined' && 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
 export const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
-export const FABER = 'faber', BROWSER_DEFAULT = 'navegador';
+export const CADU = 'cadu', BROWSER_DEFAULT = 'navegador';
 
 // Preferências por aparelho; o leitor funciona igual se o armazenamento estiver bloqueado.
 const stored = (key: string) => { try { return localStorage.getItem(key); } catch { return null; } };
 const store = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch { /* sem armazenamento */ } };
 
-// Sem escolha salva (ou com uma voz de IA antiga), usa a Faber quando o aparelho aceita.
-const isFaber = (choice: string) => localVoiceSupported() && (!choice || choice === FABER || choice.startsWith('ai:'));
+// Sem escolha salva (ou com uma voz antiga: Faber ou de IA), usa a Cadu quando o aparelho aceita.
+const isCadu = (choice: string) => localVoiceSupported() && (!choice || choice === CADU || choice === 'faber' || choice.startsWith('ai:'));
 
 export function useGuideVoice(sections: SpeechSection[]) {
   const [status, setStatus] = useState<'idle' | 'playing' | 'paused'>('idle');
@@ -21,10 +21,10 @@ export function useGuideVoice(sections: SpeechSection[]) {
   const [section, setSection] = useState(0);
   const [rate, setRateState] = useState(() => { const r = Number(stored('voice-rate')); return RATES.includes(r) ? r : 1; });
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  // Voz escolhida: FABER, BROWSER_DEFAULT ou o identificador de uma voz do navegador.
+  // Voz escolhida: CADU, BROWSER_DEFAULT ou o identificador de uma voz do navegador.
   const [choice, setChoice] = useState(() => stored('voice-uri') ?? '');
   const [error, setError] = useState('');
-  const faber = isFaber(choice);
+  const cadu = isCadu(choice);
   const browserVoice = voices.find((v) => v.voiceURI === choice) ?? voices.find((v) => /^pt[-_]BR/i.test(v.lang)) ?? voices[0];
   const parts = useMemo(() => sections.map(speechParts), [sections]);
   const pos = useRef({ section: 0, chunk: 0 });
@@ -34,8 +34,8 @@ export function useGuideVoice(sections: SpeechSection[]) {
   const current = useRef<SpeechSynthesisUtterance | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
   const loaded = useRef('');   // trecho carregado no <audio>: continuar da pausa sem gerar de novo
-  const prefs = useRef({ rate, faber, browserVoice });
-  prefs.current = { rate, faber, browserVoice };
+  const prefs = useRef({ rate, cadu, browserVoice });
+  prefs.current = { rate, cadu, browserVoice };
 
   useEffect(() => {
     if (!voiceSupported()) return;
@@ -92,7 +92,7 @@ export function useGuideVoice(sections: SpeechSection[]) {
     setTimeout(next, 60);
   }, [sections, nextSection, stop, fail]);
 
-  const playFaber = useCallback(async (mine: number) => {
+  const playCadu = useCallback(async (mine: number) => {
     const el = (audio.current ??= new Audio());
     const urlOf = (s: number, p: number) => localPartUrl(parts[s]![p]!, (f) => setDownload(f < 1 ? f : null));
     while (mine === run.current) {
@@ -134,10 +134,10 @@ export function useGuideVoice(sections: SpeechSection[]) {
     halt();
     const mine = run.current;
     setError(''); setStatus('playing');
-    if (prefs.current.faber) void playFaber(mine);
+    if (prefs.current.cadu) void playCadu(mine);
     else if (voiceSupported()) playBrowser(mine);
     else fail('Este navegador não tem voz disponível.');
-  }, [halt, playFaber, playBrowser, fail]);
+  }, [halt, playCadu, playBrowser, fail]);
 
   // Na voz do navegador, pausar é cancelar e lembrar o trecho: pause() nativo falha no Android e trava em pausas longas.
   const pause = useCallback(() => { halt(); setLoading(false); setStatus('paused'); }, [halt]);
@@ -154,13 +154,13 @@ export function useGuideVoice(sections: SpeechSection[]) {
   const setRate = useCallback((r: number) => {
     setRateState(r); store('voice-rate', String(r)); prefs.current.rate = r;
     if (audio.current) audio.current.playbackRate = r;
-    if (status === 'playing' && !prefs.current.faber) play();
+    if (status === 'playing' && !prefs.current.cadu) play();
   }, [status, play]);
 
   // Trocar de voz recomeça a seção atual: cada tipo divide o texto em trechos de tamanhos diferentes.
   const setVoice = useCallback((value: string) => {
     setChoice(value); store('voice-uri', value);
-    prefs.current.faber = isFaber(value);
+    prefs.current.cadu = isCadu(value);
     prefs.current.browserVoice = voices.find((v) => v.voiceURI === value) ?? voices.find((v) => /^pt[-_]BR/i.test(v.lang)) ?? voices[0];
     halt(); unload();
     pos.current.chunk = 0;
@@ -176,8 +176,8 @@ export function useGuideVoice(sections: SpeechSection[]) {
 
   return {
     status, loading, download, section, rate, voices, error, play, pause, stop, jump, setRate, setVoice,
-    value: faber ? FABER : browserVoice?.voiceURI ?? BROWSER_DEFAULT,
-    isFaber: faber,
+    value: cadu ? CADU : browserVoice?.voiceURI ?? BROWSER_DEFAULT,
+    isCadu: cadu,
     activeKey: status === 'idle' ? null : sections[section]?.key ?? null,
   };
 }

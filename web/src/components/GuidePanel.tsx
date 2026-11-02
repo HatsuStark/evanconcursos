@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { guideSpeech } from '../../../shared/ai/speech.ts';
 import { localVoiceSupported } from '../lib/piper.ts';
 import { supabase } from '../lib/supabase.ts';
-import { BROWSER_DEFAULT, FABER, RATES, useGuideVoice, voiceSupported } from '../lib/voice.ts';
+import { BROWSER_DEFAULT, CADU, RATES, useGuideVoice, voiceSupported } from '../lib/voice.ts';
 
 interface GuideContent {
   titulo: string; introducao: string;
@@ -163,7 +163,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
             {RATES.map((r) => <option key={r} value={r}>{String(r).replace('.', ',')}x</option>)}
           </select>
           <select className="select voice-select" aria-label="Voz" value={voice.value} onChange={(e) => voice.setVoice(e.target.value)}>
-            {localVoiceSupported() && <option value={FABER}>Faber</option>}
+            {localVoiceSupported() && <option value={CADU}>Cadu</option>}
             {voiceSupported() && (
               <optgroup label="Voz do navegador">
                 {voice.voices.length ? voice.voices.map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>) : <option value={BROWSER_DEFAULT}>Padrão do navegador</option>}
@@ -175,7 +175,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
               <span className="spinner" /> {voice.download != null ? `Baixando a voz, só na primeira vez (63 MB): ${Math.round(voice.download * 100)}%` : 'Preparando o áudio…'}
             </span>
           )}
-          {!voice.isFaber && voiceSupported() && !voice.voices.length && <span className="faint small">Sem voz em português no navegador: a pronúncia pode sair errada.</span>}
+          {!voice.isCadu && voiceSupported() && !voice.voices.length && <span className="faint small">Sem voz em português no navegador: a pronúncia pode sair errada.</span>}
           {voice.error && <span className="error small">{voice.error}</span>}
         </div>
       )}

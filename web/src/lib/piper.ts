@@ -1,4 +1,4 @@
-// Voz Faber no próprio aparelho: sem custo por uso e sem enviar o texto a ninguém.
+// Voz Cadu no próprio aparelho: sem custo por uso e sem enviar o texto a ninguém.
 export const localVoiceSupported = () => typeof Worker !== 'undefined' && !!navigator.storage?.getDirectory;
 
 type Reply = { progress: number } | { id: number; blob: Blob } | { id: number; error: string };

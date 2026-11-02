@@ -97,7 +97,7 @@ Com tarefas atrasadas, a tela Hoje e o Cronograma mostram o que mudaria e só gr
 
 O botão **Ouvir** da apostila lê bloco a bloco com destaque na tela, escreve siglas e abreviações por extenso (`shared/ai/speech.ts`) e tem pausar, pular seção, velocidade e escolha de voz. A leitura para ao sair da aba Apostila. Nenhuma voz em uso tem custo por leitura:
 
-- **Faber** (padrão; Piper, `web/src/lib/piper.ts`): gerada no próprio aparelho, em worker. Baixa o modelo de 63 MB do Hugging Face uma vez (fica no OPFS do navegador) e carrega o runtime dos CDNs cdnjs e jsDelivr, em versões fixas. O texto não sai do aparelho e o áudio não é salvo.
+- **Cadu** (padrão; Piper, `web/src/lib/piper.ts`): gerada no próprio aparelho, em worker, com locução mais pausada que o padrão do modelo (`CONFIG` em `web/src/lib/piper.worker.ts`). Baixa o modelo de 63 MB de `VITE_VOICE_MODEL_URL` uma vez (padrão: Hugging Face; fica no OPFS do navegador) e carrega o runtime dos CDNs cdnjs e jsDelivr, em versões fixas. O texto não sai do aparelho e o áudio não é salvo. Se o modelo for hospedado em outro domínio, inclua-o em `connect-src` no `web/public/_headers`.
 - **Navegador** (Web Speech API): sem download; a qualidade depende do aparelho.
 
 **Antes do uso comercial:** o pacote `@mintplex-labs/piper-tts-web` se declara MIT, mas o componente de pronúncia que ele carrega deriva do espeak-ng (GPL). Revisar as licenças do pacote, desse componente e da voz.
