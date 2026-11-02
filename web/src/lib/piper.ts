@@ -9,21 +9,50 @@ const pending = new Map<number, { resolve: (blob: Blob) => void; reject: (e: Err
 const urls = new Map<string, Promise<string>>();
 let onDownload: ((fraction: number) => void) | null = null;
 
+const NETWORK_ERROR = /networkerror|failed to fetch|load failed/i;
+
+// A biblioteca e o ONNX guardam a falha de inicialização: só um worker novo tenta baixar de novo.
+function failAll(message: string) {
+  worker?.terminate();
+  worker = null;
+  const waiting = [...pending.values()];
+  pending.clear();
+  for (const p of waiting) p.reject(new Error(message));
+}
+
 function start() {
   const w = new Worker(new URL('./piper.worker.ts', import.meta.url), { type: 'module' });
   w.onmessage = (e: MessageEvent<Reply>) => {
     const m = e.data;
     if ('progress' in m) { onDownload?.(m.progress); return; }
+    if ('error' in m) { failAll(m.error); return; }
     const p = pending.get(m.id);
     pending.delete(m.id);
-    if ('blob' in m) p?.resolve(m.blob); else p?.reject(new Error(m.error));
+    p?.resolve(m.blob);
   };
-  w.onerror = (e) => {
-    for (const p of pending.values()) p.reject(new Error(e.message || 'Falha ao carregar a voz.'));
-    pending.clear();
-    worker = null;
-  };
+  w.onerror = (e) => failAll(e.message || 'Falha ao carregar a voz.');
   return w;
+}
+
+function generate(text: string) {
+  worker ??= start();
+  const w = worker, id = ++nextId;
+  return new Promise<Blob>((resolve, reject) => {
+    pending.set(id, { resolve, reject });
+    w.postMessage({ id, text });
+  });
+}
+
+// Oscilação de rede passa sozinha: repete algumas vezes antes de mostrar o erro.
+async function generateWithRetry(text: string, retries = 2): Promise<Blob> {
+  try {
+    return await generate(text);
+  } catch (e) {
+    if (!NETWORK_ERROR.test((e as Error).message)) throw e;
+    if (!retries) throw new Error('falha de conexão ao baixar os arquivos da voz');
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    return generateWithRetry(text, retries - 1);
+  }
 }
 
 // Áudio de um trecho. Guarda a promessa: o trecho adiantado não é gerado duas vezes.
@@ -31,12 +60,7 @@ export function localPartUrl(text: string, download: (fraction: number) => void)
   onDownload = download;
   let url = urls.get(text);
   if (!url) {
-    worker ??= start();
-    const w = worker, id = ++nextId;
-    url = new Promise<Blob>((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      w.postMessage({ id, text });
-    }).then((blob) => URL.createObjectURL(blob));
+    url = generateWithRetry(text).then((blob) => URL.createObjectURL(blob));
     urls.set(text, url);
     url.catch(() => urls.delete(text));
   }

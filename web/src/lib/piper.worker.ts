@@ -15,7 +15,6 @@ self.onmessage = (e: MessageEvent<{ id: number; text: string }>) => {
       });
       self.postMessage({ id, blob: await (await session).predict(text) });
     } catch (err) {
-      session = null;
       self.postMessage({ id, error: err instanceof Error ? err.message : String(err) });
     }
   });
