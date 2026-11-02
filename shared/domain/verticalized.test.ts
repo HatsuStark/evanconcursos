@@ -75,8 +75,8 @@ describe('desempenho', () => {
     const sessions = [session('s1', ['t1'])], tasks = [task('a', 's1', '2026-10-01', false, { goal_questions: 20 })];
     const r = build({ sessions, tasks, stats: [stat('s1', 1, 1)] });
     expect(row(r)).toMatchObject({ attempts: 1, correct: 1, acc: 1, total: 20, pending: 19, score: 5 });
-    expect(r.subjects[0]!.pending).toBe(19);
-    expect(r.summary.pending).toBe(19);
+    expect(r.subjects[0]).toMatchObject({ acc: 1, total: 20, pending: 19, score: 5 });
+    expect(r.summary).toMatchObject({ acc: 1, pending: 19, score: 5 });
   });
   it('pendência não vira ponto fraco', () => {
     const sessions = [session('s1', ['t1'])], tasks = [task('a', 's1', '2026-10-01', false, { goal_questions: 20 })];

@@ -249,7 +249,7 @@ export function PerformanceTab() {
       </div>
       <p className="faint small" style={{ margin: 0 }}><ListChecks size={12} style={{ verticalAlign: -2 }} /> {week} questões nos últimos 7 dias.</p>
       {!rows.length ? <div className="glass card muted">Sem questões neste contexto ainda.</div> : (
-        <table className="sum-table glass"><thead><tr><th>Matéria</th><th>Acertos</th><th /></tr></thead><tbody>
+        <table className="sum-table glass"><thead><tr><th>Matéria</th><th>Acertos nas respondidas</th><th /></tr></thead><tbody>
           {[...by].sort((a, b) => a[1].c / a[1].t - b[1].c / b[1].t).map(([m, e]) => (
             <tr key={m}><td>{m}</td><td>{e.c}/{e.t} · {Math.round((e.c / e.t) * 100)}%</td><td style={{ width: '35%' }}><div className="bar"><span style={{ width: `${(e.c / e.t) * 100}%`, background: e.c / e.t >= 0.75 ? 'var(--lime)' : 'var(--orange)' }} /></div></td></tr>
           ))}

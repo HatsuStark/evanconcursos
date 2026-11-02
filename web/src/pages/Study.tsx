@@ -16,7 +16,7 @@ import { VideosPanel } from '../components/VideosPanel.tsx';
 import { fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
 import { sessionLawRefs } from '../lib/legal.ts';
 import { KIND_LABEL, setTaskDone } from '../lib/plans.ts';
-import { accuracy, saveTimeSpent, useStudy, type StudyData } from '../lib/study.ts';
+import { saveTimeSpent, useStudy, type StudyData } from '../lib/study.ts';
 
 const fmtClock = (s: number) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ':' : ''}${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 // Ordem de estudo: teoria primeiro, questões por último. Lei seca só em assuntos de legislação.
@@ -73,8 +73,11 @@ function StudyView({ d }: { d: StudyData }) {
   const color = d.subjectIndex >= 0 ? subjectColor(d.subjectIndex) : 'var(--magenta)';
   const mine = latestAnswers(d.attempts.filter((a) => a.task_id === d.task.id));
   const right = mine.filter((a) => a.correct).length;
-  const subjectAcc = accuracy(d.attempts), verdict = evaluate(mine.length ? right / mine.length : null);
+  const verdict = evaluate(mine.length ? right / mine.length : null);
   const score = questionScore(right, mine.length, d.task.goal_questions);
+  // A matéria segue a mesma conta do Edital: questões das sessões, com as pendentes.
+  const subjectAnswers = latestAnswers(d.attempts.filter((a) => a.session_id));
+  const subjectScore = questionScore(subjectAnswers.filter((a) => a.correct).length, subjectAnswers.length, d.subjectGoal);
 
   const canFocus = d.task.kind !== 'simulado';
   const [focus, setFocus] = useState(false);
@@ -122,7 +125,7 @@ function StudyView({ d }: { d: StudyData }) {
         <div className="stats">
           <div className="stat"><strong style={{ color: 'var(--violet)' }}>{mine.length}</strong><span>de {d.task.goal_questions || '—'}</span></div>
           <div className="stat"><strong style={{ color: score.pending ? 'var(--cyan)' : 'var(--lime)' }}>{mine.length ? score.pct + '%' : '—'}</strong><span>no tema</span></div>
-          <div className="stat"><strong style={{ color: 'var(--orange)' }}>{subjectAcc != null ? Math.round(subjectAcc * 100) + '%' : '—'}</strong><span>na matéria</span></div>
+          <div className="stat"><strong style={{ color: subjectScore.pending ? 'var(--cyan)' : 'var(--orange)' }}>{subjectAnswers.length ? subjectScore.pct + '%' : '—'}</strong><span>na matéria</span></div>
         </div>
         {d.task.goal_questions > 0 && <div className="bar" style={{ marginTop: 12 }}><span style={{ width: `${Math.min(100, (mine.length / d.task.goal_questions) * 100)}%`, background: 'var(--violet)', boxShadow: '0 0 10px var(--violet)' }} /></div>}
         {!!mine.length && <p className="small" style={{ margin: '10px 0 0' }}>{score.pending

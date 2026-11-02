@@ -20,7 +20,7 @@ export interface TopicRow {
   total: number; pending: number; score: number;
   weak: boolean; noQuestions: boolean; taskId: string | null;
 }
-export interface SubjectRow extends VSubject { topics: TopicRow[]; studied: number; attempts: number; correct: number; acc: number | null; pending: number }
+export interface SubjectRow extends VSubject { topics: TopicRow[]; studied: number; attempts: number; correct: number; acc: number | null; total: number; pending: number; score: number }
 
 const ratio = (correct: number, total: number) => (total ? correct / total : null);
 const latest = (dates: (string | null | undefined)[]) => dates.reduce<string | null>((max, d) => (d && (!max || d > max) ? d : max), null);
@@ -61,11 +61,13 @@ export function buildVerticalized(input: { subjects: VSubject[]; topics: VTopic[
     });
     const ownSessions = input.sessions.filter((s) => s.subject_id === subject.id), own = ownSessions.flatMap((s) => statBySession.get(s.id) ?? []);
     const attempts = own.reduce((n, s) => n + s.total, 0), correct = own.reduce((n, s) => n + s.correct, 0);
-    return { ...subject, topics, studied: topics.filter((t) => t.status === 'estudado').length, attempts, correct, acc: ratio(correct, attempts), pending: questionScore(correct, attempts, goalOf(ownSessions)).pending };
+    const { total, pending, pct: score } = questionScore(correct, attempts, goalOf(ownSessions));
+    return { ...subject, topics, studied: topics.filter((t) => t.status === 'estudado').length, attempts, correct, acc: ratio(correct, attempts), total, pending, score };
   });
 
   const topics = subjects.flatMap((s) => s.topics);
   const attempts = subjects.reduce((n, s) => n + s.attempts, 0), correct = subjects.reduce((n, s) => n + s.correct, 0);
+  const planned = subjects.reduce((n, s) => n + s.total, 0);
   // Onde focar: erra mais em matéria que pesa mais.
   const bySubject = new Map(subjects.map((s) => [s.id, s]));
   const priority = (t: TopicRow) => { const s = bySubject.get(t.subjectId)!; return (1 - t.acc!) * s.weight * (s.is_core ? CORE_BOOST : 1); };
@@ -74,7 +76,7 @@ export function buildVerticalized(input: { subjects: VSubject[]; topics: VTopic[
     subjects, focus,
     summary: {
       total: topics.length, studied: topics.filter((t) => t.status === 'estudado').length, inProgress: topics.filter((t) => t.status === 'andamento').length,
-      weak: topics.filter((t) => t.weak).length, noQuestions: topics.filter((t) => t.noQuestions).length, attempts, correct, acc: ratio(correct, attempts), pending: subjects.reduce((n, s) => n + s.pending, 0),
+      weak: topics.filter((t) => t.weak).length, noQuestions: topics.filter((t) => t.noQuestions).length, attempts, correct, acc: ratio(correct, attempts), pending: subjects.reduce((n, s) => n + s.pending, 0), score: questionScore(correct, attempts, planned).pct,
     },
   };
 }

@@ -77,7 +77,7 @@ export function VerticalizedPage() {
         <h3>Questões do cronograma</h3>
         <div className="stats">
           <div className="stat"><strong style={{ color: 'var(--violet)' }}>{summary.attempts}</strong><span>questões</span></div>
-          <div className="stat"><strong style={{ color: summary.acc != null && summary.acc >= WEAK ? 'var(--lime)' : 'var(--orange)' }}>{summary.acc != null ? pct(summary.acc) : '—'}</strong><span>acerto</span></div>
+          <div className="stat"><strong style={{ color: summary.pending ? 'var(--cyan)' : summary.acc != null && summary.acc >= WEAK ? 'var(--lime)' : 'var(--orange)' }}>{summary.acc != null ? `${summary.score}%` : '—'}</strong><span>das metas</span></div>
           <div className="stat"><strong style={{ color: 'var(--orange)' }}>{summary.weak}</strong><span>fracos</span></div>
         </div>
         {summary.pending > 0 && <p className="muted small" style={{ margin: '10px 0 0' }}>{plural(summary.pending)} nas metas do cronograma.</p>}
@@ -89,7 +89,7 @@ export function VerticalizedPage() {
             {focus.map((t) => (
               <Link key={t.id} className="glass vert-focus" to={t.taskId ? `/estudo/${t.taskId}` : '/edital'}>
                 <span className="vert-focus-text">{t.text}</span>
-                <span className="muted small">{t.subjectName} · {pct(t.acc!)} em {t.attempts} questões</span>
+                <span className="muted small">{t.subjectName} · {pct(t.acc!)} de acerto em {t.attempts} respondidas</span>
               </Link>
             ))}
           </div>
@@ -113,7 +113,7 @@ export function VerticalizedPage() {
                 <div>{s.name}{s.is_core && <span className="badge violet" style={{ marginLeft: 8 }}>específica</span>}</div>
                 <div className="bar" style={{ marginTop: 6 }}><span style={{ width: `${s.topics.length ? (s.studied / s.topics.length) * 100 : 0}%`, background: subjectColor(i) }} /></div>
                 <div className="muted small" style={{ marginTop: 6, fontWeight: 400 }}>
-                  {s.studied} de {s.topics.length} tópicos{s.questions ? ` · ${s.questions} questões na prova` : ''}{s.attempts ? ` · ${pct(s.acc!)} de acerto em ${s.attempts}` : ''}{s.attempts && s.pending ? ` · ${plural(s.pending)}` : ''}
+                  {s.studied} de {s.topics.length} tópicos{s.questions ? ` · ${s.questions} questões na prova` : ''}{s.attempts ? ` · ${s.correct}/${s.total} · ${s.score}%` : ''}{s.attempts && s.pending ? ` · ${plural(s.pending)}` : ''}
                 </div>
               </div>
             </summary>
@@ -121,7 +121,7 @@ export function VerticalizedPage() {
           </details>
         ))}
       </div>
-      <p className="faint small" style={{ marginTop: 14 }}>Contam as questões feitas nas sessões do cronograma; simulados, revisão de erros e questões livres ficam na aba Desempenho. Uma sessão com vários tópicos conta suas questões para todos eles. A porcentagem de cada tópico inclui as questões pendentes da meta; "de acerto" considera só as respondidas.</p>
+      <p className="faint small" style={{ marginTop: 14 }}>Contam as questões feitas nas sessões do cronograma; simulados, revisão de erros e questões livres ficam na aba Desempenho. Uma sessão com vários tópicos conta suas questões para todos eles. As porcentagens de tópico e matéria incluem as questões pendentes da meta; "de acerto" considera só as respondidas.</p>
     </Shell>
   );
 }
