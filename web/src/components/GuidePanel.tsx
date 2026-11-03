@@ -1,5 +1,5 @@
 import { AlertTriangle, BookOpen, CheckCircle2, Headphones, Landmark, Pause, Play, Printer, SkipBack, SkipForward, Sparkles, Square } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { guideSpeech } from '../../../shared/ai/speech.ts';
 import { localVoiceSupported } from '../lib/piper.ts';
 import { supabase } from '../lib/supabase.ts';
@@ -12,6 +12,8 @@ interface GuideContent {
   quadros?: { titulo: string; colunas: string[]; linhas: string[][] }[];
   legislacao: { ref: string; comentario: string }[];
   memorizar?: string[]; pontos_banca: string[]; pegadinhas: string[]; resumo: string[];
+  mnemonicos?: { alvo: string; mnemonico: string; explicacao: string }[];   // revisão curta (review-v1)
+  gatilhos?: { pista: string; resposta: string }[];
   questoes?: { enunciado: string; alternativas: string[]; gabarito: string; comentario: string }[];
   perguntas: { pergunta: string; resposta: string }[];
   depende_legislacao: boolean;
@@ -40,6 +42,7 @@ async function fetchGuide(taskId: string, depth: string, cancelled: () => boolea
   return null;
 }
 
+const MAP_COLORS = ['var(--cyan)', 'var(--violet)', 'var(--lime)', 'var(--orange)', 'var(--magenta)'];
 const paragraphs = (t: string) => t.split(/\n\s*\n|\n/).map((p) => p.trim()).filter(Boolean);
 
 // Apostila da sessão: completa ou revisão curta, gerada pela IA a partir do edital e da lei seca oficial.
@@ -107,8 +110,16 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
             {!!g.objetivos?.length && <div className="guide-goals"><strong>Ao final, você vai saber</strong><ul>{g.objetivos.map((o, i) => <li key={i}>{o}</li>)}</ul></div>}
           </header>
           {!!g.esquema?.length && (
-            <section className="guide-map"><h3>Mapa do tema</h3>
-              <div className="guide-map-grid">{g.esquema.map((e, i) => <div key={i}><b>{e.topico}</b><ul>{e.itens.map((x, j) => <li key={j}>{x}</li>)}</ul></div>)}</div>
+            <section {...reading('mapa')}><h3>Mapa mental</h3>
+              <div className="mindmap">
+                <div className="mm-center">{g.titulo}</div>
+                <div className="mm-trunk" />
+                <div className="mm-branches">{g.esquema.map((e, i) => (
+                  <div key={i} className="mm-branch" style={{ '--c': MAP_COLORS[i % MAP_COLORS.length] } as CSSProperties}>
+                    <b>{e.topico}</b><ul>{e.itens.map((x, j) => <li key={j}>{x}</li>)}</ul>
+                  </div>
+                ))}</div>
+              </div>
             </section>
           )}
           {(!!guide!.unlisted_sources.length || !!guide!.unverified.length) && (
@@ -133,6 +144,18 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
               )}
             </section>
           ))}
+          {!!g.mnemonicos?.length && (
+            <section {...reading('mnemonicos')}><h3>Mnemônicos</h3>
+              <div className="guide-mnemo">{g.mnemonicos.map((m, i) => (
+                <div key={i}><span className="faint small">{m.alvo}</span><br /><strong>{m.mnemonico}</strong><p>{m.explicacao}</p></div>
+              ))}</div>
+            </section>
+          )}
+          {!!g.gatilhos?.length && (
+            <section {...reading('gatilhos')}><h3>Gatilhos de prova</h3>
+              <div className="guide-cues">{g.gatilhos.map((x, i) => <div key={i}><span>{x.pista}</span><span>→</span><span>{x.resposta}</span></div>)}</div>
+            </section>
+          )}
           {(g.quadros ?? []).filter((q) => q.linhas.length).map((q, i) => (
             <section key={`q${i}`} {...reading(`q${i}`)}><h3>{q.titulo}</h3>
               <div className="guide-table"><table className="sum-table"><thead><tr>{q.colunas.map((c, j) => <th key={j}>{c}</th>)}</tr></thead>
@@ -173,7 +196,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
             </section>
           )}
           {!!g.perguntas.length && (
-            <section {...reading('perguntas')}><h3>Perguntas de revisão</h3>
+            <section {...reading('perguntas')}><h3>{guide!.depth === 'revisao' ? 'Tente lembrar' : 'Perguntas de revisão'}</h3>
               {g.perguntas.map((q, i) => (
                 <div key={i} className="guide-q">
                   <button className="link-btn" onClick={() => setOpen(open === i ? null : i)}>{i + 1}. {q.pergunta}</button>

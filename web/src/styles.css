@@ -375,6 +375,25 @@ a.task-title:hover { color: var(--cyan); }
 .guide-map-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
 .guide-map-grid > div { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
 .guide-map-grid ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
+/* Mapa mental: tema no centro, tronco e ramos coloridos com as palavras-chave. */
+.mindmap { display: grid; justify-items: center; }
+.mm-center { padding: 10px 18px; border-radius: 999px; border: 1.5px solid var(--violet); background: rgba(169, 116, 255, .12); font-weight: 700; text-align: center; max-width: 520px; }
+.mm-trunk { width: 2px; height: 18px; background: var(--line-2); }
+.mm-branches { width: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; padding-top: 14px; border-top: 2px solid var(--line-2); }
+.mm-branch { position: relative; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--c) 8%, transparent); }
+.mm-branch::before { content: ''; position: absolute; top: -16px; left: 50%; width: 2px; height: 14px; background: var(--line-2); }
+.mm-branch b { display: block; color: var(--c); margin-bottom: 6px; }
+.mm-branch ul { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.mm-branch li { padding: 2px 8px; border-radius: 999px; background: var(--surface-2); font-size: 13.5px; }
+.guide-mnemo { display: grid; gap: 10px; }
+.guide-mnemo > div { padding: 12px 14px; border-left: 3px solid var(--lime); background: rgba(181, 229, 80, .07); border-radius: 8px; }
+.guide-mnemo strong { font-size: 20px; letter-spacing: .04em; color: var(--lime); }
+.guide-mnemo p { margin: 4px 0 0; }
+.guide-cues { display: grid; gap: 6px; }
+.guide-cues > div { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.guide-cues span:nth-child(2) { color: var(--cyan); }
+.guide-cues span:last-child { font-weight: 600; }
+@media (max-width: 560px) { .guide-cues > div { grid-template-columns: 1fr; gap: 2px; } .guide-cues span:nth-child(2) { display: none; } }
 .guide-table { overflow-x: auto; }
 .guide-table th[scope="row"] { text-align: left; font-weight: 600; }
 .guide-memo { padding: 12px 14px; border-left: 3px solid var(--cyan); background: rgba(42, 212, 232, .06); border-radius: 8px; }
@@ -406,6 +425,8 @@ a.task-title:hover { color: var(--cyan); }
   .guide-a:not(.print-only) { display: none; }
   .print-only { display: block; color: #222; }
   .warning-card { border-color: #c60; background: #fff7ed; color: #111; }
+  .mm-branch li { background: #eee; }
+  .mm-branch b, .guide-mnemo strong { color: #234; }
 }
 
 /* ---------- E4.5: materiais e leitor de PDF ---------- */

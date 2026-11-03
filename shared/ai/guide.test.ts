@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyBoardEvidence, boardSample, guideCacheKey, guidePrompt, lawKeys, pickSimilarGuide, roleSpecific, topicKeys, trimReview, clipText, REVIEW_LIMITS, unlistedLaws, verifyGuide, type BoardQuestion, type Guide } from './guide.ts';
+import { applyBoardEvidence, boardSample, guideCacheKey, guidePrompt, lawKeys, pickSimilarGuide, roleSpecific, topicKeys, trimReview, clipText, cuePista, guideVersion, REVIEW_LIMITS, unlistedLaws, verifyGuide, type BoardQuestion, type Guide } from './guide.ts';
 
 const law = [{ ref: 'CP, art. 312', text: 'x'.repeat(100) }, { ref: 'CP, art. 313', text: 'y'.repeat(80) }];
 const base = { depth: 'completa' as const, subject: 'Direito Penal', banca: 'VUNESP', topics: ['Peculato', 'Concussão'], law };
@@ -7,7 +7,7 @@ const base = { depth: 'completa' as const, subject: 'Direito Penal', banca: 'VUN
 const question = (assunto: string, enunciado = 'Enunciado'): BoardQuestion => ({ assunto, ano: 2024, enunciado, alternativas: ['A) um', 'B) dois'] });
 const guide: Guide = {
   titulo: 'T', introducao: 'I', objetivos: [], esquema: [], secoes: [{ titulo: 'S', prioridade: 'alta', texto: 'X', exemplos: [], como_banca_cobra: 'Cobra a letra do art. 999 do CP.' }],
-  quadros: [], legislacao: [], memorizar: [], pontos_banca: [], pegadinhas: [], resumo: [], questoes: [], perguntas: [], depende_legislacao: false,
+  quadros: [], legislacao: [], memorizar: [], mnemonicos: [], gatilhos: [], pontos_banca: [], pegadinhas: [], resumo: [], questoes: [], perguntas: [], depende_legislacao: false,
 };
 const promptBase = { depth: 'completa' as const, banca: 'VUNESP', cargo: 'Escrevente', subject: 'Direito Penal', title: 'Peculato', topics: ['Peculato'], law: [] };
 
@@ -100,30 +100,49 @@ describe('revisão curta', () => {
     memorizar: many(12, String), pontos_banca: many(7, String), pegadinhas: many(7, String), resumo: many(12, String),
     questoes: many(5, () => ({ enunciado: 'e', alternativas: [], gabarito: 'C', comentario: 'c' })), perguntas: many(6, () => ({ pergunta: 'p', resposta: 'r' })),
   };
-  it('trimReview aplica os tetos, corta parágrafos e exemplos', () => {
-    const r = trimReview(big);
-    expect(r.secoes).toHaveLength(REVIEW_LIMITS.secoes);
-    expect(r.secoes[0]!.texto).toBe('p1\n\np2');
-    expect(r.secoes[0]!.exemplos).toEqual(['e1']);
+  it('trimReview aplica os tetos: sem seções nem questões, mapa, mnemônicos e gatilhos limitados', () => {
+    const r = trimReview({ ...big, esquema: many(8, (i) => ({ topico: String(i), itens: many(6, String) })),
+      mnemonicos: many(5, () => ({ alvo: 'a', mnemonico: 'm', explicacao: 'e' })), gatilhos: many(9, () => ({ pista: 'p', resposta: 'r' })) });
+    expect(r.secoes).toEqual([]);
+    expect(r.questoes).toEqual([]);
+    expect(r.objetivos).toEqual([]);
+    expect(r.esquema).toHaveLength(REVIEW_LIMITS.esquema);
+    expect(r.esquema[0]!.itens).toHaveLength(REVIEW_LIMITS.ramoItens);
+    expect(r.mnemonicos).toHaveLength(REVIEW_LIMITS.mnemonicos);
+    expect(r.gatilhos).toHaveLength(REVIEW_LIMITS.gatilhos);
     expect(r.legislacao).toHaveLength(REVIEW_LIMITS.legislacao);
     expect(r.resumo).toHaveLength(REVIEW_LIMITS.resumo);
-    expect(r.questoes).toHaveLength(REVIEW_LIMITS.questoes);
     expect(JSON.stringify(r).length).toBeLessThan(JSON.stringify(big).length * 0.7);
   });
   it('apostila antiga sem os campos novos continua sem eles', () => {
-    const { objetivos: _o, quadros: _q, memorizar: _m, questoes: _qs, ...old } = big;
+    const { objetivos: _o, quadros: _q, memorizar: _m, questoes: _qs, mnemonicos: _mn, gatilhos: _g, ...old } = big;
     const r = trimReview(old as Partial<Guide>);
     expect(r.objetivos).toBeUndefined();
-    expect(r.secoes).toHaveLength(REVIEW_LIMITS.secoes);
+    expect(r.mnemonicos).toBeUndefined();
   });
   it('clipText corta no fim da frase, ou na palavra com reticências', () => {
     expect(clipText('Curto.', 50)).toBe('Curto.');
     expect(clipText('Primeira frase aqui. Segunda frase bem mais longa que passa.', 30)).toBe('Primeira frase aqui.');
     expect(clipText('palavras sem ponto nenhum que passam do limite', 20)).toBe('palavras sem ponto…');
   });
+  it('cuePista tira o "se a questão falar em" da pista', () => {
+    expect(cuePista('se a questão falar em juízo de admissibilidade')).toBe('Juízo de admissibilidade');
+    expect(cuePista('Se o enunciado mencionar que houve posse')).toBe('Houve posse');
+    expect(cuePista('Funcionário figura como acionista')).toBe('Funcionário figura como acionista');
+  });
   it('o prompt da revisão pede os tetos', () => {
     const p = guidePrompt({ ...promptBase, depth: 'revisao' });
-    expect(p).toMatch(/um terço/);
-    expect(p).toMatch(new RegExp(`legislacao: até ${REVIEW_LIMITS.legislacao}`));
+    expect(p).toMatch(/folha de memorização/);
+    expect(p).toMatch(/mnemonicos: 1 a 3/);
+    expect(p).toMatch(/gatilhos: 4 a 6/);
+    expect(p).toMatch(/mapa mental/);
+    expect(p).not.toMatch(/questoes: inéditas/);
+    const full = guidePrompt(promptBase);
+    expect(full).toMatch(/questoes: inéditas/);
+    expect(full).toMatch(/mnemonicos e gatilhos: vazios/);
+  });
+  it('revisão tem versão própria na chave: mudar a revisão não refaz a completa', () => {
+    expect(guideCacheKey({ ...base, depth: 'revisao' })).not.toBe(guideCacheKey(base));
+    expect(guideVersion('revisao')).not.toBe(guideVersion('completa'));
   });
 });

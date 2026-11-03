@@ -1,9 +1,10 @@
 // Avaliação da apostila da IA em sessões reais do cronograma: tamanho, citações verificadas e amostra do texto.
 // Uso: node --experimental-strip-types evals/guide-run.ts [completa|revisao] [n-sessões=3]
+// Na revisão (review-v1), mostra também o tamanho, o mapa mental, os mnemônicos e os gatilhos.
 import { readFileSync } from 'node:fs';
 import pg from 'pg';
 import { costUsd, generateJson } from '../shared/ai/gemini.ts';
-import { Guide, guideJsonSchema, guidePrompt, sourceRef, verifyGuide, type GuideDepth } from '../shared/ai/guide.ts';
+import { Guide, guideJsonSchema, guidePrompt, sourceRef, trimReview, verifyGuide, type GuideDepth } from '../shared/ai/guide.ts';
 import { findLawRefs, inRanges } from '../shared/legal/refs.ts';
 import { lawByKey } from '../shared/legal/registry.ts';
 
@@ -34,7 +35,7 @@ for (const s of sessions) {
   const t0 = Date.now();
   const r = await generateJson({ apiKey: env.GEMINI_API_KEY!, model: env.GEMINI_MODEL || 'gemini-3.8-flash', schema: Guide, jsonSchema: guideJsonSchema(), temperature: 0.3,
     parts: [{ text: guidePrompt({ depth, banca: notice.board, cargo: notice.role_name, subject: s.subject, title: s.title, topics: s.topics, law }) }] });
-  const v = verifyGuide(r.data, provided, s.subject);
+  const v = verifyGuide(depth === 'revisao' ? trimReview(r.data) : r.data, provided, s.subject);
   const words = JSON.stringify(r.data).split(/\s+/).length;
   console.log(`\n■ ${s.subject} · ${s.title}\n  ${law.length} artigos fornecidos · ${Math.round((Date.now() - t0) / 1000)}s · US$ ${costUsd(r.usage, PRICE).toFixed(4)} · ~${words} palavras · ${r.data.secoes.length} seções · ${r.data.perguntas.length} perguntas`);
   console.log(`  legislação comentada: ${v.guide.legislacao.map((l) => l.ref).join('; ') || '—'}${v.droppedRefs ? ` · ${v.droppedRefs} ref(s) removida(s) por não estarem nas fontes` : ''}`);
@@ -42,5 +43,13 @@ for (const s of sessions) {
   console.log(`  introdução: ${r.data.introducao.slice(0, 260)}`);
   console.log(`  1ª seção: ${r.data.secoes[0]?.titulo} — ${r.data.secoes[0]?.texto.slice(0, 260).replace(/\n+/g, ' ')}`);
   console.log(`  pegadinha: ${r.data.pegadinhas[0] ?? '—'}`);
+  if (depth === 'revisao') {
+    const g = v.guide;
+    console.log(`  tamanho: ${JSON.stringify(g).length} caracteres (bruto da IA: ${JSON.stringify(r.data).length})`);
+    console.log(`  mapa mental: ${g.esquema.map((e) => `${e.topico} [${e.itens.join(', ')}]`).join(' · ')}`);
+    for (const m of g.mnemonicos) console.log(`  mnemônico: ${m.alvo} → ${m.mnemonico} (${m.explicacao})`);
+    for (const x of g.gatilhos) console.log(`  gatilho: ${x.pista} → ${x.resposta}`);
+    console.log(`  tente lembrar: ${g.perguntas.map((q) => q.pergunta).join(' | ')}`);
+  }
 }
 await db.end();

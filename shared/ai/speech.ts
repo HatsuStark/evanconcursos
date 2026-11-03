@@ -8,7 +8,8 @@ interface SpeakableGuide {
   secoes: { titulo: string; texto: string; exemplos: string[]; como_banca_cobra?: string }[];
   quadros?: { titulo: string; colunas: string[]; linhas: string[][] }[];
   legislacao: { ref: string; comentario: string }[];
-  memorizar?: string[]; pontos_banca: string[]; pegadinhas: string[]; resumo: string[];
+  memorizar?: string[]; mnemonicos?: { alvo: string; mnemonico: string; explicacao: string }[]; gatilhos?: { pista: string; resposta: string }[];
+  esquema?: { topico: string; itens: string[] }[]; pontos_banca: string[]; pegadinhas: string[]; resumo: string[];
   questoes?: { enunciado: string; alternativas: string[]; gabarito: string; comentario: string }[];
   perguntas: { pergunta: string; resposta: string }[];
 }
@@ -80,7 +81,10 @@ export function guideSpeech(g: SpeakableGuide): SpeechSection[] {
   const list = (key: string, title: string, items: string[]) => (items.length ? [section(key, title, items)] : []);
   return [
     section('intro', g.titulo, [g.introducao, ...(g.objetivos?.length ? [`Ao final, você vai saber: ${g.objetivos.join('; ')}.`] : [])]),
+    ...(g.secoes.length ? [] : list('mapa', 'Mapa mental', (g.esquema ?? []).map((e) => `${e.topico}: ${e.itens.join(', ')}.`))),
     ...g.secoes.map((s, i) => section(`s${i}`, s.titulo, [s.texto, ...s.exemplos.map((e) => `Exemplo: ${e}`), ...(s.como_banca_cobra ? [`Como a banca cobra: ${s.como_banca_cobra}`] : [])])),
+    ...list('mnemonicos', 'Mnemônicos', (g.mnemonicos ?? []).map((m) => `${m.alvo}: ${m.mnemonico}. ${m.explicacao}`)),
+    ...list('gatilhos', 'Gatilhos de prova', (g.gatilhos ?? []).map((x) => `Se aparecer ${x.pista}, lembre: ${x.resposta}.`)),
     ...(g.quadros ?? []).map((q, i) => section(`q${i}`, q.titulo, q.linhas.map((l) => l.map((c, j) => (j ? `${q.colunas[j] ?? ''}: ${c}` : c)).join('; ') + '.'))),
     ...list('lei', 'Lei seca comentada', g.legislacao.map((l) => `${l.ref}: ${l.comentario}`)),
     ...list('memorizar', 'Para memorizar', g.memorizar ?? []),

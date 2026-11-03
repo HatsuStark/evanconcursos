@@ -1,11 +1,14 @@
 // Pente-fino da reta final: tudo o que já foi estudado na matéria, para reler rápido. Por sessão concluída, o que
-// memorizar e as pegadinhas da apostila e as marcações feitas nos PDFs daquele trecho. Sem teoria nova e sem custo de IA.
+// memorizar e as pegadinhas da apostila, os mnemônicos e gatilhos da revisão curta (se já foi gerada) e as marcações feitas nos PDFs daquele trecho. Sem teoria nova e sem custo de IA.
 import { useQuery } from '@tanstack/react-query';
 import { Layers } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase.ts';
 
-interface PenteItem { sessionId: string; title: string; memorizar: string[]; pegadinhas: string[]; hasGuide: boolean }
+interface PenteItem {
+  sessionId: string; title: string; memorizar: string[]; pegadinhas: string[]; hasGuide: boolean;
+  mnemonicos?: { alvo: string; mnemonico: string; explicacao: string }[]; gatilhos?: { pista: string; resposta: string }[];
+}
 interface Mark { quote: string; note: string; color: string }
 
 async function loadPente(taskId: string) {
@@ -33,7 +36,7 @@ export function PenteFinoPanel({ taskId }: { taskId: string }) {
   if (q.isError) return <p className="error">{(q.error as Error).message}</p>;
   if (!q.data) return <div className="spinner" />;
   const { items, marks } = q.data;
-  const filled = items.filter((i) => i.memorizar.length || i.pegadinhas.length || marks.has(i.sessionId));
+  const filled = items.filter((i) => i.memorizar.length || i.pegadinhas.length || i.mnemonicos?.length || i.gatilhos?.length || marks.has(i.sessionId));
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       <div className="glass card">
@@ -52,6 +55,10 @@ export function PenteFinoPanel({ taskId }: { taskId: string }) {
         <section key={i.sessionId} className="glass card">
           <h3 style={{ marginTop: 0 }}>{i.title}</h3>
           {!!i.memorizar.length && <div className="guide-memo"><h4>Para memorizar</h4><ul>{i.memorizar.map((p, k) => <li key={k}>{p}</li>)}</ul></div>}
+          {!!i.mnemonicos?.length && <div className="guide-mnemo" style={{ marginTop: 10 }}>{i.mnemonicos.map((m, k) => (
+            <div key={k}><span className="faint small">{m.alvo}</span><br /><strong>{m.mnemonico}</strong><p>{m.explicacao}</p></div>
+          ))}</div>}
+          {!!i.gatilhos?.length && <><h4>Gatilhos de prova</h4><div className="guide-cues">{i.gatilhos.map((x, k) => <div key={k}><span>{x.pista}</span><span>→</span><span>{x.resposta}</span></div>)}</div></>}
           {!!i.pegadinhas.length && <><h4>Pegadinhas</h4><ul className="advice">{i.pegadinhas.map((p, k) => <li key={k}>{p}</li>)}</ul></>}
           {!!marks.get(i.sessionId)?.length && <><h4>Suas marcações</h4><ul className="advice">{marks.get(i.sessionId)!.map((m, k) => (
             <li key={k} style={{ borderLeft: `3px solid ${MARK_COLOR[m.color] ?? 'var(--lime)'}`, paddingLeft: 8 }}>

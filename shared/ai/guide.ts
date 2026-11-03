@@ -6,6 +6,10 @@ import { findLawRefs, inRanges, type LawRef } from '../legal/refs.ts';
 import { lawByKey } from '../legal/registry.ts';
 
 export const GUIDE_PROMPT_VERSION = 'guide-v4';
+// Revisão curta com versão própria: folha de memorização (mapa mental, mnemônicos, gatilhos), sem texto corrido nem
+// questões. Mudar só a revisão não refaz as apostilas completas.
+export const REVIEW_PROMPT_VERSION = 'review-v1';
+export const guideVersion = (depth: GuideDepth) => (depth === 'revisao' ? REVIEW_PROMPT_VERSION : GUIDE_PROMPT_VERSION);
 export type GuideDepth = 'completa' | 'revisao';
 
 // Apostila como um professor especialista em concursos monta: objetivos, mapa do tema, seções com prioridade, quadros
@@ -14,7 +18,7 @@ export const Guide = z.object({
   titulo: z.string(),
   introducao: z.string().describe('Contexto e por que o tema importa para a prova, em até 4 frases.'),
   objetivos: z.array(z.string()).describe('O que o aluno saberá fazer ao final, em 3 a 5 itens curtos ("Diferenciar…", "Identificar…").'),
-  esquema: z.array(z.object({ topico: z.string(), itens: z.array(z.string()) })).describe('Mapa do tema: 3 a 6 tópicos, cada um com 2 a 5 itens de poucas palavras.'),
+  esquema: z.array(z.object({ topico: z.string(), itens: z.array(z.string()) })).describe('Mapa do tema (mapa mental): 3 a 6 ramos, cada um com 2 a 5 palavras-chave.'),
   secoes: z.array(z.object({
     titulo: z.string(),
     prioridade: z.enum(['alta', 'media', 'baixa']).describe('Quanto o assunto da seção cai em prova deste cargo e banca.'),
@@ -28,6 +32,15 @@ export const Guide = z.object({
   })).describe('Quadros comparativos entre institutos, espécies ou prazos parecidos, que a banca costuma confundir.'),
   legislacao: z.array(z.object({ ref: z.string().describe('Exatamente como no colchete do trecho fornecido, ex.: "CP, art. 312".'), comentario: z.string() })),
   memorizar: z.array(z.string()).describe('Prazos, números, quóruns e listas que precisam ser decorados, tirados dos trechos de lei ou do edital.'),
+  mnemonicos: z.array(z.object({
+    alvo: z.string().describe('O que o mnemônico ajuda a lembrar (lista, requisitos, ordem, prazos).'),
+    mnemonico: z.string().describe('Sigla, palavra ou frase curta fácil de lembrar.'),
+    explicacao: z.string().describe('Como decifrar: cada letra ou palavra e o item que representa.'),
+  })).describe('Mnemônicos para as listas e sequências do tema. Vazio se nada pede mnemônico.'),
+  gatilhos: z.array(z.object({
+    pista: z.string().describe('Palavra ou situação que aparece no enunciado ("se a questão falar em…").'),
+    resposta: z.string().describe('O que lembrar na hora, em poucas palavras.'),
+  })).describe('Associações rápidas entre pistas do enunciado e a resposta.'),
   pontos_banca: z.array(z.string()).describe('O que a banca mais cobra neste tema.'),
   pegadinhas: z.array(z.string()),
   resumo: z.array(z.string()).describe('Revisão em tópicos curtos.'),
@@ -67,12 +80,13 @@ export function applyBoardEvidence(g: Guide, banca: string, questions: number) {
   return { ...g, secoes, perfil_banca: questions ? { banca, questoes: questions } : null };
 }
 
-// Revisão curta (cerca de um terço da completa): o prompt pede estes tetos e `trimReview` os garante, também nas revisões
-// já gravadas (cortadas ao servir). Sem questões de fixação: a revisão de teoria usa as questões reais da aba Questões.
+// Revisão curta (review-v1): folha de memorização para quem já estudou o tema. Mapa mental, mnemônicos, gatilhos de
+// prova, o que memorizar, pegadinhas, resumo e perguntas de recordação; sem seções de texto e sem questões de fixação (a
+// revisão de teoria usa as questões reais da aba Questões). O prompt pede estes tetos e `trimReview` os garante.
 // Medido em 2026-11-03: as revisões guide-v4 tinham 74% do tamanho da completa, quase metade em seções e questões.
 export const REVIEW_LIMITS = {
-  objetivos: 3, esquema: 4, secoes: 3, paragrafos: 2, textoChars: 700, exemplos: 1, quadros: 1, legislacao: 3, comentarioChars: 220,
-  memorizar: 8, pontos_banca: 4, pegadinhas: 4, resumo: 8, questoes: 0, perguntas: 3, respostaChars: 250,
+  objetivos: 0, esquema: 6, ramoItens: 4, secoes: 0, paragrafos: 2, textoChars: 700, exemplos: 1, quadros: 1, legislacao: 3, comentarioChars: 220,
+  memorizar: 8, mnemonicos: 3, gatilhos: 6, pontos_banca: 4, pegadinhas: 4, resumo: 8, questoes: 0, perguntas: 3, respostaChars: 250,
 } as const;
 // Corta no fim da última frase que cabe; sem frase que caiba pela metade, corta na palavra com reticências.
 export function clipText(t: string, max: number) {
@@ -80,26 +94,45 @@ export function clipText(t: string, max: number) {
   const s = t.slice(0, max), end = Math.max(s.lastIndexOf('. '), s.lastIndexOf('.\n'), s.endsWith('.') ? s.length - 1 : -1);
   return end >= max / 2 ? s.slice(0, end + 1) : s.slice(0, s.lastIndexOf(' ') > 0 ? s.lastIndexOf(' ') : max).trimEnd() + '…';
 }
+// A tela e a voz já mostram "pista → resposta": tira o "se a questão falar em" que a IA às vezes repete na pista.
+export const cuePista = (t: string) => {
+  const s = t.replace(/^\s*se\s+(a\s+questão|o\s+enunciado|a\s+assertiva)\s+(falar|mencionar|disser|trouxer|citar)\s+(em\s+|que\s+)?/i, '').trim();
+  return s ? s[0]!.toUpperCase() + s.slice(1) : t;
+};
 export function trimReview<G extends Partial<Guide>>(g: G): G {
   const L = REVIEW_LIMITS, cut = <T,>(list: T[] | undefined, n: number) => list?.slice(0, n);
   return {
     ...g,
-    objetivos: cut(g.objetivos, L.objetivos), esquema: cut(g.esquema, L.esquema),
+    objetivos: cut(g.objetivos, L.objetivos), esquema: cut(g.esquema, L.esquema)?.map((e) => ({ ...e, itens: e.itens.slice(0, L.ramoItens) })),
     secoes: cut(g.secoes, L.secoes)?.map((s) => ({
       ...s, texto: clipText(s.texto.split(/\n\s*\n/).slice(0, L.paragrafos).join('\n\n'), L.textoChars), exemplos: cut(s.exemplos, L.exemplos) ?? [],
     })),
     quadros: cut(g.quadros, L.quadros), legislacao: cut(g.legislacao, L.legislacao)?.map((l) => ({ ...l, comentario: clipText(l.comentario, L.comentarioChars) })),
-    memorizar: cut(g.memorizar, L.memorizar), pontos_banca: cut(g.pontos_banca, L.pontos_banca), pegadinhas: cut(g.pegadinhas, L.pegadinhas),
+    memorizar: cut(g.memorizar, L.memorizar), mnemonicos: cut(g.mnemonicos, L.mnemonicos), gatilhos: cut(g.gatilhos, L.gatilhos)?.map((x) => ({ ...x, pista: cuePista(x.pista) })), pontos_banca: cut(g.pontos_banca, L.pontos_banca), pegadinhas: cut(g.pegadinhas, L.pegadinhas),
     resumo: cut(g.resumo, L.resumo), questoes: cut(g.questoes, L.questoes),
     perguntas: cut(g.perguntas, L.perguntas)?.map((p) => ({ ...p, resposta: clipText(p.resposta, L.respostaChars) })),
   };
 }
 
+const FULL_RULES = `- Ordem didática: do conceito e da regra geral para as exceções e os detalhes; cada seção explica, dá exemplo prático e destaca o que a prova costuma perguntar. Priorize o que mais cai: seção de prioridade alta ganha mais texto, a de baixa só o essencial.
+- secoes: 3 a 6 seções; quadros: 1 ou 2; questoes: 4 ou 5; perguntas: 4 a 6.
+- objetivos e esquema: curtos; o esquema é o mapa mental do tema, na ordem das seções.
+- mnemonicos e gatilhos: vazios (ficam na revisão curta).`;
+const L = REVIEW_LIMITS;
+const REVIEW_RULES = `- Revisão curta: nada de texto corrido nem questões de fixação. Cada item cabe numa linha. Não repita a mesma informação em campos diferentes.
+- introducao: 1 frase. objetivos, secoes e questoes: vazios.
+- esquema: o mapa mental do tema, com 4 a ${L.esquema} ramos (topico = nome curto do ramo) e 2 a ${L.ramoItens} palavras-chave por ramo, de até 5 palavras cada. Os ramos seguem a lógica do tema (conceito, espécies, requisitos, exceções, prazos, consequências).
+- mnemonicos: 1 a ${L.mnemonicos}, só para listas, requisitos, ordens ou prazos que estejam nos trechos de lei ou no conteúdo do edital. Prefira siglas ou frases já usadas por concurseiros quando existirem; senão, crie uma curta e fácil de lembrar. A explicacao decifra cada letra ou palavra. Nunca force: sem lista ou sequência que peça mnemônico, deixe vazio.
+- gatilhos: 4 a ${L.gatilhos} associações rápidas entre uma pista que aparece no enunciado (só a pista, sem "se a questão falar em") e o que lembrar (ex.: pista "funcionário se apropria de bem que tem a posse em razão do cargo", resposta "peculato-apropriação").
+- memorizar: até ${L.memorizar} itens. quadros: 0 ou 1, enxuto. legislacao: até ${L.legislacao} artigos-chave, com comentário de 1 frase.
+- pontos_banca e pegadinhas: até ${L.pontos_banca} cada. resumo: 5 a ${L.resumo} tópicos.
+- perguntas: ${L.perguntas} perguntas de recordação ativa (o aluno tenta responder de cabeça), com resposta de 1 frase.`;
+
 // format: formato predominante da banca na matéria ('certo e errado' ou múltipla escolha), para as questões de fixação.
 // duties/otherRoles: atribuições do cargo no edital e os outros cargos dele, para a apostila não descrever outro cargo.
 export function guidePrompt(p: { depth: GuideDepth; banca: string; cargo: string; subject: string; title: string; topics: string[]; law: GuideSource[]; boardQuestions?: BoardQuestion[]; format?: string; duties?: string; otherRoles?: string[] }) {
   const full = p.depth === 'completa', board = p.boardQuestions ?? [], ce = /certo/i.test(p.format ?? '');
-  return `Você é professor especialista em concursos públicos brasileiros, autor de material de cursinho que aprova. Escreva uma apostila ${full ? 'completa, para quem está começando o tema (cerca de 20 minutos de leitura antes de resolver questões)' : 'de revisão curta, para quem já estudou o tema (cerca de 8 minutos de leitura)'}.
+  return `Você é professor especialista em concursos públicos brasileiros, autor de material de cursinho que aprova. ${full ? 'Escreva uma apostila completa, para quem está começando o tema (cerca de 20 minutos de leitura antes de resolver questões).' : 'Monte a revisão curta do tema: uma folha de memorização para quem já estudou (cerca de 5 minutos), sem texto corrido.'}
 Concurso: ${p.cargo || 'não informado'}${p.banca ? `, banca ${p.banca}` : ''}.
 ${roleContext(p.cargo, p.duties, p.otherRoles)}
 Matéria: ${p.subject}
@@ -113,15 +146,13 @@ Regras obrigatórias:
 - Cite artigos SOMENTE dos trechos fornecidos, no formato do colchete (ex.: "CP, art. 312"). Se não houver trecho, não cite números de artigos.
 - Não cite jurisprudência, súmulas, autores ou posições doutrinárias. Não invente leis, prazos ou números.
 - Siga o texto da lei fornecido; ele é a versão vigente.
-- Ordem didática: do conceito e da regra geral para as exceções e os detalhes; cada seção explica, dá exemplo prático e destaca o que a prova costuma perguntar. Priorize o que mais cai: seção de prioridade alta ganha mais texto, a de baixa só o essencial.
-- ${full ? 'secoes: 3 a 6 seções; quadros: 1 ou 2; questoes: 4 ou 5; perguntas: 4 a 6.' : `Revisão curta: no máximo um terço do tamanho de uma apostila completa. introducao: 1 ou 2 frases; objetivos: ${REVIEW_LIMITS.objetivos}; esquema: até ${REVIEW_LIMITS.esquema} tópicos; secoes: até ${REVIEW_LIMITS.secoes}, cada uma com 1 ou 2 parágrafos curtos (até ${REVIEW_LIMITS.textoChars} caracteres no total) e no máximo 1 exemplo; quadros: 0 ou 1; legislacao: até ${REVIEW_LIMITS.legislacao} artigos, com comentário de 1 frase; memorizar: até ${REVIEW_LIMITS.memorizar}; pontos_banca e pegadinhas: até ${REVIEW_LIMITS.pontos_banca} cada; resumo: 5 a ${REVIEW_LIMITS.resumo} tópicos; questoes: vazio (a revisão usa questões reais); perguntas: ${REVIEW_LIMITS.perguntas}, com resposta de 1 ou 2 frases. Foco em resumo, memorizar e pontos de prova; não repita a mesma informação em seções, resumo e pontos de prova.`}
-- objetivos e esquema: curtos; o esquema é o mapa mental do tema, na ordem das seções.
+${full ? FULL_RULES : REVIEW_RULES}
 - quadros: compare só o que a banca costuma confundir (espécies, prazos, requisitos, diferenças entre institutos). Sem quadro se o tema não tiver o que comparar.
 - memorizar: só números, prazos, quóruns e listas que estejam nos trechos de lei ou no conteúdo do edital, nunca de memória. Vazio se não houver.
-- questoes${full ? '' : ' (só na apostila completa; aqui, vazio)'}: inéditas, ${ce ? 'no formato certo ou errado (alternativas vazias; gabarito "C" ou "E")' : 'de múltipla escolha com 5 alternativas (gabarito A a E)'}, no estilo ${board.length ? 'das questões reais fornecidas' : `da ${p.banca || 'banca'}`}, cobrando o que a apostila ensinou. Uma única resposta correta, sem ambiguidade; o comentário explica o gabarito pela apostila ou pelo artigo fornecido.
+${full ? `- questoes: inéditas, ${ce ? 'no formato certo ou errado (alternativas vazias; gabarito "C" ou "E")' : 'de múltipla escolha com 5 alternativas (gabarito A a E)'}, no estilo ${board.length ? 'das questões reais fornecidas' : `da ${p.banca || 'banca'}`}, cobrando o que a apostila ensinou. Uma única resposta correta, sem ambiguidade; o comentário explica o gabarito pela apostila ou pelo artigo fornecido.` : ''}
 - legislacao: comente os artigos fornecidos mais importantes para a prova (ref exatamente como no colchete).
 - pontos_banca e pegadinhas: o que costuma cair e as confusões comuns${p.banca ? ` da ${p.banca}` : ''}.
-- ${board.length ? 'secoes[].como_banca_cobra: diga como as questões fornecidas abordam o assunto da seção (letra da lei, caso prático, conceito, exceção, tipo de distrator). Só o que se observa nelas: sem percentuais, sem "sempre" ou "nunca", sem copiar enunciados. Deixe vazio na seção que nenhuma questão trata. As questões são só amostra de estilo, nunca fonte do conteúdo.' : 'secoes[].como_banca_cobra: deixe vazio em todas as seções.'}
+- ${!full ? 'secoes: vazio.' : board.length ? 'secoes[].como_banca_cobra: diga como as questões fornecidas abordam o assunto da seção (letra da lei, caso prático, conceito, exceção, tipo de distrator). Só o que se observa nelas: sem percentuais, sem "sempre" ou "nunca", sem copiar enunciados. Deixe vazio na seção que nenhuma questão trata. As questões são só amostra de estilo, nunca fonte do conteúdo.' : 'secoes[].como_banca_cobra: deixe vazio em todas as seções.'}
 - Linguagem clara, frases curtas, sem markdown.`;
 }
 
@@ -151,7 +182,8 @@ export function verifyGuide(g: Guide, provided: ProvidedArticle[], subject = '')
   const legislacao = g.legislacao.filter((l) => refs.has(l.ref.trim().toLowerCase()));
   const text = [
     g.introducao, ...(g.objetivos ?? []), ...(g.esquema ?? []).flatMap((e) => [e.topico, ...e.itens]), ...g.secoes.flatMap((s) => [s.texto, ...s.exemplos, s.como_banca_cobra]),
-    ...(g.quadros ?? []).flatMap((q) => q.linhas.flat()), ...g.legislacao.map((l) => l.comentario), ...(g.memorizar ?? []), ...g.pontos_banca, ...g.pegadinhas, ...g.resumo,
+    ...(g.quadros ?? []).flatMap((q) => q.linhas.flat()), ...g.legislacao.map((l) => l.comentario), ...(g.memorizar ?? []), ...(g.mnemonicos ?? []).flatMap((m) => [m.alvo, m.mnemonico, m.explicacao]),
+    ...(g.gatilhos ?? []).flatMap((x) => [x.pista, x.resposta]), ...g.pontos_banca, ...g.pegadinhas, ...g.resumo,
     ...(g.questoes ?? []).flatMap((q) => [q.enunciado, ...q.alternativas, q.comentario]), ...g.perguntas.flatMap((q) => [q.pergunta, q.resposta]),
   ].join('\n');
   return { guide: { ...g, legislacao }, unverified: unverifiedLawRefs(text, provided, subject), droppedRefs: g.legislacao.length - legislacao.length };
@@ -170,7 +202,7 @@ export const lawKeys = (law: GuideSource[]) => [...new Set(law.map((l) => l.ref)
 export const roleSpecific = (p: { title?: string; topics: string[] }) => /atribui|do cargo|da fun[cç][aã]o|rotina funcional/i.test([p.title ?? '', ...p.topics].join(' '));
 
 export function guideCacheKey(p: { depth: GuideDepth; subject: string; title?: string; topics: string[]; law: GuideSource[]; banca: string; cargo?: string }) {
-  const s = JSON.stringify([GUIDE_PROMPT_VERSION, p.depth, norm(p.banca), norm(p.subject), titleKeys(p.title ?? ''), topicKeys(p.topics), p.law.map((l) => l.ref + '|' + l.text.length).sort(),
+  const s = JSON.stringify([guideVersion(p.depth), p.depth, norm(p.banca), norm(p.subject), titleKeys(p.title ?? ''), topicKeys(p.topics), p.law.map((l) => l.ref + '|' + l.text.length).sort(),
     ...(roleSpecific(p) ? [norm(p.cargo ?? '')] : [])]);
   let h1 = 0x811c9dc5, h2 = 0;
   for (let i = 0; i < s.length; i++) { h1 = Math.imul(h1 ^ s.charCodeAt(i), 16777619) >>> 0; h2 = (h2 * 31 + s.charCodeAt(i)) >>> 0; }

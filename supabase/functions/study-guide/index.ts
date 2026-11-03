@@ -7,7 +7,7 @@
 // Reaproveita apostilas idênticas (mesmo tema, fontes e profundidade) entre sessões e estudantes.
 // Não há "gerar de novo" pelo estudante (economia de créditos): uma apostila existente é sempre reaproveitada.
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide, GUIDE_PROMPT_VERSION, guideCacheKey, guideJsonSchema, guidePrompt, lawKeys, pickSimilarGuide, topicKeys, trimReview, unlistedLaws, verifyGuide, type BoardQuestion, type GuideDepth } from '../../../shared/ai/guide.ts';
+import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide, guideCacheKey, guideVersion, guideJsonSchema, guidePrompt, lawKeys, pickSimilarGuide, topicKeys, trimReview, unlistedLaws, verifyGuide, type BoardQuestion, type GuideDepth } from '../../../shared/ai/guide.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient } from '../../../shared/qbank/client.ts';
 import { QMAP_PROMPT_VERSION } from '../../../shared/qbank/map.ts';
@@ -54,7 +54,7 @@ async function findGuide(admin: Admin, { input, key }: GuideContext) {
   // Apostila de tema do cargo só serve para o mesmo cargo: aí não vale a de tema parecido.
   if (roleSpecific(input)) return null;
   const { data: similar } = await admin.from('study_guides').select('*').eq('subject_key', normalizeText(input.subject)).eq('depth', input.depth)
-    .eq('banca', normalizeText(input.banca)).eq('prompt_version', GUIDE_PROMPT_VERSION).order('created_at', { ascending: false }).limit(60);
+    .eq('banca', normalizeText(input.banca)).eq('prompt_version', guideVersion(input.depth)).order('created_at', { ascending: false }).limit(60);
   const hit = pickSimilarGuide({ title: input.title, topics: topicKeys(input.topics), law: lawKeys(input.law) }, similar ?? []);
   return hit >= 0 ? similar![hit] : null;
 }
@@ -116,7 +116,8 @@ async function generate(admin: Admin, ownerId: string, jobId: string, ctx: Guide
   const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash', started = Date.now();
   let usage: GeminiUsage | null = null;
   try {
-    const boardQuestions = await boardEvidence(admin, ownerId, ctx);
+    // A revisão não tem seções, então não tem "como a banca cobra": não compra questões da banca.
+    const boardQuestions = input.depth === 'revisao' ? [] : await boardEvidence(admin, ownerId, ctx);
     // Formato predominante da banca na matéria: as questões de fixação seguem ele.
     const { data: sm } = await admin.from('qbank_subject_maps').select('banca_tipo').eq('subject_id', ctx.subjectId).maybeSingle();
     const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: Guide, jsonSchema: guideJsonSchema(), temperature: 0.3,
@@ -127,16 +128,16 @@ async function generate(admin: Admin, ownerId: string, jobId: string, ctx: Guide
     const { error } = await admin.from('study_guides').upsert({
       cache_key: key, depth: input.depth, subject_name: input.subject, subject_key: normalizeText(input.subject), banca: normalizeText(input.banca), topic_keys: topicKeys(input.topics),
       title: input.title, content: v.guide, sources: input.law.map((l) => l.ref), unlisted_sources: unlistedLaws([input.title, ...input.topics].join('\n')), unverified: v.unverified,
-      model, prompt_version: GUIDE_PROMPT_VERSION, created_at: new Date().toISOString(),
+      model, prompt_version: guideVersion(input.depth), created_at: new Date().toISOString(),
     }, { onConflict: 'cache_key' });
     if (error) throw new Error(error.message);
     await admin.from('ai_jobs').update({ status: 'succeeded', finished_at: new Date().toISOString() }).eq('id', jobId);
-    await logUsage(admin, { ownerId, jobId, operation: 'study_guide', model, promptVersion: GUIDE_PROMPT_VERSION, usage, latencyMs: Date.now() - started, status: 'ok' });
+    await logUsage(admin, { ownerId, jobId, operation: 'study_guide', model, promptVersion: guideVersion(input.depth), usage, latencyMs: Date.now() - started, status: 'ok' });
   } catch (err) {
     if (err instanceof GeminiError) usage = err.usage;
     const message = err instanceof Error ? err.message : String(err);
     await admin.from('ai_jobs').update({ status: 'failed', finished_at: new Date().toISOString(), error: message.slice(0, 1000) }).eq('id', jobId);
-    await logUsage(admin, { ownerId, jobId, operation: 'study_guide', model, promptVersion: GUIDE_PROMPT_VERSION, usage, latencyMs: Date.now() - started, status: 'error', error: message }).catch(() => {});
+    await logUsage(admin, { ownerId, jobId, operation: 'study_guide', model, promptVersion: guideVersion(input.depth), usage, latencyMs: Date.now() - started, status: 'error', error: message }).catch(() => {});
   }
 }
 
@@ -153,9 +154,14 @@ async function penteFino(auth: Auth, admin: Admin, taskId: string) {
     const ctx = await resolve(auth, admin, t, 'completa');
     if (!ctx) return null;
     const revisao = { ...ctx, input: { ...ctx.input, depth: 'revisao' as const }, key: guideCacheKey({ ...ctx.input, depth: 'revisao', cargo: ctx.cargo }) };
-    const guide = await findGuide(admin, ctx) ?? await findGuide(admin, revisao);
-    const c = (guide?.content ?? {}) as { memorizar?: string[]; pegadinhas?: string[] };
-    return { sessionId: ctx.sessionId, title: ctx.input.title, memorizar: c.memorizar ?? [], pegadinhas: c.pegadinhas ?? [], hasGuide: !!guide };
+    // Da completa, o que memorizar e as pegadinhas; da revisão (se já existe), os mnemônicos e os gatilhos.
+    const [full, review] = await Promise.all([findGuide(admin, ctx), findGuide(admin, revisao)]);
+    type Bits = { memorizar?: string[]; pegadinhas?: string[]; mnemonicos?: { alvo: string; mnemonico: string; explicacao: string }[]; gatilhos?: { pista: string; resposta: string }[] };
+    const c = (full ?? review)?.content as Bits | undefined, r = review?.content as Bits | undefined;
+    return {
+      sessionId: ctx.sessionId, title: ctx.input.title, memorizar: c?.memorizar ?? [], pegadinhas: c?.pegadinhas ?? [],
+      mnemonicos: r?.mnemonicos ?? [], gatilhos: r?.gatilhos ?? [], hasGuide: !!(full ?? review),
+    };
   }));
   return items.filter((i) => i !== null);
 }

@@ -48,3 +48,16 @@ describe('leitura em voz alta', () => {
     expect(parts.join(' ')).toBe(s!.chunks.join(' '));
   });
 });
+
+describe('revisão curta falada', () => {
+  const base = { titulo: 'T', introducao: 'I', legislacao: [], pontos_banca: [], pegadinhas: [], resumo: [], perguntas: [] };
+  const esquema = [{ topico: 'Espécies', itens: ['apropriação', 'desvio'] }];
+  it('lê mapa mental, mnemônicos e gatilhos na revisão (sem seções)', () => {
+    const keys = guideSpeech({ ...base, secoes: [], esquema, mnemonicos: [{ alvo: 'Requisitos', mnemonico: 'ABC', explicacao: 'A de…' }], gatilhos: [{ pista: 'posse do bem', resposta: 'peculato' }] }).map((s) => s.key);
+    expect(keys).toEqual(['intro', 'mapa', 'mnemonicos', 'gatilhos']);
+  });
+  it('na completa, o mapa não é lido (as seções explicam)', () => {
+    const keys = guideSpeech({ ...base, secoes: [{ titulo: 'S', texto: 'x', exemplos: [] }], esquema }).map((s) => s.key);
+    expect(keys).not.toContain('mapa');
+  });
+});
