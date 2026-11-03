@@ -3,7 +3,7 @@
 // recebe (n de sessões pedido à IA); a 2ª encaixa as sessões, uma por bloco, na ordem, e a lei seca nas que citam lei.
 import { findLawRefs } from '../legal/refs.ts';
 import { parseYmd, ymd } from '../domain/dates.ts';
-import { generateSchedule, theoryGoal, topicKeyword, type BlockKind, type ScheduleConfig, type ScheduleInput } from '../domain/scheduler.ts';
+import { generateSchedule, topicKeyword, type BlockKind, type ScheduleConfig, type ScheduleInput } from '../domain/scheduler.ts';
 import type { PlanInputs, Session } from './plan.ts';
 
 export const GENERATOR_VERSION = 'scheduler-v2';
@@ -23,6 +23,7 @@ export interface TaskRow { date: string; position: number; minutes: number; kind
 
 const TITLES: Partial<Record<TaskKind, string>> = {
   consolidation: 'Questões dos pontos fracos', final_review: 'Revisão final dos pontos fracos',
+  pente_fino: 'Pente-fino: para memorizar, pegadinhas e marcações',
   weekly_review: 'Revisão da semana e caderno de erros', simulado: 'Simulado completo + correção',
   eve: 'Revisão leve e descanso', exam: 'Dia da prova',
 };
@@ -124,7 +125,7 @@ export function buildPlanPayload(b: PlanBase, sessions: Record<string, Session[]
       tasks.push({
         date: ymd(date), position, minutes: block.minutes, kind: block.kind, subjectId: block.subject || null, sessionKey: key, title,
         keyword: session ? (session.keyword || topicKeyword(session.title)) : block.keyword,
-        goal: block.kind === 'theory' ? theoryGoal(block.minutes) : block.goal,
+        goal: block.goal,
       });
     });
   }));

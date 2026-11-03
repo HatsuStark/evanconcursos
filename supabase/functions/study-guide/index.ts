@@ -3,6 +3,7 @@
 //   {taskId, depth:'completa'|'revisao'} → 200 {guide} se já existe; senão começa a gerar e responde 202 {pending}.
 //   {taskId, depth, poll:true} → como acima, mas não começa nada: 502 se a geração falhou.
 //   {action:'prepare', planId} → 202; prepara as apostilas completas das próximas sessões (ver PREPARE_*).
+//   {action:'pente', taskId} → 200 {items}; o que memorizar e as pegadinhas das sessões já estudadas da matéria (só leitura).
 // Reaproveita apostilas idênticas (mesmo tema, fontes e profundidade) entre sessões e estudantes.
 // Não há "gerar de novo" pelo estudante (economia de créditos): uma apostila existente é sempre reaproveitada.
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
@@ -138,6 +139,26 @@ async function generate(admin: Admin, ownerId: string, jobId: string, ctx: Guide
   }
 }
 
+// Pente-fino da reta final: "para memorizar" e pegadinhas das apostilas que já existem para as sessões concluídas da
+// matéria da tarefa, da estudada há mais tempo para a mais recente. Só lê: nunca gera apostila nem gasta IA.
+const PENTE_MAX = 30;
+async function penteFino(auth: Auth, admin: Admin, taskId: string) {
+  const { data: task } = await auth.client.from('tasks').select('plan_id, subject_id').eq('id', taskId).maybeSingle();
+  if (!task?.subject_id) return [];
+  const { data: done } = await auth.client.from('tasks').select('subject_id, session_id').eq('plan_id', task.plan_id).eq('subject_id', task.subject_id)
+    .eq('kind', 'theory').not('session_id', 'is', null).not('done_at', 'is', null).order('done_at').limit(500);
+  const sessions = [...new Map((done ?? []).map((t) => [t.session_id as string, t])).values()].slice(0, PENTE_MAX);
+  const items = await Promise.all(sessions.map(async (t) => {
+    const ctx = await resolve(auth, admin, t, 'completa');
+    if (!ctx) return null;
+    const revisao = { ...ctx, input: { ...ctx.input, depth: 'revisao' as const }, key: guideCacheKey({ ...ctx.input, depth: 'revisao', cargo: ctx.cargo }) };
+    const guide = await findGuide(admin, ctx) ?? await findGuide(admin, revisao);
+    const c = (guide?.content ?? {}) as { memorizar?: string[]; pegadinhas?: string[] };
+    return { sessionId: ctx.sessionId, title: ctx.input.title, memorizar: c.memorizar ?? [], pegadinhas: c.pegadinhas ?? [], hasGuide: !!guide };
+  }));
+  return items.filter((i) => i !== null);
+}
+
 // Uma de cada vez e na ordem do cronograma. O que já existe não conta no limite.
 async function prepare(auth: Auth, admin: Admin, planId: string) {
   const from = new Date().toISOString().slice(0, 10), to = new Date(Date.now() + PREPARE_DAYS * 864e5).toISOString().slice(0, 10);
@@ -174,6 +195,7 @@ Deno.serve(async (req) => {
       EdgeRuntime.waitUntil(prepare(auth, admin, String(body.planId ?? '')).catch((e) => console.error('prepare:', e)));
       return json(202, { ok: true });
     }
+    if (body.action === 'pente') return json(200, { items: await penteFino(auth, admin, String(body.taskId ?? '')) });
     const depth: GuideDepth = body.depth === 'revisao' ? 'revisao' : 'completa';
     const { data: task } = await auth.client.from('tasks').select('subject_id, session_id').eq('id', String(body.taskId ?? '')).maybeSingle();
     const ctx = task && await resolve(auth, admin, task, depth);

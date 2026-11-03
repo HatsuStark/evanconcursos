@@ -1,7 +1,8 @@
 // Scheduler: distribui matérias e conteúdos no calendário de forma determinística (mesma entrada, mesmo resultado), como
 // um especialista em concursos montaria. Datas, horas, revisões e simulados nunca vêm da IA.
 // - Dia com 2 ou 3 blocos de 1 h a 1h30, de matérias diferentes, alternando específica e básica.
-// - Teoria sempre com questões no fim do bloco; blocos de reforço (questões dos pontos fracos) desde a 3ª semana.
+// - Teoria sempre com questões no fim do bloco, com meta que cresce ao longo do plano; blocos de reforço (questões dos
+//   pontos fracos) desde a 3ª semana; na reta final, pente-fino do que já foi estudado e revisão final, sem teoria nova.
 // - Simulado diagnóstico na 2ª semana e depois a cada 2 ou 3 semanas; na reta final, um por semana.
 // - Proporções pelo prazo: com pouco tempo, menos teoria nova e mais questões e revisão.
 // - Tempo de cada matéria pelos pontos em jogo (questões × peso), pela distância até a meta (nível) e pela prioridade da IA.
@@ -14,8 +15,15 @@ export const LEVELS = ['Iniciante', 'Básico', 'Intermediário', 'Avançado'] as
 export const DEFAULT_HOURS = [2, 2, 2, 2, 2, 3, 2];
 // Marca de tarefa de reforço: o assunto é decidido na hora pelo desempenho (assunto mais fraco).
 export const WEAK_MARK = '*fracos*';
-// Meta de questões do bloco de teoria: amostra do tema, não bateria longa; os blocos de reforço treinam volume.
-export const theoryGoal = (minutes: number) => Math.min(10, Math.max(5, Math.round(minutes / 12)));
+// Meta de questões do bloco de teoria pela fase do plano (`progress`: 0 no início da teoria, 1 no começo da reta final).
+// A parte de questões cresce como num plano de especialista: no 1º terço, amostra do tema (1 a cada 12 min, de 5 a 10;
+// cerca de 60% teoria e 40% questões, com a correção); no 2º, 1 a cada 5 min (de 10 a 20; o inverso); no último, 1 a
+// cada 3 min (de 15 a 30). Sem `progress`, vale a primeira fase.
+const GOAL_PHASES = [{ every: 12, min: 5, max: 10 }, { every: 5, min: 10, max: 20 }, { every: 3, min: 15, max: 30 }];
+export const theoryGoal = (minutes: number, progress = 0) => {
+  const p = GOAL_PHASES[progress < 1 / 3 ? 0 : progress < 2 / 3 ? 1 : 2]!;
+  return Math.min(p.max, Math.max(p.min, Math.round(minutes / p.every)));
+};
 // Questões por hora nos blocos de reforço e de revisão final.
 const REINFORCE_PER_HOUR = 15;
 
@@ -33,7 +41,8 @@ export interface SubjectConfig {
 // lawReading: reservar a lei seca diária (concurso com muita legislação).
 export interface ScheduleConfig { hours: number[]; weeklyReview: boolean; lawReading?: boolean; subjects: Record<string, SubjectConfig> }
 
-export type BlockKind = 'theory' | 'consolidation' | 'final_review' | 'lei_seca' | 'weekly_review';
+// pente_fino: na reta final, revisão do que já foi estudado (para memorizar, pegadinhas, marcações e flashcards), sem teoria nova.
+export type BlockKind = 'theory' | 'consolidation' | 'final_review' | 'pente_fino' | 'lei_seca' | 'weekly_review';
 // item: no bloco de teoria, o índice do tópico/sessão da matéria; na lei seca, o da sessão relida; -1 nos demais.
 export interface Block { kind: BlockKind; subject: string; minutes: number; item: number; text: string; keyword: string; goal: number }
 export type DayKind = '' | 'rest' | 'exam' | 'eve' | 'weekly_review' | 'simulado' | 'study';
@@ -235,13 +244,19 @@ export function generateSchedule(input: ScheduleInput, rawConfig: unknown): Sche
   study = study.filter((s) => s.kind === 'study');
 
   // Blocos do dia. Dia curto vira questões e revisão; lei seca reservada nos dias de 1h30 ou mais.
+  // Reta final: o primeiro bloco do dia é pente-fino; dia de um bloco só alterna pente-fino e revisão final.
   const blocks: Pending[] = [];
+  let finalDay = 0;
   study.forEach((s, day) => {
     const review = s.review ? reviewMinutes(dayMinutes(s)) : 0, minutes = dayMinutes(s) - review;
     if (review) blocks.push({ slot: s, day, minutes: review, kind: 'weekly_review' });
     const law = cfg.lawReading && minutes >= LAW_MIN_DAY ? lawMinutes(minutes) : 0;
     if (law) blocks.push({ slot: s, day, minutes: law, kind: 'lei_seca' });
-    if (s.final) for (const m of splitDay(minutes, law)) blocks.push({ slot: s, day, minutes: m, kind: 'final_review' });
+    if (s.final) {
+      const parts = splitDay(minutes, law);
+      parts.forEach((m, i) => blocks.push({ slot: s, day, minutes: m, kind: i === 0 && (parts.length > 1 || finalDay % 2 === 0) ? 'pente_fino' : 'final_review' }));
+      finalDay++;
+    }
     else if (minutes < SHORT_DAY) blocks.push({ slot: s, day, minutes, kind: 'consolidation' });
     else for (const m of splitDay(minutes, law)) blocks.push({ slot: s, day, minutes: m, kind: 'flex' });
   });
@@ -285,11 +300,15 @@ export function generateSchedule(input: ScheduleInput, rawConfig: unknown): Sche
     for (const x of g) if (subjectsOf(g).filter((si) => si === assign[x]).length > 1) swapAhead(gi, x, (m, t) => distinct(m) && distinct(t));
     if (!mixed(subjectsOf(g))) for (const x of g) if (swapAhead(gi, x, (m, t, before) => distinct(m) && distinct(t) && mixed(m) && (mixed(t) || !mixed(before)))) break;
   });
-  const out = new Map<Pending, Block>(), usedIn = new Map<Slot, number[]>();
+  // Fase do bloco para a meta de questões: posição entre os dias de estudo antes da reta final.
+  const theoryDays = Math.max(1, study.filter((s) => !s.final).length);
+  const out = new Map<Pending, Block>(), usedIn = new Map<Slot, number[]>(), phaseOf = new Map<Block, number>();
   theoryBlocks.forEach((b, k) => {
-    const si = assign[k]!, t = queues[si]!.shift()!;
+    const si = assign[k]!, t = queues[si]!.shift()!, phase = b.day / theoryDays;
     usedIn.set(b.slot, [...(usedIn.get(b.slot) ?? []), si]);
-    out.set(b, { kind: 'theory', subject: names[si]!, minutes: b.minutes, item: t.item, text: t.text, keyword: t.keyword, goal: theoryGoal(b.minutes) });
+    const block: Block = { kind: 'theory', subject: names[si]!, minutes: b.minutes, item: t.item, text: t.text, keyword: t.keyword, goal: theoryGoal(b.minutes, phase) };
+    out.set(b, block);
+    phaseOf.set(block, phase);
   });
   // Reforço e revisão final: matéria ainda não usada no dia, alternando específica e básica; se a fila só tem matérias já
   // usadas, vale a de maior demanda livre.
@@ -309,16 +328,18 @@ export function generateSchedule(input: ScheduleInput, rawConfig: unknown): Sche
     usedIn.set(slot, [...used, si]);
     return si;
   };
-  // Reforço e revisão final: matérias pela mesma demanda; o assunto sai do desempenho na hora.
-  for (const kind of ['consolidation', 'final_review'] as const) {
+  // Reforço, pente-fino e revisão final: matérias pela mesma demanda; o assunto das questões sai do desempenho na hora.
+  // O pente-fino é leitura do que já foi estudado, com poucas questões para conferir.
+  const TEXT = { consolidation: 'questões dos pontos fracos', pente_fino: 'pente-fino do que já estudou', final_review: 'revisão final dos pontos fracos' };
+  for (const kind of ['consolidation', 'pente_fino', 'final_review'] as const) {
     const list = blocks.filter((b) => b.kind === kind);
     if (!list.length) continue;
     const order = interleave(apportion(demand, Math.max(list.length, names.length)));
     for (const b of list) {
       const si = pick(order, b.slot);
       out.set(b, {
-        kind, subject: names[si]!, minutes: b.minutes, item: -1, keyword: WEAK_MARK, goal: Math.round((b.minutes / 60) * REINFORCE_PER_HOUR),
-        text: `${names[si]}: ${kind === 'consolidation' ? 'questões dos pontos fracos' : 'revisão final dos pontos fracos'}`,
+        kind, subject: names[si]!, minutes: b.minutes, item: -1, keyword: WEAK_MARK, text: `${names[si]}: ${TEXT[kind]}`,
+        goal: kind === 'pente_fino' ? theoryGoal(b.minutes) : Math.round((b.minutes / 60) * REINFORCE_PER_HOUR),
       });
     }
   }
@@ -345,7 +366,10 @@ export function generateSchedule(input: ScheduleInput, rawConfig: unknown): Sche
     const block = out.get(b);
     if (block) { b.slot.blocks.push(block); continue; }
     const other = blocks.find((x) => x.slot === b.slot && out.has(x) && x.kind !== 'weekly_review') ?? blocks.find((x) => x.slot === b.slot && out.has(x));
-    if (other) out.get(other)!.minutes += b.minutes;
+    if (!other) continue;
+    const o = out.get(other)!;
+    o.minutes += b.minutes;
+    if (o.kind === 'theory') o.goal = theoryGoal(o.minutes, phaseOf.get(o));
   }
   // Lei seca abre o dia (aquecimento), depois a revisão semanal e os outros blocos na ordem.
   const first = (b: Block) => (b.kind === 'lei_seca' ? 2 : b.kind === 'weekly_review' ? 1 : 0);
@@ -355,7 +379,7 @@ export function generateSchedule(input: ScheduleInput, rawConfig: unknown): Sche
   const weeks: Week[] = [];
   for (let w = 0; w * 7 < slots.length; w++) {
     const days = slots.slice(w * 7, w * 7 + 7), all = days.flatMap((d) => d.blocks);
-    const theory = all.filter((b) => b.kind === 'theory').length, final = all.filter((b) => b.kind === 'final_review').length;
+    const theory = all.filter((b) => b.kind === 'theory').length, final = all.filter((b) => b.kind === 'final_review' || b.kind === 'pente_fino').length;
     const subs = [...new Set(all.filter((b) => b.kind === 'theory').map((b) => b.subject))].slice(0, 3);
     const phase = final > theory ? 'Reta final' : theory ? 'Teoria e questões' : 'Semana';
     const title = days.some((d) => d.kind === 'exam') && !subs.length ? 'Semana da prova'

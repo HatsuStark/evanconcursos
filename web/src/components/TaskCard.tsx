@@ -7,7 +7,7 @@ import { useErrorDueDates } from '../lib/practice.ts';
 import { fmtDate, subjectColor, SubjectIcon } from './ui.tsx';
 
 export const KIND_COLOR: Record<string, string> = {
-  simulado: 'var(--magenta)', weekly_review: 'var(--lime)', lei_seca: 'var(--cyan)', consolidation: 'var(--orange)', final_review: 'var(--orange)', eve: 'var(--cyan)', exam: '#fff',
+  simulado: 'var(--magenta)', weekly_review: 'var(--lime)', lei_seca: 'var(--cyan)', consolidation: 'var(--orange)', final_review: 'var(--orange)', pente_fino: 'var(--violet)', eve: 'var(--cyan)', exam: '#fff',
 };
 export const taskColor = (t: TaskRow, subjects: SubjectRow[]) => {
   const i = subjects.findIndex((s) => s.id === t.subject_id);

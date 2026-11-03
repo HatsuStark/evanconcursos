@@ -194,7 +194,7 @@ export async function setTaskDone(taskId: string, done: boolean) {
 }
 
 export const KIND_LABEL: Record<string, string> = {
-  theory: 'Teoria', consolidation: 'Reforço', final_review: 'Revisão final', weekly_review: 'Revisão semanal', lei_seca: 'Lei seca',
+  theory: 'Teoria', consolidation: 'Reforço', final_review: 'Revisão final', pente_fino: 'Pente-fino', weekly_review: 'Revisão semanal', lei_seca: 'Lei seca',
   simulado: 'Simulado', eve: 'Véspera', exam: 'Prova',
 };
 export const today = () => ymd(new Date());

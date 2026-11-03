@@ -45,6 +45,11 @@ export function subjectWeakness(subjects: ReplanSubject[], attempts: ReplanAttem
   return new Map([...totals].map(([id, e]) => [id, { weakness: (e.wrong + (1 - PRIOR) * PRIOR_WEIGHT) / (e.all + PRIOR_WEIGHT), count: e.count }]));
 }
 
+// Meta da sessão movida: a mesma fase do plano (questões por minuto da meta original), no tempo do novo dia. Tarefa sem
+// meta gravada volta à meta da primeira fase.
+export const movedGoal = (t: Pick<ReplanTask, 'goal_questions' | 'minutes'>, minutes: number) =>
+  t.goal_questions > 0 && t.minutes > 0 ? Math.max(5, Math.round((t.goal_questions * minutes) / t.minutes)) : theoryGoal(minutes);
+
 // Tarefas de teoria atrasadas: nenhuma se perde, e por isso são elas que pedem a reorganização.
 export const overdueTasks = (tasks: ReplanTask[], today: string) => tasks.filter((t) => !t.done_at && t.date < today && t.kind !== 'exam');
 
@@ -85,7 +90,7 @@ export function replan(tasks: ReplanTask[], subjects: ReplanSubject[], attempts:
       for (let p = 0; p < size; p++) {
         const s = sessions[next++]!;
         if (size === 1 && s.date === day.date) kept.add(s.id);
-        else add(day, s, p, minutes, theoryGoal(minutes));
+        else add(day, s, p, minutes, movedGoal(s, minutes));
       }
     });
   } else for (const s of sessions) kept.add(s.id);
@@ -105,7 +110,7 @@ export function replan(tasks: ReplanTask[], subjects: ReplanSubject[], attempts:
   }
 
   // Revisão semanal que não virou teoria, lei seca, simulado, véspera e prova ficam como estão; o que passou sem ser feito sai.
-  for (const t of open) if (['weekly_review', 'lei_seca', 'simulado', 'eve', 'exam'].includes(t.kind) && !taken.has(t.id)) kept.add(t.id);
+  for (const t of open) if (['weekly_review', 'pente_fino', 'lei_seca', 'simulado', 'eve', 'exam'].includes(t.kind) && !taken.has(t.id)) kept.add(t.id);
   const overdue = overdueTasks(tasks, today);
   const weakest = subjects.filter((s) => weak.get(s.id)!.count >= 5).sort((a, b) => weak.get(b.id)!.weakness - weak.get(a.id)!.weakness).slice(0, 2).map((s) => s.id);
   return {

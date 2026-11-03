@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Check, FileText, ListChecks, Maximize2, Minimize2, Pause, Play, Scale, Video } from 'lucide-react';
+import { BookOpen, Check, FileText, ListChecks, Maximize2, Minimize2, Pause, Play, Scale, ScanSearch, Video } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { evaluate, latestAnswers, questionScore, scoreGoal } from '../../../shared/domain/adaptive.ts';
@@ -7,6 +7,7 @@ import { REVIEW_PREFIX } from '../../../shared/ai/plan-build.ts';
 import { videoQuery } from '../../../shared/domain/videos.ts';
 import { GuidePanel } from '../components/GuidePanel.tsx';
 import { LawReader } from '../components/LawReader.tsx';
+import { PenteFinoPanel } from '../components/PenteFinoPanel.tsx';
 import { QuestionsPanel } from '../components/QuestionsPanel.tsx';
 import { SessionMaterials } from '../components/SessionMaterials.tsx';
 import { SimuladoStarter } from '../components/SimuladoStarter.tsx';
@@ -21,6 +22,7 @@ import { saveTimeSpent, useStudy, type StudyData } from '../lib/study.ts';
 const fmtClock = (s: number) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ':' : ''}${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 // Ordem de estudo: teoria primeiro, questões por último. Lei seca só em assuntos de legislação.
 const TABS = [
+  { key: 'pente', label: 'Pente-fino', icon: ScanSearch },
   { key: 'apostila', label: 'Apostila', icon: BookOpen },
   { key: 'videos', label: 'Vídeos', icon: Video },
   { key: 'lei', label: 'Lei seca', icon: Scale },
@@ -67,7 +69,7 @@ function StudyView({ d }: { d: StudyData }) {
   const timer = useTimer(d.task.id, d.task.time_spent_sec);
   const lawRefs = sessionLawRefs(d.task.title, d.topics, d.subject?.name ?? '');
   const hasSession = !!d.task.session_id;
-  const tabs = TABS.filter((t) => (t.key === 'lei' ? lawRefs.length > 0 : t.key === 'apostila' || t.key === 'videos' || t.key === 'material' ? hasSession : true));
+  const tabs = TABS.filter((t) => (t.key === 'pente' ? d.task.kind === 'pente_fino' : t.key === 'lei' ? lawRefs.length > 0 : t.key === 'apostila' || t.key === 'videos' || t.key === 'material' ? hasSession : true));
   // Lei seca abre direto nos artigos.
   const [tab, setTab] = useState<TabKey>(d.task.kind === 'lei_seca' && tabs.some((t) => t.key === 'lei') ? 'lei' : tabs[0]!.key);
   const [videosOpened, setVideosOpened] = useState(false);
@@ -185,6 +187,7 @@ function StudyView({ d }: { d: StudyData }) {
           )}
           {tab === 'videos' ? null
             : tab === 'questoes' ? <QuestionsPanel source={{ kind: 'task', taskId: d.task.id, planId: d.task.plan_id }} goal={d.task.goal_questions} answered={mine.length} />
+            : tab === 'pente' ? <PenteFinoPanel taskId={d.task.id} />
             : tab === 'lei' ? <LawReader refs={lawRefs} />
             : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={hasSession} initialDepth={params.has('revisao') || d.task.title.startsWith(REVIEW_PREFIX) ? 'revisao' : 'completa'} />
             : <SessionMaterials sessionId={d.task.session_id} minutes={d.task.kind === 'theory' ? d.task.minutes : 0} />}

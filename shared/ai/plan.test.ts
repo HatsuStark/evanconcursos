@@ -118,7 +118,8 @@ describe('buildPlanPayload', () => {
       const h = base.inputs.hours[(new Date(date + 'T12:00:00').getDay() + 6) % 7]! * 60;
       expect([h, Math.round(h * 0.7)], date).toContain(minutes);
     }
-    expect(theory.every((t) => t.goal === theoryGoal(t.minutes))).toBe(true);
+    expect(theory.every((t) => [0, 0.5, 0.9].some((p) => t.goal === theoryGoal(t.minutes, p)))).toBe(true);
+    expect(theory[theory.length - 1]!.goal).toBeGreaterThan(theory[0]!.goal);
     expect(p.tasks.filter((t) => t.kind === 'simulado').every((t) => t.goal === 70)).toBe(true);
   });
   it('prioridade: mais dias para quem tem mais peso e menos nível', () => {

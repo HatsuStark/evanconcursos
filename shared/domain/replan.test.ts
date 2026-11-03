@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { overdueTasks, replan, subjectWeakness, type ReplanAttempt, type ReplanTask } from './replan.ts';
+import { movedGoal, overdueTasks, replan, subjectWeakness, type ReplanAttempt, type ReplanTask } from './replan.ts';
 
 const TODAY = '2030-03-10', NOW = new Date('2030-03-10T12:00:00Z').getTime();
 let seq = 0;
@@ -38,13 +38,22 @@ describe('reorganizar o cronograma', () => {
     expect(r.summary.crowdedDays).toBe(2);
     expect(r.tasks.map((t) => t.date)).toEqual(['2030-03-10', '2030-03-10', '2030-03-10', '2030-03-10', '2030-03-11', '2030-03-11', '2030-03-11']);
   });
-  it('dia com duas sessões divide o tempo e a meta, e mantém a ordem', () => {
+  it('dia com duas sessões divide o tempo e a meta (na mesma fase), e mantém a ordem', () => {
     const a = task('2030-03-08', 'theory'), b = task('2030-03-10', 'theory');
     const r = replan([a, b], subjects, [], TODAY, NOW);
     expect(r.tasks).toMatchObject([
-      { date: '2030-03-10', position: 0, minutes: 60, goal: 5, sessionId: a.session_id },
-      { date: '2030-03-10', position: 1, minutes: 60, goal: 5, sessionId: b.session_id },
+      { date: '2030-03-10', position: 0, minutes: 60, goal: 10, sessionId: a.session_id },
+      { date: '2030-03-10', position: 1, minutes: 60, goal: 10, sessionId: b.session_id },
     ]);
+  });
+  it('meta movida: proporcional à original, com mínimo de 5; sem meta gravada, a da primeira fase', () => {
+    expect(movedGoal({ goal_questions: 25, minutes: 75 }, 75)).toBe(25);
+    expect(movedGoal({ goal_questions: 6, minutes: 75 }, 30)).toBe(5);
+    expect(movedGoal({ goal_questions: 0, minutes: 75 }, 60)).toBe(5);
+  });
+  it('mantém o pente-fino da reta final', () => {
+    const p = task('2030-03-11', 'pente_fino');
+    expect(replan([p], subjects, [], TODAY, NOW).supersede).not.toContain(p.id);
   });
   it('não mexe em tarefa feita, simulado, véspera nem prova', () => {
     const done = task('2030-03-09', 'theory', 'a', { done_at: '2030-03-09T10:00:00Z' }), future = task('2030-03-11', 'theory');

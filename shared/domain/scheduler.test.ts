@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  apportion, apportionWithFloors, generateSchedule, horizonShares, interleave, splitDay, splitTopics, subjectDemand, topicKeyword, WEAK_MARK,
+  apportion, apportionWithFloors, generateSchedule, horizonShares, interleave, splitDay, splitTopics, subjectDemand, theoryGoal, topicKeyword, WEAK_MARK,
   type Block, type ScheduleConfig, type ScheduleInput,
 } from './scheduler.ts';
 
@@ -104,6 +104,26 @@ describe('generateSchedule', () => {
     expect(firstReinforce).toBeGreaterThanOrEqual(2);
     expect(blocks.filter((b) => b.kind === 'consolidation').every((b) => b.keyword === WEAK_MARK && b.goal > 0)).toBe(true);
   });
+  it('meta de questões da teoria cresce ao longo do plano (5–10, 10–20, 15–30)', () => {
+    const goals = theory.map((b) => b.goal), third = Math.floor(goals.length / 3);
+    const avg = (l: number[]) => l.reduce((a, b) => a + b, 0) / l.length;
+    expect(goals.slice(0, third).every((g) => g >= 5 && g <= 10)).toBe(true);
+    expect(goals.slice(-third).every((g) => g >= 15 && g <= 30)).toBe(true);
+    expect(avg(goals.slice(-third))).toBeGreaterThan(avg(goals.slice(third, -third)));
+    expect(avg(goals.slice(third, -third))).toBeGreaterThan(avg(goals.slice(0, third)));
+    expect([theoryGoal(75), theoryGoal(75, 0.5), theoryGoal(75, 0.9)]).toEqual([6, 15, 25]);
+  });
+  it('reta final: pente-fino abre o dia, sem teoria nova, com poucas questões', () => {
+    const finalDays = studyDays.filter((d) => d.blocks.some((b) => b.kind === 'final_review' || b.kind === 'pente_fino'));
+    expect(finalDays.length).toBeGreaterThan(0);
+    expect(finalDays.some((d) => d.blocks.some((b) => b.kind === 'theory'))).toBe(false);
+    for (const d of finalDays.filter((x) => x.blocks.filter((b) => b.kind !== 'lei_seca' && b.kind !== 'weekly_review').length > 1)) {
+      expect(d.blocks.find((b) => b.kind !== 'lei_seca' && b.kind !== 'weekly_review')!.kind).toBe('pente_fino');
+    }
+    const pente = blocks.filter((b) => b.kind === 'pente_fino');
+    expect(pente.length).toBeGreaterThan(0);
+    expect(pente.every((b) => b.subject && b.goal >= 5 && b.goal <= 10)).toBe(true);
+  });
   it('simulado diagnóstico na 2ª semana, periódicos depois e semanais na reta final', () => {
     const weeksWith = r.weeks.map((w, i) => (w.days.some((d) => d.kind === 'simulado') ? i : -1)).filter((i) => i >= 0);
     expect(weeksWith[0]).toBe(1);
@@ -121,7 +141,7 @@ describe('generateSchedule', () => {
   });
   it('dia curto vira questões e revisão, sem teoria nova', () => {
     const short = generateSchedule(plan, { ...cfg, hours: [2, 2, 2, 2, 0.75, 4, 0] });
-    const fri = short.weeks.flatMap((w) => w.days.filter((d, i) => i === 4 && d.kind === 'study' && !d.blocks.some((b) => b.kind === 'final_review')));
+    const fri = short.weeks.flatMap((w) => w.days.filter((d, i) => i === 4 && d.kind === 'study' && !d.blocks.some((b) => b.kind === 'final_review' || b.kind === 'pente_fino')));
     expect(fri.length).toBeGreaterThan(0);
     expect(fri.every((d) => d.blocks.length === 1 && d.blocks[0]!.kind === 'consolidation')).toBe(true);
   });

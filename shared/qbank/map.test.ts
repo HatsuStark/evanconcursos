@@ -6,7 +6,7 @@ const tally = (picks: string[]) => picks.reduce<Record<string, number>>((m, a) =
 
 describe('theoryGoal', () => {
   it('fica entre 5 e 10 questões, qualquer que seja o tempo', () => {
-    expect([30, 60, 90, 120, 240].map(theoryGoal)).toEqual([5, 5, 8, 10, 10]);
+    expect([30, 60, 90, 120, 240].map((m) => theoryGoal(m))).toEqual([5, 5, 8, 10, 10]);
   });
 });
 
