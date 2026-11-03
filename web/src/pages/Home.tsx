@@ -27,10 +27,10 @@ export function HomePage() {
   const { session } = useAuth();
   const notices = useNotices();
   const active = useActivePlan();
-  const due = useDueCounts();
+  const planId = active.data?.plan.id;
+  const due = useDueCounts(planId);
   const discursive = useDiscursiveRules(active.data?.notice.id);
   const lastDiscursive = useLastDiscursive(active.data?.notice.id);
-  const planId = active.data?.plan.id;
   const theoryReviews = useTheoryReviews(planId);
   const activity = useStudyActivity(planId);
   useEffect(() => { if (planId) prepareGuides(planId); }, [planId]);
@@ -135,8 +135,8 @@ export function HomePage() {
       {!!(due.data?.errors || due.data?.cards) && (
         <div className="glass card review-today">
           <RotateCcw size={20} style={{ color: 'var(--orange)' }} />
-          <div style={{ flex: 1 }}><strong>Revisar hoje</strong><div className="muted small">{due.data!.errors} questão(ões) do caderno de erros · {due.data!.cards} flashcard(s)</div></div>
-          {!!due.data!.errors && <Link className="btn sm" to="/questoes?aba=revisar">Revisar erros</Link>}
+          <div style={{ flex: 1 }}><strong>Revisar</strong><div className="muted small">{due.data!.errors} erro(s) esperando a revisão semanal · {due.data!.cards} flashcard(s) para hoje</div></div>
+          {!!due.data!.errors && <Link className="btn ghost sm" to="/questoes?aba=revisar">Revisar erros agora</Link>}
           {!!due.data!.cards && <Link className="btn ghost sm" to="/questoes?aba=flashcards">Flashcards</Link>}
         </div>
       )}

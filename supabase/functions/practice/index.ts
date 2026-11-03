@@ -5,13 +5,13 @@
 //   {action:'review', count}           → questões do caderno de erros que vencem hoje (do cache, sem créditos)
 //   {action:'simulado_create', kind:'concurso'|'custom', planId?, taskId?, size?, subjects?, banca?, tipo?, timed, minutes?}
 //   {action:'simulado_get', id} · {action:'simulado_finish', id}
-// Questões livres e simulados entram no histórico com contexto próprio (desempenho separado do cronograma).
+// Questões livres, revisão e simulados entram no histórico com contexto próprio, no concurso ativo do estudante.
 import type { GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import { interleave, mapSubject, MEDIUM_OR_HARD, pickBoard, QMAP_PROMPT_VERSION, SESSION_DIFFICULTIES } from '../../../shared/qbank/map.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-import { cacheQuestions, mapDeps, publicQuestion, questFailure, recordAnswer, takeNewest, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
+import { activePlan, cacheQuestions, mapDeps, publicQuestion, questFailure, recordAnswer, takeNewest, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
 
 const str = (v: unknown, n = 160) => String(v ?? '').trim().slice(0, n);
 const hash = (s: string) => { let h = 0; for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) >>> 0; return h.toString(36); };
@@ -34,7 +34,13 @@ Deno.serve(async (req) => {
   // Busca `count` questões inéditas para o estudante, das mais recentes para as mais antigas (não repete entre sessões).
   const fetchFresh = (scope: string, params: Record<string, string>, count: number, seen: Set<string>) =>
     takeNewest(admin, quest, auth.user.id, scope, hash(JSON.stringify(params)), params, count, (q) => !seen.has(q.id));
-  const seenQids = async () => new Set(((await admin.from('question_attempts').select('qid').eq('owner_id', auth.user.id).limit(20000)).data ?? []).map((d) => d.qid as string));
+  // Questões já vistas no concurso ativo: em outro concurso, a mesma questão pode voltar.
+  const seenQids = async () => {
+    const plan = await activePlan(admin, auth.user.id);
+    let q = admin.from('question_attempts').select('qid').eq('owner_id', auth.user.id).limit(20000);
+    q = plan ? q.eq('plan_id', plan) : q.is('plan_id', null);
+    return new Set(((await q).data ?? []).map((d) => d.qid as string));
+  };
 
   try {
     if (body.action === 'filters') {
@@ -92,7 +98,10 @@ Deno.serve(async (req) => {
 
     if (body.action === 'review') {
       const count = Math.max(1, Math.min(30, Number(body.count) || 10));
-      const { data: due } = await admin.from('error_book').select('qid, stage, wrong_count, due_on').eq('owner_id', auth.user.id).eq('resolved', false)
+      const plan = await activePlan(admin, auth.user.id);
+      let dueQuery = admin.from('error_book').select('qid, stage, wrong_count, due_on').eq('owner_id', auth.user.id).eq('resolved', false);
+      dueQuery = plan ? dueQuery.eq('plan_id', plan) : dueQuery.is('plan_id', null);
+      const { data: due } = await dueQuery
         .lte('due_on', new Date().toISOString().slice(0, 10)).order('due_on').limit(count);
       const qids = (due ?? []).map((d) => d.qid);
       const { data: qs } = qids.length ? await admin.from('qbank_questions').select('qid, payload').in('qid', qids) : { data: [] };
@@ -136,6 +145,8 @@ Deno.serve(async (req) => {
           if (block.subjects.length) blocks.push(block);
         }
       } else {
+        // Simulado personalizado entra no concurso ativo, com o desempenho dele.
+        planId = await activePlan(admin, auth.user.id);
         const subjects = (Array.isArray(body.subjects) ? body.subjects : []).slice(0, 20)
           .map((s: Record<string, unknown>) => ({ name: str(s.materia, 200), materia: str(s.materia, 200) || null, assunto: str(s.assunto, 200), count: Math.max(1, Math.min(50, Number(s.count) || 5)) }))
           .filter((s: { materia: string | null }) => s.materia);

@@ -172,6 +172,11 @@ export async function saveEducationLevel(noticeId: string, level: Draft['educati
   must(await supabase.from('notices').update({ education_level: level }).eq('id', noticeId));
 }
 
+// Última nota de corte do cargo (% da prova objetiva); null volta ao padrão (mínimo de 80%, meta de 90%).
+export async function saveCutoff(noticeId: string, pct: number | null) {
+  must(await supabase.from('notices').update({ cutoff_pct: pct }).eq('id', noticeId));
+}
+
 // Edital novo enviado para atualizar um plano: liga ao edital antigo, para a comparação valer em qualquer aparelho.
 export async function rememberUpdate(noticeId: string, previousId: string) {
   must(await supabase.from('notices').update({ replaces_notice_id: previousId }).eq('id', noticeId));

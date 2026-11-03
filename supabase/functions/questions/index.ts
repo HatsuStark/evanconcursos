@@ -1,5 +1,6 @@
 // Edge Function "questions": questões do banco (Quest API) dentro do app.
-//   {action:'next', taskId, count}        → questões da sessão (sem gabarito), sem repetir as já respondidas
+//   {action:'next', taskId, count, exclude?} → questões da sessão (sem gabarito), sem repetir as já respondidas; na revisão
+//                                            semanal, os erros vencidos do caderno do concurso (exclude: os já mostrados)
 //   {action:'answer', qid, chosen, taskId? | context:'free'|'review', timeMs?} → corrige no servidor e registra
 //   {action:'explain', qid, taskId?}      → explicação da IA ancorada nos artigos oficiais (cache por questão)
 //   {action:'mnemonic', qid, taskId?}     → mnemônico compartilhado (ou nenhum), vira flashcard do estudante
@@ -15,12 +16,10 @@ import {
 } from '../../../shared/qbank/map.ts';
 import { conceptKey, MNEMONIC_PROMPT_VERSION, MnemonicChoice, mnemonicJsonSchema, mnemonicPrompt, pickExisting } from '../../../shared/qbank/mnemonic.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-import { ensureBoardFormat, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, questFailure, recordAnswer, takeNewest, upsertFlashcard, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
+import { activePlan, ensureBoardFormat, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, questFailure, recordAnswer, takeNewest, upsertFlashcard, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
 
 // Com alguma questão pronta, não faz o estudante esperar por mais; sem nenhuma, desiste antes do limite da função.
 const SOFT_LIMIT_MS = 15_000, HARD_LIMIT_MS = 90_000;
-// Uma em cada 5 questões é de revisão do caderno de erros, para intercalar assuntos antigos com o da sessão.
-const REVIEW_EVERY = 5;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -50,10 +49,10 @@ Deno.serve(async (req) => {
       : { data: null };
 
     if (body.action === 'answer') {
-      const context = task ? 'plan' : body.context === 'review' ? 'review' : 'free';
+      const context = task ? (task.kind === 'weekly_review' ? 'review' : 'plan') : body.context === 'review' ? 'review' : 'free';
       const r = await recordAnswer(admin, {
         ownerId: auth.user.id, qid: String(body.qid ?? ''), chosen: String(body.chosen ?? ''), context,
-        planId: task?.plan_id, taskId: task?.id, sessionId: task?.session_id, subjectId: task?.subject_id,
+        planId: task?.plan_id ?? await activePlan(admin, auth.user.id), taskId: task?.id, sessionId: task?.session_id, subjectId: task?.subject_id,
       });
       return json(200, r);
     }
@@ -83,7 +82,7 @@ Deno.serve(async (req) => {
       if (!q) return json(404, { error: 'Questão não encontrada.' });
       const fields = 'id, concept, mnemonic, explanation, items';
       const toCard = async (m: { id: string; concept: string; mnemonic: string; items: { chave: string; significado: string }[] } | null) => {
-        if (m) await upsertFlashcard(admin, auth.user.id, 'mnemonic', m.id, `Mnemônico: ${m.concept}`, [m.mnemonic, ...(m.items ?? []).map((i) => `${i.chave} = ${i.significado}`)].join('\n'), task?.plan_id);
+        if (m) await upsertFlashcard(admin, auth.user.id, 'mnemonic', m.id, `Mnemônico: ${m.concept}`, [m.mnemonic, ...(m.items ?? []).map((i) => `${i.chave} = ${i.significado}`)].join('\n'), task?.plan_id ?? await activePlan(admin, auth.user.id));
       };
       if (q.mnemonic_checked) {
         const m = q.mnemonic_id ? (await admin.from('mnemonics').select(fields).eq('id', q.mnemonic_id).maybeSingle()).data : null;
@@ -134,8 +133,21 @@ Deno.serve(async (req) => {
 
     if (body.action !== 'next') return json(400, { error: 'Ação inválida.' });
     if (!task) return json(400, { error: 'Informe a tarefa.' });
-    if (!subject) return json(200, { questions: [], reason: 'sem-materia' });
     const count = Math.max(1, Math.min(10, Number(body.count) || 5));
+
+    // Revisão semanal: os erros vencidos do caderno deste concurso, do cache, sem créditos. As sessões não intercalam erros:
+    // eles esperam por esta tarefa.
+    if (task.kind === 'weekly_review') {
+      const exclude = Array.isArray(body.exclude) ? (body.exclude as unknown[]).map(String).slice(0, 500) : [];
+      const { data: due } = await admin.from('error_book').select('qid').eq('owner_id', auth.user.id).eq('plan_id', task.plan_id).eq('resolved', false)
+        .lte('due_on', new Date().toISOString().slice(0, 10)).order('due_on').limit(exclude.length + count);
+      const ids = (due ?? []).map((d) => d.qid as string).filter((id) => !exclude.includes(id)).slice(0, count);
+      const { data: rows } = ids.length ? await admin.from('qbank_questions').select('qid, payload').in('qid', ids) : { data: [] };
+      const byId = new Map((rows ?? []).map((r) => [r.qid as string, r.payload as PublicQuestion]));
+      const questions = await withMnemo(admin, ids.map((id) => byId.get(id)).filter((q): q is PublicQuestion => !!q));
+      return json(200, { questions, reason: questions.length ? null : exclude.length ? 'fim-revisao' : 'sem-erros' });
+    }
+    if (!subject) return json(200, { questions: [], reason: 'sem-materia' });
     const topics = ((subject.notice_topics ?? []) as { text: string; position: number }[]).sort((a, b) => a.position - b.position).map((t) => t.text);
 
     // Matéria da disciplina (uma vez) e banca do edital.
@@ -189,14 +201,7 @@ Deno.serve(async (req) => {
     const served = new Map<string, number>();
     for (const d of done ?? []) if (task.session_id && d.session_id === task.session_id) served.set(normalizeText(d.assunto), (served.get(normalizeText(d.assunto)) ?? 0) + 1);
     const out: QuestQuestion[] = [];
-    // Revisões vencidas vêm do cache, sem créditos, e são respondidas fora da sessão: não contam na meta nem no tema.
-    const shown = Array.isArray(body.shownReviews) ? (body.shownReviews as unknown[]).map(String) : [];
-    const { data: due } = await admin.from('error_book').select('qid').eq('owner_id', auth.user.id).eq('resolved', false)
-      .lte('due_on', new Date().toISOString().slice(0, 10)).order('due_on').limit(shown.length + 5);
-    const reviewIds = (due ?? []).map((d) => d.qid as string).filter((id) => !shown.includes(id)).slice(0, Math.floor(count / REVIEW_EVERY));
-    const { data: reviewRows } = reviewIds.length ? await admin.from('qbank_questions').select('payload').in('qid', reviewIds) : { data: [] };
-    const reviews = (reviewRows ?? []).map((r) => r.payload as PublicQuestion);
-    const wantedTotal = count - reviews.length;
+    const wantedTotal = count;
     // Traz até `limit` questões no total, das mais recentes para as mais antigas.
     let timedOut = false;
     const take = async (f: (typeof filters)[number], limit: number) => {
@@ -219,10 +224,9 @@ Deno.serve(async (req) => {
     }
     for (const f of inTurn(filters, turn)) await take(f, wantedTotal);
     await log('qbank_fetch', 'ok');
-    // Dentro do lote, primeiro as questões que caíram em mais provas; a revisão entra no meio.
+    // Dentro do lote, primeiro as questões que caíram em mais provas.
     out.sort((a, b) => (b.provas?.length ?? 0) - (a.provas?.length ?? 0));
-    const fresh = await withMnemo(admin, out.slice(0, wantedTotal).map(publicQuestion));
-    const batch = [...fresh.slice(0, 2), ...(await withMnemo(admin, reviews)).map((q) => ({ ...q, revisao: true })), ...fresh.slice(2)];
+    const batch = await withMnemo(admin, out.slice(0, wantedTotal).map(publicQuestion));
     return json(200, { questions: batch, filter: { materia: filter.materia, assuntos: filter.assuntos, how: filter.how }, reason: batch.length ? null : timedOut ? 'demorou' : 'esgotado-dificeis' });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

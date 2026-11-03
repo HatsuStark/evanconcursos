@@ -12,6 +12,7 @@ export interface Attempt { id: string; task_id: string | null; session_id: strin
 export interface StudyData {
   task: TaskRow & { plan_id: string; time_spent_sec: number };
   noticeId: string;
+  cutoffPct: number | null;   // última nota de corte do cargo (% da prova), base da meta de acerto
   pacing: Pacing;
   subject: SubjectRow | null;
   subjectIndex: number;
@@ -27,6 +28,7 @@ export const useStudy = (taskId: string | undefined) => useQuery({
   queryFn: async (): Promise<StudyData> => {
     const task = must(await supabase.from('tasks').select('id, plan_id, date, minutes, kind, subject_id, session_id, title, keyword, goal_questions, done_at, time_spent_sec').eq('id', taskId!).single()) as StudyData['task'];
     const plan = must(await supabase.from('study_plans').select('notice_id, pacing').eq('id', task.plan_id).single()) as { notice_id: string; pacing: Pacing };
+    const notice = must(await supabase.from('notices').select('cutoff_pct').eq('id', plan.notice_id).single()) as { cutoff_pct: number | null };
     const [subjects, session, attempts, goals] = await Promise.all([
       supabase.from('notice_subjects').select('id, name, position, is_core, questions, weight').eq('notice_id', plan.notice_id).order('position'),
       task.session_id ? supabase.from('study_sessions').select('id, title, keyword, topic_ids').eq('id', task.session_id).single() : Promise.resolve({ data: null, error: null }),
@@ -39,7 +41,7 @@ export const useStudy = (taskId: string | undefined) => useQuery({
     const topics = sess?.topic_ids.length ? (must(await supabase.from('notice_topics').select('id, text').in('id', sess.topic_ids)) as { id: string; text: string }[])
       .sort((a, b) => sess.topic_ids.indexOf(a.id) - sess.topic_ids.indexOf(b.id)).map((t) => t.text) : [];
     const subjectIndex = subs.findIndex((s) => s.id === task.subject_id);
-    return { task, noticeId: plan.notice_id, pacing: plan.pacing, subject: subs[subjectIndex] ?? null, subjectIndex, session: sess, topics, attempts: must(attempts) as Attempt[], subjectGoal: (must(goals) as { goal_questions: number }[]).reduce((n, t) => n + t.goal_questions, 0) };
+    return { task, noticeId: plan.notice_id, cutoffPct: notice.cutoff_pct, pacing: plan.pacing, subject: subs[subjectIndex] ?? null, subjectIndex, session: sess, topics, attempts: must(attempts) as Attempt[], subjectGoal: (must(goals) as { goal_questions: number }[]).reduce((n, t) => n + t.goal_questions, 0) };
   },
 });
 

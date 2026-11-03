@@ -7,7 +7,8 @@ import {
   answerQuestion, explainQuestion, loadNote, mnemonicFor, nextQuestions, optionsOf, saveNote,
   type Explanation, type Mnemonic, type Question,
 } from '../lib/questions.ts';
-import { questionScore } from '../../../shared/domain/adaptive.ts';
+import { goalTone, questionScore, scoreGoal } from '../../../shared/domain/adaptive.ts';
+import { useActivePlan } from '../lib/plans.ts';
 import { mayHaveMnemonic } from '../../../shared/qbank/mnemonic.ts';
 import { ArticleChips } from './ArticlePeek.tsx';
 import { CommentsPanel } from './CommentsPanel.tsx';
@@ -23,7 +24,9 @@ const REASON: Record<string, string> = {
   esgotado: 'Não há mais questões inéditas com esses filtros. Ótimo trabalho!',
   'esgotado-dificeis': 'Não há mais questões inéditas de dificuldade média ou alta para esta sessão. Para treinar outras, use a aba Questões → Resolver.',
   demorou: 'A busca demorou mais que o normal. Abra a aba de novo para continuar de onde parou.',
-  revisao: 'Nada para revisar hoje. As questões que você errar voltam aqui em 1, 7 e 30 dias.',
+  revisao: 'Nada para revisar hoje. As questões que você errar voltam na revisão semanal.',
+  'sem-erros': 'Nenhum erro para revisar agora. As questões que você errar neste concurso voltam aqui na revisão semanal.',
+  'fim-revisao': 'Você revisou todos os erros desta semana. Os próximos voltam na revisão semanal seguinte.',
   'id-inexistente': 'Nenhuma questão com esse ID. Confira o número e tente de novo.',
   'id-indisponivel': 'Essa questão existe, mas foi anulada ou não tem gabarito, então não dá para resolvê-la aqui.',
 };
@@ -45,6 +48,8 @@ const storedPageSize = () => { try { const n = Number(localStorage.getItem(PAGE_
 export function QuestionsPanel({ source, goal = 0, answered = 0, paged = false }: { source: Source; goal?: number; answered?: number; paged?: boolean }) {
   const taskId = source.kind === 'task' ? source.taskId : null;
   const [queue, setQueue] = useState<Question[]>([]);
+  const queueRef = useRef<Question[]>([]);
+  queueRef.current = queue;
   const [states, setStates] = useState<Record<string, QState>>({});
   const [idx, setIdx] = useState(0); // primeira questão da página
   const [pageSize, setPageSize] = useState(() => (paged ? storedPageSize() : 1));
@@ -54,7 +59,6 @@ export function QuestionsPanel({ source, goal = 0, answered = 0, paged = false }
   const [error, setError] = useState('');
   const [summary, setSummary] = useState(false);
   const fetching = useRef(false);
-  const shownReviews = useRef<string[]>([]);
   const sizeRef = useRef(pageSize);
   sizeRef.current = pageSize;
   // A busca depende do conteúdo da origem, não da identidade do objeto (que muda a cada renderização).
@@ -68,11 +72,11 @@ export function QuestionsPanel({ source, goal = 0, answered = 0, paged = false }
     if (initial) setLoading(true);
     try {
       // Cada questão nova custa créditos: a busca livre traz só o que a página vai mostrar.
-      const r = source.kind === 'task' ? await nextQuestions(source.taskId, 5, shownReviews.current)
+      // Na revisão semanal, os erros já mostrados não voltam no mesmo lote.
+      const r = source.kind === 'task' ? await nextQuestions(source.taskId, 5, queueRef.current.map((q) => q.qid))
         : source.kind === 'free' ? await searchFree(source.filters, Math.max(sizeRef.current, 5))
         : source.kind === 'id' ? await questionById(source.qid)
         : { ...(await reviewDue(20)), reason: 'revisao' as string | null };
-      shownReviews.current.push(...r.questions.filter((n) => n.revisao).map((n) => n.qid));
       setQueue((q) => [...q, ...r.questions.filter((n) => !q.some((o) => o.qid === n.qid))]);
       const filter = (r as { filter?: { assuntos: string[] } }).filter;
       if (filter) setAssuntos(filter.assuntos);
@@ -179,7 +183,7 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
     if (!st.chosen || st.result) return;
     setBusy('answer'); setError('');
     try {
-      const r = await answerQuestion(q.revisao ? null : taskId, q.qid, st.chosen, q.revisao || source.kind === 'review' ? 'review' : source.kind === 'task' ? 'plan' : 'free');
+      const r = await answerQuestion(taskId, q.qid, st.chosen, source.kind === 'review' ? 'review' : source.kind === 'task' ? 'plan' : 'free');
       patch({ result: r, tab: 'explicacao' });
       void qc.invalidateQueries({ queryKey: ['study'] });
       void qc.invalidateQueries({ queryKey: ['due-counts'] });
@@ -216,7 +220,6 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
   return (
       <article className="glass q-card">
         {source.kind === 'review' && <span className="badge orange" style={{ justifySelf: 'start' }}><RotateCcw size={12} /> Revisão do caderno de erros</span>}
-        {q.revisao && <p className="small" style={{ margin: '0 0 10px' }}><span className="badge violet">Revisão de erro</span> <span className="faint">Assunto anterior; não conta na meta desta sessão.</span></p>}
         <QuestionBody q={q} number={number} chosen={st.chosen} struck={st.struck} gabarito={st.result?.gabarito ?? null} locked={!!st.result} onSelect={select} onStrike={strike} />
 
         {st.result ? (
@@ -281,6 +284,7 @@ export function MnemonicView({ m, busy, onLoad }: { m: Mnemonic | null | undefin
 
 // Resumo da bateria: acertos e desempenho por assunto (o mais fraco primeiro).
 function BatchSummary({ queue, states, onBack }: { queue: Question[]; states: Record<string, QState>; onBack: () => void }) {
+  const goal = scoreGoal(useActivePlan().data?.notice.cutoff_pct);
   const done = queue.filter((x) => states[x.qid]?.result);
   const right = done.filter((x) => states[x.qid]!.result!.correct).length;
   // Por assunto, conta também as questões da bateria ainda sem resposta (t); a = respondidas, c = certas.
@@ -300,13 +304,13 @@ function BatchSummary({ queue, states, onBack }: { queue: Question[]; states: Re
       <h2 style={{ margin: 0 }}>Resumo da bateria</h2>
       <div className="stats">
         <div className="stat"><strong style={{ color: 'var(--violet)' }}>{done.length}</strong><span>de {score.total} respondidas</span></div>
-        <div className="stat"><strong style={{ color: score.pending ? 'var(--cyan)' : score.pct >= 75 ? 'var(--lime)' : 'var(--orange)' }}>{score.pct}%</strong><span>da bateria</span></div>
+        <div className="stat"><strong style={{ color: score.pending ? 'var(--cyan)' : `var(--${goalTone(score.pct / 100, goal)})` }}>{score.pct}%</strong><span>da bateria</span></div>
         <div className="stat"><strong style={{ color: 'var(--cyan)' }}>{by.size}</strong><span>assuntos</span></div>
       </div>
       <table className="sum-table"><thead><tr><th>Assunto</th><th>Acertos</th><th /></tr></thead><tbody>
-        {rows.map(([a, e]) => <tr key={a}><td>{a}</td><td>{e.c}/{e.t}{e.t > e.a ? ` · ${e.t - e.a} ${e.t - e.a === 1 ? 'pendente' : 'pendentes'}` : ''}</td><td style={{ width: '40%' }}><div className="bar"><span style={{ width: `${(e.c / e.t) * 100}%`, background: e.t > e.a ? 'var(--violet)' : e.c / e.t >= 0.75 ? 'var(--lime)' : 'var(--orange)' }} /></div></td></tr>)}
+        {rows.map(([a, e]) => <tr key={a}><td>{a}</td><td>{e.c}/{e.t}{e.t > e.a ? ` · ${e.t - e.a} ${e.t - e.a === 1 ? 'pendente' : 'pendentes'}` : ''}</td><td style={{ width: '40%' }}><div className="bar"><span style={{ width: `${(e.c / e.t) * 100}%`, background: e.t > e.a ? 'var(--violet)' : `var(--${goalTone(e.c / e.t, goal)})` }} /></div></td></tr>)}
       </tbody></table>
-      {weakest && weakest[1].c / weakest[1].a < 0.75 && <p className="muted" style={{ margin: 0 }}>Ponto a reforçar: <b>{weakest[0]}</b>. As questões erradas já estão no seu caderno de erros e voltam amanhã.</p>}
+      {weakest && weakest[1].c / weakest[1].a < goal.min && <p className="muted" style={{ margin: 0 }}>Ponto a reforçar: <b>{weakest[0]}</b>, abaixo do mínimo de {Math.round(goal.min * 100)}%. As questões erradas já estão no seu caderno de erros e voltam na revisão semanal.</p>}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <button className="btn" onClick={onBack}>Continuar resolvendo</button>
         <Link className="btn ghost" to="/questoes?aba=revisar">Caderno de erros</Link>

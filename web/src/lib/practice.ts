@@ -1,4 +1,5 @@
 // Prática fora do cronograma: questões livres, caderno de erros, flashcards, simulados e desempenho por contexto.
+// Tudo do concurso ativo (planId): cada concurso tem o próprio caderno, flashcards, simulados e desempenho.
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { ymd } from '../../../shared/domain/dates.ts';
@@ -39,33 +40,36 @@ export const searchFree = (filters: FreeFilters, count = 10) => practice<{ quest
 export const questionById = (qid: string) => practice<{ questions: Question[]; reason: string | null }>({ action: 'by_id', qid });
 export const reviewDue = (count = 15) => practice<{ questions: Question[]; stages: Record<string, { stage: number; wrong: number }> }>({ action: 'review', count });
 
-// Matérias do concurso já ligadas ao banco de questões (atalhos nos filtros).
-export const useMappedMaterias = () => useQuery({
-  queryKey: ['mapped-materias'],
+// Matérias do concurso ativo já ligadas ao banco de questões (atalhos nos filtros).
+export const useMappedMaterias = (noticeId: string | undefined) => useQuery({
+  queryKey: ['mapped-materias', noticeId],
+  enabled: !!noticeId,
   queryFn: async () => {
-    const { data } = await supabase.from('qbank_subject_maps').select('materia');
+    const { data } = await supabase.from('qbank_subject_maps').select('materia, notice_subjects!inner(notice_id)').eq('notice_subjects.notice_id', noticeId!);
     return [...new Set((data ?? []).map((d) => d.materia as string | null).filter((m): m is string => !!m))];
   },
 });
 
 // ---------- caderno de erros e flashcards ----------
-export const useDueCounts = () => useQuery({
-  queryKey: ['due-counts'],
+export const useDueCounts = (planId: string | undefined) => useQuery({
+  queryKey: ['due-counts', planId],
+  enabled: !!planId,
   queryFn: async () => {
     const today = ymd(new Date());
     const [e, f] = await Promise.all([
-      supabase.from('error_book').select('qid', { count: 'exact', head: true }).eq('resolved', false).lte('due_on', today),
-      supabase.from('flashcards').select('id', { count: 'exact', head: true }).lte('due_on', today),
+      supabase.from('error_book').select('qid', { count: 'exact', head: true }).eq('plan_id', planId!).eq('resolved', false).lte('due_on', today),
+      supabase.from('flashcards').select('id', { count: 'exact', head: true }).eq('plan_id', planId!).lte('due_on', today),
     ]);
     return { errors: e.count ?? 0, cards: f.count ?? 0 };
   },
 });
 
 export interface Flashcard { id: string; kind: 'mnemonic' | 'question'; front: string; back: string; box: number; due_on: string }
-export const useFlashcards = (all: boolean) => useQuery({
-  queryKey: ['flashcards', all],
+export const useFlashcards = (all: boolean, planId: string | undefined) => useQuery({
+  queryKey: ['flashcards', all, planId],
+  enabled: !!planId,
   queryFn: async () => {
-    let q = supabase.from('flashcards').select('id, kind, front, back, box, due_on').order('due_on').limit(300);
+    let q = supabase.from('flashcards').select('id, kind, front, back, box, due_on').eq('plan_id', planId!).order('due_on').limit(300);
     if (!all) q = q.lte('due_on', ymd(new Date()));
     const { data, error } = await q;
     if (error) throw new Error(error.message);
@@ -96,10 +100,11 @@ export async function saveSimAnswer(simuladoId: string, qid: string, chosen: str
   const { error } = await supabase.from('simulado_answers').upsert({ owner_id: u.user?.id, simulado_id: simuladoId, qid, chosen, struck, updated_at: new Date().toISOString() }, { onConflict: 'simulado_id,qid' });
   if (error) throw new Error(error.message);
 }
-export const useSimulados = () => useQuery({
-  queryKey: ['simulados'],
+export const useSimulados = (planId: string | undefined) => useQuery({
+  queryKey: ['simulados', planId],
+  enabled: !!planId,
   queryFn: async () => {
-    const { data, error } = await supabase.from('simulados').select('id, title, config, status, started_at, finished_at, result, task_id').order('started_at', { ascending: false }).limit(50);
+    const { data, error } = await supabase.from('simulados').select('id, title, config, status, started_at, finished_at, result, task_id').eq('plan_id', planId!).order('started_at', { ascending: false }).limit(50);
     if (error) throw new Error(error.message);
     return data as SimuladoRow[];
   },
@@ -108,18 +113,20 @@ export const useSimulados = () => useQuery({
 // ---------- desempenho por contexto ----------
 export type Ctx = 'plan' | 'free' | 'simulado' | 'review';
 export interface AttemptStat { context: Ctx; materia: string; assunto: string; correct: boolean; created_at: string; time_ms: number | null; error_reason: ErrorReason | null }
-export const useAttemptStats = () => useQuery({
-  queryKey: ['attempt-stats'],
+export const useAttemptStats = (planId: string | undefined) => useQuery({
+  queryKey: ['attempt-stats', planId],
+  enabled: !!planId,
   queryFn: async () => {
-    const { data, error } = await supabase.from('question_attempts').select('context, materia, assunto, correct, created_at, time_ms, error_reason').order('created_at', { ascending: false }).limit(5000);
+    const { data, error } = await supabase.from('question_attempts').select('context, materia, assunto, correct, created_at, time_ms, error_reason').eq('plan_id', planId!).order('created_at', { ascending: false }).limit(5000);
     if (error) throw new Error(error.message);
     return data as AttemptStat[];
   },
 });
 
 // ---------- motivo do erro ----------
-export async function lastErrorReason(qid: string) {
-  const { data, error } = await supabase.from('question_attempts').select('error_reason').eq('qid', qid).eq('correct', false).order('created_at', { ascending: false }).limit(1).maybeSingle();
+export async function lastErrorReason(qid: string, planId: string | undefined) {
+  if (!planId) return null;
+  const { data, error } = await supabase.from('question_attempts').select('error_reason').eq('plan_id', planId).eq('qid', qid).eq('correct', false).order('created_at', { ascending: false }).limit(1).maybeSingle();
   if (error) throw new Error(error.message);
   return (data as { error_reason: ErrorReason | null } | null)?.error_reason ?? null;
 }

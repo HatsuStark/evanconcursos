@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { scoreGoal, type ScoreGoal } from './adaptive.ts';
 import { buildVerticalized, type VSession, type VStat, type VSubject, type VTask, type VTopic } from './verticalized.ts';
 
 const subject = (id: string, over: Partial<VSubject> = {}): VSubject => ({ id, name: id, is_core: false, weight: 2, questions: 10, ...over });
@@ -6,7 +7,7 @@ const topic = (id: string, subject_id = 'penal'): VTopic => ({ id, subject_id, t
 const session = (id: string, topic_ids: string[], over: Partial<VSession> = {}): VSession => ({ id, subject_id: 'penal', plan_version_id: 'v2', topic_ids, ...over });
 const task = (id: string, session_id: string, date: string, done = false, over: Partial<VTask> = {}): VTask => ({ id, session_id, date, done_at: done ? `${date}T12:00:00Z` : null, superseded_in_version: null, goal_questions: 0, ...over });
 const stat = (session_id: string, total: number, correct: number, last_at = '2026-10-01T10:00:00Z'): VStat => ({ session_id, total, correct, last_at });
-const build = (over: { subjects?: VSubject[]; topics?: VTopic[]; sessions?: VSession[]; tasks?: VTask[]; stats?: VStat[] }) =>
+const build = (over: { subjects?: VSubject[]; topics?: VTopic[]; sessions?: VSession[]; tasks?: VTask[]; stats?: VStat[]; goal?: ScoreGoal }) =>
   buildVerticalized({ subjects: [subject('penal')], topics: [topic('t1')], sessions: [], tasks: [], stats: [], activeVersionId: 'v2', ...over });
 const row = (r: ReturnType<typeof build>, id = 't1') => r.subjects.flatMap((s) => s.topics).find((t) => t.id === id)!;
 
@@ -52,12 +53,17 @@ describe('atalho para a tarefa', () => {
 });
 
 describe('desempenho', () => {
-  it('ponto fraco exige 5 questões e acerto abaixo de 75%', () => {
+  it('ponto fraco exige 5 questões e acerto abaixo do mínimo (80% sem nota de corte)', () => {
     const sessions = [session('s1', ['t1'])];
     expect(row(build({ sessions, stats: [stat('s1', 4, 0)] })).weak).toBe(false);
     expect(row(build({ sessions, stats: [stat('s1', 5, 3)] })).weak).toBe(true);
     expect(row(build({ sessions, stats: [stat('s1', 4, 3)] })).weak).toBe(false);
-    expect(row(build({ sessions, stats: [stat('s1', 8, 6)] })).weak).toBe(false);
+    expect(row(build({ sessions, stats: [stat('s1', 8, 6)] })).weak).toBe(true);
+    expect(row(build({ sessions, stats: [stat('s1', 10, 8)] })).weak).toBe(false);
+  });
+  it('com nota de corte, o mínimo é ela', () => {
+    const sessions = [session('s1', ['t1'])];
+    expect(row(build({ sessions, stats: [stat('s1', 8, 6)], goal: scoreGoal(70) })).weak).toBe(false);
   });
   it('estudado sem questões fica marcado', () => {
     const sessions = [session('s1', ['t1'])];

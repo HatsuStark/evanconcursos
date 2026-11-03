@@ -1,10 +1,12 @@
-import { useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, FilePlus2, Layers, Trash2 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { CalendarClock, CheckCircle2, FilePlus2, Layers, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Shell } from '../components/Shell.tsx';
 import { fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
 import { deleteNotice, useNotices, useNoticeStats, type NoticeRow } from '../lib/notices.ts';
+import { setActiveNotice, useActivePlan } from '../lib/plans.ts';
+import { supabase } from '../lib/supabase.ts';
 
 export function NoticesPage() {
   const qc = useQueryClient();
@@ -13,6 +15,20 @@ export function NoticesPage() {
   const stats = useNoticeStats(ids);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const active = useActivePlan();
+  const activeNotice = active.data?.notice.id;
+  // Só edital com cronograma pode ser o concurso ativo.
+  const withPlan = useQuery({
+    queryKey: ['notices-with-plan'],
+    queryFn: async () => new Set(((await supabase.from('study_plans').select('notice_id').eq('status', 'active')).data ?? []).map((p) => p.notice_id as string)),
+  });
+
+  async function activate(n: NoticeRow) {
+    setBusy(n.id); setError('');
+    try { await setActiveNotice(n.id); await qc.invalidateQueries(); }
+    catch (e) { setError(`Não foi possível trocar o concurso ativo: ${(e as Error).message}`); }
+    finally { setBusy(''); }
+  }
 
   async function remove(n: NoticeRow) {
     const name = n.role_name || n.title;
@@ -24,7 +40,7 @@ export function NoticesPage() {
   }
 
   return (
-    <Shell title="Concursos" subtitle="Seus editais e planos de estudo."
+    <Shell title="Concursos" subtitle="Seus editais e planos de estudo. O concurso ativo define cronograma, questões, caderno de erros, flashcards, simulados e desempenho."
       actions={<Link className="btn" to="/concursos/novo"><FilePlus2 size={18} /> Novo edital</Link>}>
       {error && <p className="error">{error}</p>}
       {notices.isLoading ? <div className="spinner" /> : !notices.data?.length ? (
@@ -47,6 +63,8 @@ export function NoticesPage() {
                     {s && <span className="chip"><Layers /> {s.subjects.length} matérias</span>}
                   </div>
                 </Link>
+                {activeNotice === n.id ? <span className="badge lime course-active"><CheckCircle2 size={12} /> Concurso ativo</span>
+                  : withPlan.data?.has(n.id) && <button className="btn ghost sm course-active" disabled={!!busy} onClick={() => activate(n)}>{busy === n.id ? <span className="spinner" /> : 'Estudar este'}</button>}
                 <button className="icon-btn danger course-delete" title="Excluir concurso" aria-label={`Excluir ${n.role_name || n.title}`} disabled={!!busy} onClick={() => remove(n)}>
                   {busy === n.id ? <span className="spinner" /> : <Trash2 size={16} />}
                 </button>

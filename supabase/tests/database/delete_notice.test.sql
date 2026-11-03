@@ -38,13 +38,14 @@ insert into public.simulados (id, owner_id, plan_id, title, config) values
   ('66000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-0000000000a5', '62000000-0000-4000-8000-000000000001', 'Do concurso', '{}'),
   ('66000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-0000000000a5', null, 'Personalizado', '{}');
 
--- Questões: só do concurso (+ revisão), também em prática livre, também no outro concurso, em simulado do concurso
--- e em simulado personalizado. Anotada sem responder, e anotada no outro concurso.
+-- Questões: só do concurso (+ revisão), também em prática livre do outro concurso, também no outro concurso, em simulado
+-- do concurso e em simulado personalizado antigo (sem concurso). Anotada sem responder, e anotada no outro concurso.
+-- Revisão e prática livre pertencem ao concurso ativo em que foram feitas.
 insert into public.question_attempts (owner_id, plan_id, simulado_id, qid, chosen, correct, context) values
   ('00000000-0000-4000-8000-0000000000a5', '62000000-0000-4000-8000-000000000001', null, 'q-so', 'A', false, 'plan'),
-  ('00000000-0000-4000-8000-0000000000a5', null, null, 'q-so', 'B', true, 'review'),
+  ('00000000-0000-4000-8000-0000000000a5', '62000000-0000-4000-8000-000000000001', null, 'q-so', 'B', true, 'review'),
   ('00000000-0000-4000-8000-0000000000a5', '62000000-0000-4000-8000-000000000001', null, 'q-livre', 'A', false, 'plan'),
-  ('00000000-0000-4000-8000-0000000000a5', null, null, 'q-livre', 'A', false, 'free'),
+  ('00000000-0000-4000-8000-0000000000a5', '62000000-0000-4000-8000-000000000002', null, 'q-livre', 'A', false, 'free'),
   ('00000000-0000-4000-8000-0000000000a5', '62000000-0000-4000-8000-000000000001', null, 'q-dois', 'A', false, 'plan'),
   ('00000000-0000-4000-8000-0000000000a5', '62000000-0000-4000-8000-000000000002', null, 'q-dois', 'A', false, 'plan'),
   ('00000000-0000-4000-8000-0000000000a5', '62000000-0000-4000-8000-000000000001', '66000000-0000-4000-8000-000000000001', 'q-sim', 'A', false, 'simulado'),
@@ -56,15 +57,16 @@ insert into public.question_notes (owner_id, plan_id, qid, note) values
   ('00000000-0000-4000-8000-0000000000a5', '62000000-0000-4000-8000-000000000001', 'q-livre', 'n'),
   ('00000000-0000-4000-8000-0000000000a5', '62000000-0000-4000-8000-000000000002', 'q-outra', 'n'),
   ('00000000-0000-4000-8000-0000000000b5', '62000000-0000-4000-8000-000000000003', 'q-so', 'n');
-insert into public.error_book (owner_id, qid, due_on) values
-  ('00000000-0000-4000-8000-0000000000a5', 'q-so', current_date),
-  ('00000000-0000-4000-8000-0000000000a5', 'q-sim', current_date),
-  ('00000000-0000-4000-8000-0000000000a5', 'q-livre', current_date),
-  ('00000000-0000-4000-8000-0000000000b5', 'q-so', current_date);
-insert into public.flashcards (owner_id, kind, ref, front, back) values
-  ('00000000-0000-4000-8000-0000000000a5', 'question', 'q-so', 'f', 'b'),
-  ('00000000-0000-4000-8000-0000000000a5', 'question', 'q-dois', 'f', 'b'),
-  ('00000000-0000-4000-8000-0000000000b5', 'question', 'q-so', 'f', 'b');
+insert into public.error_book (owner_id, plan_id, qid, due_on) values
+  ('00000000-0000-4000-8000-0000000000a5', '62000000-0000-4000-8000-000000000001', 'q-so', current_date),
+  ('00000000-0000-4000-8000-0000000000a5', '62000000-0000-4000-8000-000000000001', 'q-sim', current_date),
+  ('00000000-0000-4000-8000-0000000000a5', '62000000-0000-4000-8000-000000000001', 'q-livre', current_date),
+  ('00000000-0000-4000-8000-0000000000a5', '62000000-0000-4000-8000-000000000002', 'q-livre', current_date),
+  ('00000000-0000-4000-8000-0000000000b5', '62000000-0000-4000-8000-000000000003', 'q-so', current_date);
+insert into public.flashcards (owner_id, plan_id, kind, ref, front, back) values
+  ('00000000-0000-4000-8000-0000000000a5', '62000000-0000-4000-8000-000000000001', 'question', 'q-so', 'f', 'b'),
+  ('00000000-0000-4000-8000-0000000000a5', '62000000-0000-4000-8000-000000000002', 'question', 'q-dois', 'f', 'b'),
+  ('00000000-0000-4000-8000-0000000000b5', '62000000-0000-4000-8000-000000000003', 'question', 'q-so', 'f', 'b');
 
 -- Mnemônicos: um só da questão excluída, um dividido com questão mantida, um criado ao ver questão sem responder.
 insert into public.mnemonics (id, concept, concept_key, mnemonic, model, prompt_version) values
@@ -76,8 +78,8 @@ insert into public.qbank_questions (qid, payload, gabarito, mnemonic_id) values
   ('q-sim', '{}', 'B', '67000000-0000-4000-8000-000000000002'),
   ('q-dois', '{}', 'B', '67000000-0000-4000-8000-000000000002');
 insert into public.flashcards (owner_id, kind, ref, plan_id, front, back) values
-  ('00000000-0000-4000-8000-0000000000a5', 'mnemonic', '67000000-0000-4000-8000-000000000001', null, 'f', 'b'),
-  ('00000000-0000-4000-8000-0000000000a5', 'mnemonic', '67000000-0000-4000-8000-000000000002', null, 'f', 'b'),
+  ('00000000-0000-4000-8000-0000000000a5', 'mnemonic', '67000000-0000-4000-8000-000000000001', '62000000-0000-4000-8000-000000000001', 'f', 'b'),
+  ('00000000-0000-4000-8000-0000000000a5', 'mnemonic', '67000000-0000-4000-8000-000000000002', '62000000-0000-4000-8000-000000000002', 'f', 'b'),
   ('00000000-0000-4000-8000-0000000000a5', 'mnemonic', '67000000-0000-4000-8000-000000000003', '62000000-0000-4000-8000-000000000001', 'f', 'b');
 
 -- Marcações: uma lei citada só por este concurso e outra que fica.
@@ -127,7 +129,7 @@ select is(pg_temp.n('simulados', $$id = '66000000-0000-4000-8000-000000000001'$$
 select is(pg_temp.n('simulados', $$id = '66000000-0000-4000-8000-000000000002'$$), 1::bigint, 'simulado personalizado fica');
 
 select is(pg_temp.n('question_attempts', $$owner_id = '00000000-0000-4000-8000-0000000000a5' and qid in ('q-so', 'q-sim')$$), 0::bigint, 'tentativas do concurso e a revisão delas apagadas');
-select is(pg_temp.n('question_attempts', $$owner_id = '00000000-0000-4000-8000-0000000000a5' and qid = 'q-livre'$$), 1::bigint, 'só a tentativa livre fica');
+select is(pg_temp.n('question_attempts', $$owner_id = '00000000-0000-4000-8000-0000000000a5' and qid = 'q-livre'$$), 1::bigint, 'só a tentativa livre do outro concurso fica');
 select is(pg_temp.n('question_attempts', $$owner_id = '00000000-0000-4000-8000-0000000000a5' and qid = 'q-dois'$$), 1::bigint, 'tentativa do outro concurso fica');
 select is(pg_temp.n('question_attempts', $$owner_id = '00000000-0000-4000-8000-0000000000a5' and qid = 'q-pers'$$), 1::bigint, 'tentativa do simulado personalizado fica');
 
@@ -135,11 +137,12 @@ select is(pg_temp.n('question_notes', $$owner_id = '00000000-0000-4000-8000-0000
 select is(pg_temp.n('question_notes', $$owner_id = '00000000-0000-4000-8000-0000000000a5' and qid = 'q-livre' and plan_id is null$$), 1::bigint, 'anotação de questão também usada fora fica, sem vínculo');
 select is(pg_temp.n('question_notes', $$qid = 'q-outra'$$), 1::bigint, 'anotação do outro concurso fica');
 select is(pg_temp.n('error_book', $$owner_id = '00000000-0000-4000-8000-0000000000a5' and qid in ('q-so', 'q-sim')$$), 0::bigint, 'erros só deste concurso apagados');
-select is(pg_temp.n('error_book', $$owner_id = '00000000-0000-4000-8000-0000000000a5' and qid = 'q-livre'$$), 1::bigint, 'erro de questão também usada fora fica');
+select is(pg_temp.n('error_book', $$owner_id = '00000000-0000-4000-8000-0000000000a5' and qid = 'q-livre'$$), 1::bigint, 'erro da mesma questão no outro concurso fica');
+select is(pg_temp.n('error_book', $$owner_id = '00000000-0000-4000-8000-0000000000a5' and plan_id is not null and plan_id <> '62000000-0000-4000-8000-000000000002'$$), 0::bigint, 'nenhum erro do concurso apagado sobra');
 select is(pg_temp.n('flashcards', $$owner_id = '00000000-0000-4000-8000-0000000000a5' and kind = 'question' and ref = 'q-so'$$), 0::bigint, 'flashcard da questão apagado');
 select is(pg_temp.n('flashcards', $$owner_id = '00000000-0000-4000-8000-0000000000a5' and kind = 'question' and ref = 'q-dois'$$), 1::bigint, 'flashcard de questão do outro concurso fica');
 select is(pg_temp.n('flashcards', $$kind = 'mnemonic' and ref = '67000000-0000-4000-8000-000000000001'$$), 0::bigint, 'cartão de mnemônico só deste concurso apagado');
-select is(pg_temp.n('flashcards', $$kind = 'mnemonic' and ref = '67000000-0000-4000-8000-000000000002'$$), 1::bigint, 'cartão de mnemônico dividido fica');
+select is(pg_temp.n('flashcards', $$kind = 'mnemonic' and ref = '67000000-0000-4000-8000-000000000002'$$), 1::bigint, 'cartão de mnemônico do outro concurso fica');
 select is(pg_temp.n('flashcards', $$kind = 'mnemonic' and ref = '67000000-0000-4000-8000-000000000003'$$), 0::bigint, 'cartão criado em questão não respondida apagado');
 select is(pg_temp.n('mnemonics', $$id = '67000000-0000-4000-8000-000000000001'$$), 1::bigint, 'o mnemônico compartilhado continua no catálogo');
 select is(pg_temp.n('legal_marks', $$owner_id = '00000000-0000-4000-8000-0000000000a5' and article_id = '69000000-0000-4000-8000-000000000001'$$), 0::bigint, 'marcação da lei só deste concurso apagada');

@@ -1,17 +1,19 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ERROR_REASONS, type ErrorReason } from '../../../shared/domain/replan.ts';
+import { useActivePlan } from '../lib/plans.ts';
 import { lastErrorReason, setErrorReason } from '../lib/practice.ts';
 
 // Por que errou: ajuda a reorganizar o cronograma (atenção pesa menos que falta de conteúdo) e aparece no desempenho.
 export function ErrorReasonPicker({ qid }: { qid: string }) {
   const qc = useQueryClient();
-  const current = useQuery({ queryKey: ['error-reason', qid], queryFn: () => lastErrorReason(qid) });
+  const planId = useActivePlan().data?.plan.id;
+  const current = useQuery({ queryKey: ['error-reason', qid, planId], enabled: !!planId, queryFn: () => lastErrorReason(qid, planId) });
   const [failed, setFailed] = useState(false);
   async function pick(reason: ErrorReason) {
     const next = current.data === reason ? null : reason;
     setFailed(false);
-    qc.setQueryData(['error-reason', qid], next);
+    qc.setQueryData(['error-reason', qid, planId], next);
     try { await setErrorReason(qid, next); void qc.invalidateQueries({ queryKey: ['attempt-stats'] }); void qc.invalidateQueries({ queryKey: ['plan-attempts'] }); }
     catch { setFailed(true); void qc.invalidateQueries({ queryKey: ['error-reason', qid] }); }
   }

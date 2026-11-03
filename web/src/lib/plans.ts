@@ -128,23 +128,30 @@ export async function updatePlanFromNotice(noticeId: string, inputs: PlanInputs,
 export type Pacing = 'agenda' | 'ciclo';
 export interface ActivePlan {
   plan: { id: string; name: string; notice_id: string; active_version_id: string | null; pacing: Pacing };
-  notice: { id: string; role_name: string; organization: string; board: string; exam_date: string | null; total_questions: number; education_level: Draft['educationLevel'] };
+  notice: { id: string; role_name: string; organization: string; board: string; exam_date: string | null; total_questions: number; education_level: Draft['educationLevel']; cutoff_pct: number | null };
   version: { id: string; number: number; reason: string; inputs: PlanInputs; strategy: Strategy; summary: { weeks?: number; hours?: number; perSubject?: { subjectId: string; name: string; days: number }[]; replan?: { round?: RoundSummary }; openEnded?: boolean }; created_at: string } | null;
   subjects: SubjectRow[];
   tasks: TaskRow[];
   openEnded: boolean; // prova já realizada: plano sem prazo, que se adapta ao desempenho
 }
 
-// Plano ativo mais recente (com o edital, a versão ativa, as matérias e as tarefas vigentes).
+// Plano ativo do edital pedido ou, sem edital, do concurso ativo (escolhido na aba Concursos; sem escolha, o mais
+// recente), com o edital, a versão ativa, as matérias e as tarefas vigentes.
 export const useActivePlan = (noticeId?: string) => useQuery({
-  queryKey: ['active-plan', noticeId ?? 'latest'],
+  queryKey: ['active-plan', noticeId ?? 'current'],
   queryFn: async (): Promise<ActivePlan | null> => {
     let q = supabase.from('study_plans').select('id, name, notice_id, active_version_id, pacing').eq('status', 'active').order('created_at', { ascending: false }).limit(1);
     if (noticeId) q = q.eq('notice_id', noticeId);
+    else {
+      const { data: current, error } = await supabase.rpc('my_active_plan');
+      if (error) throw new Error(error.message);
+      if (!current) return null;
+      q = q.eq('id', current as string);
+    }
     const plan = (must(await q) as ActivePlan['plan'][])[0];
     if (!plan) return null;
     const [notice, version, subjects, tasks] = await Promise.all([
-      supabase.from('notices').select('id, role_name, organization, board, exam_date, total_questions, education_level').eq('id', plan.notice_id).single(),
+      supabase.from('notices').select('id, role_name, organization, board, exam_date, total_questions, education_level, cutoff_pct').eq('id', plan.notice_id).single(),
       plan.active_version_id ? supabase.from('plan_versions').select('id, number, reason, inputs, strategy, summary, created_at').eq('id', plan.active_version_id).single() : Promise.resolve({ data: null, error: null }),
       supabase.from('notice_subjects').select('id, name, position, is_core, questions, weight').eq('notice_id', plan.notice_id).order('position'),
       supabase.from('tasks').select('id, date, minutes, kind, subject_id, session_id, title, keyword, goal_questions, done_at')
@@ -155,6 +162,13 @@ export const useActivePlan = (noticeId?: string) => useQuery({
     return { plan: openEnded ? { ...plan, pacing: 'ciclo' } : plan, notice: noticeRow, version: versionRow, subjects: must(subjects) as SubjectRow[], tasks: must(tasks) as TaskRow[], openEnded };
   },
 });
+
+// Concurso ativo: o app inteiro (início, questões, caderno de erros, flashcards, simulados, metas) passa a usar o plano dele.
+export async function setActiveNotice(noticeId: string) {
+  const { data: u } = await supabase.auth.getUser();
+  const { error } = await supabase.from('profiles').update({ active_notice_id: noticeId }).eq('id', u.user!.id);
+  if (error) throw new Error(error.message);
+}
 
 // Reorganização depois de atrasos: tudo calculado no app, sem IA; o banco grava a nova versão.
 export const usePlanAttempts = (planId: string | undefined, enabled: boolean) => useQuery({

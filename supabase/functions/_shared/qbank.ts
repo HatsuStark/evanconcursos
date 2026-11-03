@@ -119,7 +119,14 @@ export async function recordAnswer(admin: SupabaseClient, a: AnswerInput) {
 }
 
 export async function upsertFlashcard(admin: SupabaseClient, ownerId: string, kind: 'mnemonic' | 'question', ref: string, front: string, back: string, planId?: string | null) {
-  await admin.from('flashcards').upsert({ owner_id: ownerId, kind, ref, front: front.slice(0, 2000), back: back.slice(0, 4000), plan_id: planId ?? null }, { onConflict: 'owner_id,kind,ref', ignoreDuplicates: true });
+  await admin.from('flashcards').upsert({ owner_id: ownerId, kind, ref, front: front.slice(0, 2000), back: back.slice(0, 4000), plan_id: planId ?? null }, { onConflict: 'owner_id,plan_id,kind,ref', ignoreDuplicates: true });
+}
+
+// Plano do concurso ativo do estudante (escolhido na aba Concursos; sem escolha, o mais recente). Null sem plano.
+export async function activePlan(admin: SupabaseClient, ownerId: string): Promise<string | null> {
+  const { data, error } = await admin.rpc('active_plan_for', { p_owner: ownerId });
+  if (error) throw new Error(error.message);
+  return (data as string | null) ?? null;
 }
 
 // Situação do mnemônico de cada questão (uma consulta por lote): 'yes' já existe, 'no' a IA já disse que não

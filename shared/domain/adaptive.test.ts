@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyze, difficultyFor, evaluate, latestAnswers, questionScore, reviewQueue, type ThemedRecord } from './adaptive.ts';
+import { analyze, difficultyFor, evaluate, goalLabel, goalTone, latestAnswers, questionScore, reviewQueue, scoreGoal, type ThemedRecord } from './adaptive.ts';
 
 describe('latestAnswers', () => {
   it('questão refeita conta uma vez, pela última resposta, em qualquer ordem', () => {
@@ -56,6 +56,8 @@ describe('evaluate e difficultyFor', () => {
     expect(evaluate(0.9).level).toBe('ok');
     expect(evaluate(0.7).level).toBe('warning');
     expect(evaluate(0.5).level).toBe('bad');
+    expect(evaluate(0.78).level).toBe('warning'); // sem nota de corte, o mínimo é 80%
+    expect(evaluate(0.7, scoreGoal(65)).level).toBe('ok');
     expect(difficultyFor(0.5)).toEqual(['2', '3']);
     expect(difficultyFor(0.7)).toEqual(['3', '4']);
     expect(difficultyFor(0.9)).toEqual(['4', '5']);
@@ -77,5 +79,22 @@ describe('reviewQueue (1, 3 e 7 dias)', () => {
     expect(reviewQueue([rec('Penal', 'x', 9, 10, 1, 'b')])).toHaveLength(0);
     const q = reviewQueue([rec('P', 'x', 1, 10, 1, 'late'), rec('P', 'y', 1, 10, 6, 'early')]);
     expect(q.map((i) => i.theme)).toEqual(['early', 'late']);
+  });
+});
+
+describe('scoreGoal', () => {
+  it('sem nota de corte: mínimo 80% e meta 90%', () => {
+    for (const v of [null, undefined, 0, -5, 120, Number.NaN]) expect(scoreGoal(v)).toEqual({ min: 0.8, target: 0.9, fromCutoff: false });
+  });
+  it('com nota de corte: mínimo nela e meta 10 pontos acima, até 95%', () => {
+    expect(scoreGoal(70)).toMatchObject({ min: 0.7, fromCutoff: true });
+    expect(scoreGoal(70).target).toBeCloseTo(0.8);
+    expect(scoreGoal(90).target).toBeCloseTo(0.95);
+    expect(scoreGoal(97)).toMatchObject({ min: 0.97, target: 0.97 });
+  });
+  it('cor: meta, mínimo e abaixo', () => {
+    const g = scoreGoal(null);
+    expect([0.95, 0.85, 0.7].map((a) => goalTone(a, g))).toEqual(['lime', 'cyan', 'orange']);
+    expect(goalLabel(scoreGoal(72.5))).toBe('nota de corte 73% · meta 83%');
   });
 });

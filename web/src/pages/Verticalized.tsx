@@ -3,11 +3,11 @@ import { Check, Circle, CircleDashed, CircleOff } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { EDUCATION_LEVELS } from '../../../shared/ai/notice.ts';
-import { GOOD, WEAK } from '../../../shared/domain/adaptive.ts';
+import { goalLabel, goalTone, scoreGoal, type ScoreGoal } from '../../../shared/domain/adaptive.ts';
 import type { TopicRow, TopicStatus } from '../../../shared/domain/verticalized.ts';
 import { Shell } from '../components/Shell.tsx';
 import { fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
-import { saveEducationLevel, type Draft } from '../lib/notices.ts';
+import { saveCutoff, saveEducationLevel, type Draft } from '../lib/notices.ts';
 import { useActivePlan } from '../lib/plans.ts';
 import { useVerticalized } from '../lib/verticalized.ts';
 
@@ -25,11 +25,10 @@ const STATUS: Record<TopicStatus, { label: string; icon: typeof Check; color: st
   pendente: { label: 'Não estudado', icon: Circle, color: 'var(--faint)' },
   fora: { label: 'Fora do cronograma', icon: CircleOff, color: 'var(--orange)' },
 };
-const accBadge = (acc: number) => (acc >= GOOD ? 'lime' : acc >= WEAK ? 'cyan' : 'orange');
 const pct = (acc: number) => `${Math.round(acc * 100)}%`;
 const plural = (n: number) => `${n} ${n === 1 ? 'pendente' : 'pendentes'}`;
 
-function TopicItem({ t }: { t: TopicRow }) {
+function TopicItem({ t, goal }: { t: TopicRow; goal: ScoreGoal }) {
   const [open, setOpen] = useState(false);
   const s = STATUS[t.status];
   return (
@@ -39,7 +38,7 @@ function TopicItem({ t }: { t: TopicRow }) {
         <button className={'vert-text' + (open ? ' open' : '')} onClick={() => setOpen(!open)} title={open ? undefined : t.text}>{t.text}</button>
         <div className="vert-meta muted small">
           <span>{s.label}{t.sessionsTotal > 1 ? ` · ${t.sessionsDone} de ${t.sessionsTotal} sessões` : ''}</span>
-          {t.attempts > 0 && <span className={'badge ' + (t.pending ? 'violet' : accBadge(t.acc!))}>{t.correct}/{t.total} · {t.score}%</span>}
+          {t.attempts > 0 && <span className={'badge ' + (t.pending ? 'violet' : goalTone(t.acc!, goal))}>{t.correct}/{t.total} · {t.score}%</span>}
           {t.attempts > 0 && t.pending > 0 && <span className="faint">{plural(t.pending)}</span>}
           {t.weak && <span className="badge orange">ponto fraco</span>}
           {t.noQuestions && <span className="badge violet">sem questões</span>}
@@ -71,6 +70,14 @@ export function VerticalizedPage() {
     await saveEducationLevel(active.data!.notice.id, level);
     await qc.invalidateQueries();
   }
+  const goal = scoreGoal(active.data.notice.cutoff_pct);
+  async function changeCutoff(text: string) {
+    const n = Number(text.replace(',', '.'));
+    const pct = text.trim() && n > 0 && n <= 100 ? Math.round(n * 100) / 100 : null;
+    if (pct === (active.data!.notice.cutoff_pct == null ? null : Number(active.data!.notice.cutoff_pct))) return;
+    await saveCutoff(active.data!.notice.id, pct);
+    await qc.invalidateQueries();
+  }
 
   const rail = (
     <>
@@ -81,6 +88,16 @@ export function VerticalizedPage() {
           {EDUCATION_LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
         </select>
         <p className="faint small" style={{ margin: '8px 0 0' }}>As questões das sessões seguem este nível, sempre com dificuldade média ou alta.</p>
+      </section>
+      <section>
+        <h3>Nota de corte do cargo</h3>
+        <label className="field">Última nota de corte (% da prova objetiva)
+          <input key={String(active.data.notice.cutoff_pct)} className="input" inputMode="decimal" placeholder="Ex.: 72,5" defaultValue={active.data.notice.cutoff_pct ?? ''}
+            onBlur={(e) => void changeCutoff(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+        </label>
+        <p className="faint small" style={{ margin: '8px 0 0' }}>
+          {goal.fromCutoff ? `Mínimo ${Math.round(goal.min * 100)}% (nota de corte) e meta ${Math.round(goal.target * 100)}%.` : 'Sem nota de corte: mínimo 80% e meta 90%.'} Abaixo do mínimo, o tema entra no reforço. Use a nota da ampla concorrência no último concurso do cargo, convertida em % de acertos.
+        </p>
       </section>
       <section>
         <h3>Edital estudado</h3>
@@ -94,7 +111,7 @@ export function VerticalizedPage() {
         <h3>Questões do cronograma</h3>
         <div className="stats">
           <div className="stat"><strong style={{ color: 'var(--violet)' }}>{summary.attempts}</strong><span>questões</span></div>
-          <div className="stat"><strong style={{ color: summary.pending ? 'var(--cyan)' : summary.acc != null && summary.acc >= WEAK ? 'var(--lime)' : 'var(--orange)' }}>{summary.acc != null ? `${summary.score}%` : '—'}</strong><span>das metas</span></div>
+          <div className="stat"><strong style={{ color: summary.pending ? 'var(--cyan)' : summary.acc != null ? `var(--${goalTone(summary.acc, goal)})` : 'var(--orange)' }}>{summary.acc != null ? `${summary.score}%` : '—'}</strong><span>das metas</span></div>
           <div className="stat"><strong style={{ color: 'var(--orange)' }}>{summary.weak}</strong><span>fracos</span></div>
         </div>
         {summary.pending > 0 && <p className="muted small" style={{ margin: '10px 0 0' }}>{plural(summary.pending)} nas metas do cronograma.</p>}
@@ -134,11 +151,11 @@ export function VerticalizedPage() {
                 </div>
               </div>
             </summary>
-            <ul className="vert-list">{topics.map((t) => <TopicItem key={t.id} t={t} />)}</ul>
+            <ul className="vert-list">{topics.map((t) => <TopicItem key={t.id} t={t} goal={goal} />)}</ul>
           </details>
         ))}
       </div>
-      <p className="faint small" style={{ marginTop: 14 }}>Contam as questões feitas nas sessões do cronograma; simulados, revisão de erros e questões livres ficam na aba Desempenho. Uma sessão com vários tópicos conta suas questões para todos eles. As porcentagens de tópico e matéria incluem as questões pendentes da meta; "de acerto" considera só as respondidas.</p>
+      <p className="faint small" style={{ marginTop: 14 }}>Contam as questões feitas nas sessões do cronograma; simulados, revisão de erros e questões livres ficam na aba Desempenho. Uma sessão com vários tópicos conta suas questões para todos eles. As porcentagens de tópico e matéria incluem as questões pendentes da meta; "de acerto" considera só as respondidas. Cores: verde na meta, azul acima do mínimo, laranja abaixo ({goalLabel(goal)}).</p>
     </Shell>
   );
 }

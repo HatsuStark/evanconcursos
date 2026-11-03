@@ -1,7 +1,7 @@
 // Edital verticalizado: cada tópico do edital com o que já foi estudado e o desempenho nas questões das suas sessões.
 // Sessão com vários tópicos conta as questões para todos eles, porque a tentativa aponta para a sessão, não para o tópico.
 // Por isso os totais da matéria somam por sessão, sem contar a mesma questão duas vezes.
-import { CORE_BOOST, questionScore, WEAK } from './adaptive.ts';
+import { CORE_BOOST, DEFAULT_GOAL, questionScore, type ScoreGoal } from './adaptive.ts';
 
 export const WEAK_MIN_ATTEMPTS = 5; // com menos questões, o percentual ainda não diz muito
 const FOCUS_SIZE = 5;
@@ -25,7 +25,8 @@ export interface SubjectRow extends VSubject { topics: TopicRow[]; studied: numb
 const ratio = (correct: number, total: number) => (total ? correct / total : null);
 const latest = (dates: (string | null | undefined)[]) => dates.reduce<string | null>((max, d) => (d && (!max || d > max) ? d : max), null);
 
-export function buildVerticalized(input: { subjects: VSubject[]; topics: VTopic[]; sessions: VSession[]; tasks: VTask[]; stats: VStat[]; activeVersionId: string | null }) {
+export function buildVerticalized(input: { subjects: VSubject[]; topics: VTopic[]; sessions: VSession[]; tasks: VTask[]; stats: VStat[]; activeVersionId: string | null; goal?: ScoreGoal }) {
+  const goal = input.goal ?? DEFAULT_GOAL;
   const statBySession = new Map(input.stats.map((s) => [s.session_id, s]));
   const tasksBySession = new Map<string, VTask[]>();
   for (const t of input.tasks) if (t.session_id) tasksBySession.set(t.session_id, [...(tasksBySession.get(t.session_id) ?? []), t]);
@@ -54,7 +55,7 @@ export function buildVerticalized(input: { subjects: VSubject[]; topics: VTopic[
       return {
         id: t.id, subjectId: subject.id, subjectName: subject.name, text: t.text, status, sessionsDone, sessionsTotal: active.length, attempts, correct, acc, total, pending, score,
         lastSeen: latest([...stats.map((s) => s.last_at), ...tasks.map((x) => x.done_at)]),
-        weak: attempts >= WEAK_MIN_ATTEMPTS && acc! < WEAK,
+        weak: attempts >= WEAK_MIN_ATTEMPTS && acc! < goal.min,
         noQuestions: status === 'estudado' && attempts === 0,
         taskId: open[0]?.id ?? done[0]?.id ?? null,
       };

@@ -1,5 +1,6 @@
 // Edital verticalizado: junta tópicos, sessões, tarefas e questões do concurso (a conta fica em shared/domain/verticalized.ts).
 import { useQuery } from '@tanstack/react-query';
+import { scoreGoal } from '../../../shared/domain/adaptive.ts';
 import { buildVerticalized, type VSession, type VStat, type VTask, type VTopic } from '../../../shared/domain/verticalized.ts';
 import type { ActivePlan } from './plans.ts';
 import { supabase } from './supabase.ts';
@@ -17,7 +18,7 @@ async function readAll<T>(page: (from: number, to: number) => PromiseLike<{ data
 }
 
 export const useVerticalized = (active: ActivePlan | null | undefined) => useQuery({
-  queryKey: ['verticalized', active?.plan.id, active?.plan.active_version_id],
+  queryKey: ['verticalized', active?.plan.id, active?.plan.active_version_id, active?.notice.cutoff_pct],
   enabled: !!active,
   queryFn: async () => {
     const { plan, notice, subjects } = active!;
@@ -29,6 +30,6 @@ export const useVerticalized = (active: ActivePlan | null | undefined) => useQue
       readAll<VTask>((a, b) => supabase.from('tasks').select('id, session_id, date, done_at, superseded_in_version, goal_questions').eq('plan_id', plan.id).not('session_id', 'is', null).order('id').range(a, b)),
       readAll<VStat>((a, b) => supabase.rpc('session_attempt_stats', { p_notice: notice.id }).range(a, b)),
     ]);
-    return buildVerticalized({ subjects, topics, sessions, tasks, stats, activeVersionId: plan.active_version_id });
+    return buildVerticalized({ subjects, topics, sessions, tasks, stats, activeVersionId: plan.active_version_id, goal: scoreGoal(notice.cutoff_pct) });
   },
 });

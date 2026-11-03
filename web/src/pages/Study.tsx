@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Check, FileText, ListChecks, Maximize2, Minimize2, Pause, Play, Scale, Video } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { evaluate, latestAnswers, questionScore } from '../../../shared/domain/adaptive.ts';
+import { evaluate, latestAnswers, questionScore, scoreGoal } from '../../../shared/domain/adaptive.ts';
 import { REVIEW_PREFIX } from '../../../shared/ai/plan-build.ts';
 import { videoQuery } from '../../../shared/domain/videos.ts';
 import { GuidePanel } from '../components/GuidePanel.tsx';
@@ -73,7 +73,7 @@ function StudyView({ d }: { d: StudyData }) {
   const color = d.subjectIndex >= 0 ? subjectColor(d.subjectIndex) : 'var(--magenta)';
   const mine = latestAnswers(d.attempts.filter((a) => a.task_id === d.task.id));
   const right = mine.filter((a) => a.correct).length;
-  const verdict = evaluate(mine.length ? right / mine.length : null);
+  const verdict = evaluate(mine.length ? right / mine.length : null, scoreGoal(d.cutoffPct));
   const score = questionScore(right, mine.length, d.task.goal_questions);
   // A matéria segue a mesma conta do Edital: questões das sessões, com as pendentes.
   const subjectAnswers = latestAnswers(d.attempts.filter((a) => a.session_id));

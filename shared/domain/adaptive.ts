@@ -31,14 +31,26 @@ export function analyze(records: QuestionRecord[], subjects: { name: string; cor
   return { rows, weakTopics };
 }
 
-// Avaliação de uma sessão: abaixo de 75% o tema entra na fila de reforço.
-export const WEAK = 0.75, GOOD = 0.85;
+// Mínimo e meta de acerto do concurso: o mínimo é a última nota de corte do cargo (% da prova objetiva) e a meta fica
+// 10 pontos acima, até 95%. Sem nota de corte, mínimo de 80% e meta de 90%. Abaixo do mínimo, o tema entra no reforço.
+export interface ScoreGoal { min: number; target: number; fromCutoff: boolean }
+export const DEFAULT_GOAL: ScoreGoal = { min: 0.8, target: 0.9, fromCutoff: false };
+export function scoreGoal(cutoffPct: number | null | undefined): ScoreGoal {
+  const cut = Number(cutoffPct);
+  if (!cutoffPct || !Number.isFinite(cut) || cut <= 0 || cut > 100) return DEFAULT_GOAL;
+  const min = cut / 100;
+  return { min, target: Math.max(min, Math.min(0.95, min + 0.1)), fromCutoff: true };
+}
+export const goalLabel = (g: ScoreGoal) => `${g.fromCutoff ? 'nota de corte' : 'mínimo'} ${Math.round(g.min * 100)}% · meta ${Math.round(g.target * 100)}%`;
+// Cor do acerto: meta (verde), mínimo (ciano), abaixo (laranja).
+export const goalTone = (acc: number, g: ScoreGoal) => (acc >= g.target ? 'lime' : acc >= g.min ? 'cyan' : 'orange');
+
 export type Verdict = { text: string; level: '' | 'ok' | 'warning' | 'bad' };
-export function evaluate(acc: number | null): Verdict {
+export function evaluate(acc: number | null, g: ScoreGoal = DEFAULT_GOAL): Verdict {
   if (acc == null) return { text: 'Sem questões registradas', level: '' };
-  if (acc >= GOOD) return { text: 'Ótimo: tema dominado', level: 'ok' };
-  if (acc >= WEAK) return { text: 'Bom: siga em frente', level: 'ok' };
-  return acc >= 0.6 ? { text: 'Atenção: entrou no reforço', level: 'warning' } : { text: 'Reforçar: entrou no reforço', level: 'bad' };
+  if (acc >= g.target) return { text: 'Ótimo: na meta', level: 'ok' };
+  if (acc >= g.min) return { text: `Bom: acima ${g.fromCutoff ? 'da nota de corte' : 'do mínimo'}, falta chegar à meta`, level: 'ok' };
+  return acc >= g.min - 0.15 ? { text: 'Atenção: abaixo do mínimo, entrou no reforço', level: 'warning' } : { text: 'Reforçar: entrou no reforço', level: 'bad' };
 }
 
 // Nota do tema: as questões ainda não respondidas ficam pendentes e contam na conta, para o tema não parecer completo.
@@ -60,13 +72,13 @@ export function latestAnswers<T extends { qid: string; created_at: string }>(att
 // Acerto baixo → questões médias; acerto alto → questões mais difíceis (escala 1–5 do QConcursos).
 export const difficultyFor = (acc: number): string[] => (acc < 0.6 ? ['2', '3'] : acc < 0.8 ? ['3', '4'] : ['4', '5']);
 
-// Revisão espaçada: tema fraco volta em 1, 3 e 7 dias; cada dia de revisão com ≥75% avança uma etapa,
+// Revisão espaçada: tema fraco volta em 1, 3 e 7 dias; cada dia de revisão no mínimo do concurso avança uma etapa,
 // abaixo disso recomeça. Depois da 3ª revisão boa o tema sai da fila. Tudo é derivado dos registros.
 export const REVIEW_DAYS = [1, 3, 7];
 export interface ThemedRecord extends QuestionRecord { theme: string }
 export interface ReviewItem { theme: string; stage: number; last: { d: number; c: number; t: number }; due: number; sample: ThemedRecord }
 
-export function reviewQueue(records: ThemedRecord[]): ReviewItem[] {
+export function reviewQueue(records: ThemedRecord[], g: ScoreGoal = DEFAULT_GOAL): ReviewItem[] {
   const groups = new Map<string, ThemedRecord[]>();
   for (const r of records) if (r.theme) { if (!groups.has(r.theme)) groups.set(r.theme, []); groups.get(r.theme)!.push(r); }
   const out: ReviewItem[] = [];
@@ -78,7 +90,7 @@ export function reviewQueue(records: ThemedRecord[]): ReviewItem[] {
     }
     const sessions = [...days.values()].sort((x, y) => x.d - y.d);
     let stage = 0, weak = false;
-    for (const s of sessions) { if (s.c / s.t < WEAK) { weak = true; stage = 0; } else if (weak) stage++; }
+    for (const s of sessions) { if (s.c / s.t < g.min) { weak = true; stage = 0; } else if (weak) stage++; }
     if (!weak || stage >= REVIEW_DAYS.length) continue;
     const last = sessions[sessions.length - 1]!;
     out.push({ theme, stage, last, due: last.d + REVIEW_DAYS[stage]! * DAY_MS, sample: list[list.length - 1]! });

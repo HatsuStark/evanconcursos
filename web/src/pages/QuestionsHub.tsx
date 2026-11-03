@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BarChart3, Layers, ListChecks, Plus, RotateCcw, Search, Trash2, Trophy, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { goalLabel, goalTone, scoreGoal } from '../../../shared/domain/adaptive.ts';
 import { ERROR_REASONS } from '../../../shared/domain/replan.ts';
 import { MEDIUM_OR_HARD } from '../../../shared/qbank/map.ts';
 import { resolveMateria } from '../../../shared/qbank/materias.ts';
@@ -28,9 +29,12 @@ type TabKey = (typeof TABS)[number]['key'];
 export function QuestionsHubPage() {
   const [params, setParams] = useSearchParams();
   const tab = (TABS.find((t) => t.key === params.get('aba'))?.key ?? 'resolver') as TabKey;
-  const due = useDueCounts();
+  const active = useActivePlan();
+  const planId = active.data?.plan.id;
+  const due = useDueCounts(planId);
+  const contest = active.data ? active.data.notice.role_name || active.data.notice.organization : '';
   return (
-    <Shell title="Questões" subtitle="Treino livre, revisão dos erros, flashcards e simulados — com desempenho separado do cronograma.">
+    <Shell title="Questões" subtitle={contest ? `Concurso ativo: ${contest}. Treino livre, erros, flashcards, simulados e desempenho deste concurso.` : 'Treino livre, revisão dos erros, flashcards e simulados.'}>
       <div className="tabs" role="tablist">
         {TABS.map((t) => (
           <button key={t.key} role="tab" aria-selected={tab === t.key} className={'tab' + (tab === t.key ? ' on' : '')} onClick={() => setParams({ aba: t.key })}>
@@ -40,8 +44,9 @@ export function QuestionsHubPage() {
           </button>
         ))}
       </div>
-      {tab === 'resolver' ? <FreePractice /> : tab === 'revisar' ? <ReviewTab count={due.data?.errors ?? 0} />
-        : tab === 'flashcards' ? <FlashcardsTab /> : tab === 'simulados' ? <SimuladosTab /> : <PerformanceTab />}
+      {!active.isLoading && !planId && <div className="glass card muted">Sem concurso ativo: monte um cronograma na aba Concursos. Questões livres continuam disponíveis, mas não entram no desempenho de nenhum concurso.</div>}
+      {tab === 'resolver' ? <FreePractice noticeId={active.data?.notice.id} /> : tab === 'revisar' ? <ReviewTab count={due.data?.errors ?? 0} />
+        : tab === 'flashcards' ? <FlashcardsTab planId={planId} /> : tab === 'simulados' ? <SimuladosTab /> : <PerformanceTab planId={planId} />}
     </Shell>
   );
 }
@@ -58,9 +63,9 @@ function MateriaField({ value, onChange, placeholder }: { value: string; onChang
   return <SearchSelect label="Matéria" value={value} options={options} loading={loading} placeholder={placeholder} onChange={onChange} onPick={onChange} onBlur={() => { if (value.trim()) onChange(resolveMateria(value, options)); }} />;
 }
 
-function FreePractice() {
+function FreePractice({ noticeId }: { noticeId: string | undefined }) {
   const geral = useQuery({ queryKey: ['filtros-geral'], queryFn: () => filterLists.geral(), staleTime: Infinity });
-  const mapped = useMappedMaterias();
+  const mapped = useMappedMaterias(noticeId);
   const [f, setF] = useState<FreeFilters>({ materia: '', onlyNew: true, dificuldade: MEDIUM_OR_HARD });
   const [qid, setQid] = useState('');
   const [active, setActive] = useState<Source | null>(null);
@@ -115,7 +120,7 @@ function FreePractice() {
         <button className="btn" style={{ justifySelf: 'start' }} disabled={!f.materia.trim() && !qid.trim()} onClick={search}><Search size={16} /> Buscar questões</button>
       </div>
       {active && <QuestionsPanel key={JSON.stringify(active)} source={active} paged={active.kind === 'free'} />}
-      <p className="faint small" style={{ margin: 0 }}>Questões livres ficam num histórico próprio (aba Desempenho → Livres) e não alteram o desempenho do cronograma. As erradas entram no caderno de erros.</p>
+      <p className="faint small" style={{ margin: 0 }}>Questões livres entram no concurso ativo, num histórico próprio (aba Desempenho → Livres), e não alteram o desempenho do cronograma. As erradas entram no caderno de erros deste concurso e voltam na revisão semanal.</p>
     </div>
   );
 }
@@ -126,16 +131,16 @@ function ReviewTab({ count }: { count: number }) {
   return (
     <div className="glass card" style={{ display: 'grid', gap: 12 }}>
       <h3 style={{ margin: 0 }}>Caderno de erros</h3>
-      <p className="muted" style={{ margin: 0 }}>Toda questão que você erra volta em 1 dia; acertando, volta em 7 e depois em 30 dias, e sai do caderno. Revisar não gasta créditos: as questões já estão guardadas.</p>
+      <p className="muted" style={{ margin: 0 }}>Erros deste concurso. Eles voltam na revisão semanal do cronograma; aqui você pode revisar antes. Errou de novo, volta na próxima revisão; acertando, volta 7 e depois 30 dias depois, e sai do caderno. Revisar não gasta créditos.</p>
       <button className="btn" style={{ justifySelf: 'start' }} disabled={!count} onClick={() => setStarted(true)}><RotateCcw size={16} /> {count ? `Revisar ${count} questão(ões) de hoje` : 'Nada para revisar hoje'}</button>
     </div>
   );
 }
 
-function FlashcardsTab() {
+function FlashcardsTab({ planId }: { planId: string | undefined }) {
   const qc = useQueryClient();
   const [all, setAll] = useState(false);
-  const cards = useFlashcards(all);
+  const cards = useFlashcards(all, planId);
   const [flip, setFlip] = useState(false);
   const [i, setI] = useState(0);
   const list = cards.data ?? [], c = list[i];
@@ -173,7 +178,7 @@ function FlashcardsTab() {
 
 function SimuladosTab() {
   const active = useActivePlan();
-  const sims = useSimulados();
+  const sims = useSimulados(active.data?.plan.id);
   return (
     <div className="grid" style={{ gap: 16 }}>
       {active.data && <SimuladoStarter planId={active.data.plan.id} />}
@@ -231,8 +236,9 @@ function CustomSimulado() {
 const CTX: { key: Ctx | 'all'; label: string }[] = [
   { key: 'plan', label: 'Cronograma' }, { key: 'free', label: 'Livres' }, { key: 'simulado', label: 'Simulados' }, { key: 'review', label: 'Revisão de erros' }, { key: 'all', label: 'Tudo' },
 ];
-export function PerformanceTab() {
-  const stats = useAttemptStats();
+export function PerformanceTab({ planId }: { planId: string | undefined }) {
+  const stats = useAttemptStats(planId);
+  const goal = scoreGoal(useActivePlan().data?.notice.cutoff_pct);
   const [ctx, setCtx] = useState<Ctx | 'all'>('plan');
   const rows = useMemo(() => (stats.data ?? []).filter((a) => ctx === 'all' || a.context === ctx), [stats.data, ctx]);
   const right = rows.filter((a) => a.correct).length, pct = rows.length ? Math.round((right / rows.length) * 100) : 0;
@@ -245,14 +251,14 @@ export function PerformanceTab() {
       <div className="segmented" style={{ justifySelf: 'start' }}>{CTX.map((c) => <button key={c.key} className={ctx === c.key ? 'on' : ''} onClick={() => setCtx(c.key)}>{c.label}</button>)}</div>
       <div className="stats glass card">
         <div className="stat"><strong style={{ color: 'var(--violet)' }}>{rows.length}</strong><span>questões</span></div>
-        <div className="stat"><strong style={{ color: pct >= 75 ? 'var(--lime)' : 'var(--orange)' }}>{rows.length ? pct + '%' : '—'}</strong><span>de acerto</span></div>
+        <div className="stat"><strong style={{ color: rows.length ? `var(--${goalTone(pct / 100, goal)})` : 'var(--orange)' }}>{rows.length ? pct + '%' : '—'}</strong><span>de acerto</span></div>
         <div className="stat"><strong style={{ color: 'var(--cyan)' }}>{by.size}</strong><span>matérias</span></div>
       </div>
-      <p className="faint small" style={{ margin: 0 }}><ListChecks size={12} style={{ verticalAlign: -2 }} /> {week} questões nos últimos 7 dias.</p>
+      <p className="faint small" style={{ margin: 0 }}><ListChecks size={12} style={{ verticalAlign: -2 }} /> {week} questões nos últimos 7 dias · {goalLabel(goal)}.</p>
       {!rows.length ? <div className="glass card muted">Sem questões neste contexto ainda.</div> : (
         <table className="sum-table glass"><thead><tr><th>Matéria</th><th>Acertos nas respondidas</th><th /></tr></thead><tbody>
           {[...by].sort((a, b) => a[1].c / a[1].t - b[1].c / b[1].t).map(([m, e]) => (
-            <tr key={m}><td>{m}</td><td>{e.c}/{e.t} · {Math.round((e.c / e.t) * 100)}%</td><td style={{ width: '35%' }}><div className="bar"><span style={{ width: `${(e.c / e.t) * 100}%`, background: e.c / e.t >= 0.75 ? 'var(--lime)' : 'var(--orange)' }} /></div></td></tr>
+            <tr key={m}><td>{m}</td><td>{e.c}/{e.t} · {Math.round((e.c / e.t) * 100)}%</td><td style={{ width: '35%' }}><div className="bar"><span style={{ width: `${(e.c / e.t) * 100}%`, background: `var(--${goalTone(e.c / e.t, goal)})` }} /></div></td></tr>
           ))}
         </tbody></table>
       )}

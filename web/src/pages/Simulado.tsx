@@ -2,11 +2,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, ChevronLeft, ChevronRight, Flag, Timer, XCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { goalTone, scoreGoal } from '../../../shared/domain/adaptive.ts';
 import { CommentsPanel } from '../components/CommentsPanel.tsx';
 import { ErrorReasonPicker } from '../components/ErrorReason.tsx';
 import { ExplanationView } from '../components/QuestionsPanel.tsx';
 import { QuestionBody } from '../components/QuestionBody.tsx';
 import { Shell } from '../components/Shell.tsx';
+import { useActivePlan } from '../lib/plans.ts';
 import { finishSimulado, getSimulado, saveSimAnswer, type SimuladoData } from '../lib/practice.ts';
 import { explainQuestion, type Explanation } from '../lib/questions.ts';
 
@@ -85,10 +87,15 @@ function SimuladoExam({ d }: { d: SimuladoData }) {
   );
 }
 
-// Resultado: nota geral e por bloco (com nota mínima do edital), por matéria e revisão com explicações.
+// Resultado: nota geral contra a meta do concurso (nota de corte do cargo ou 80%/90%), blocos com a nota mínima do
+// edital (que elimina), por matéria e revisão com explicações.
 function SimuladoResult({ d }: { d: SimuladoData }) {
   const navigate = useNavigate();
   const r = d.simulado.result!;
+  const goal = scoreGoal(useActivePlan().data?.notice.cutoff_pct), tone = goalTone(r.pct / 100, goal);
+  const goalText = r.pct / 100 >= goal.target ? `Na meta de ${Math.round(goal.target * 100)}%`
+    : r.pct / 100 >= goal.min ? `Acima ${goal.fromCutoff ? 'da nota de corte' : 'do mínimo'} de ${Math.round(goal.min * 100)}%, abaixo da meta de ${Math.round(goal.target * 100)}%`
+    : `Abaixo ${goal.fromCutoff ? 'da nota de corte' : 'do mínimo'} de ${Math.round(goal.min * 100)}%`;
   const chosenOf = new Map(d.answers.map((a) => [a.qid, a.chosen]));
   const [open, setOpen] = useState<number | null>(null);
   const [ex, setEx] = useState<Record<string, Explanation>>({});
@@ -97,8 +104,9 @@ function SimuladoResult({ d }: { d: SimuladoData }) {
     <Shell title={d.simulado.title} subtitle={`Entregue em ${new Date(d.simulado.finished_at ?? Date.now()).toLocaleString('pt-BR')} · ${clock(r.seconds)}`}
       actions={<button className="btn ghost sm" onClick={() => navigate('/questoes?aba=simulados')}>Simulados</button>}>
       <div className="hero sim-score">
-        <div className="stat"><strong style={{ fontSize: 48, color: r.passed ? 'var(--lime)' : 'var(--orange)' }}>{r.pct}%</strong><span>{r.correct} de {r.total} · {r.answered} respondidas</span></div>
-        <span className={'badge ' + (r.passed ? 'lime' : 'orange')}>{r.passed ? 'Aprovado nos mínimos do edital' : 'Abaixo do mínimo em algum bloco'}</span>
+        <div className="stat"><strong style={{ fontSize: 48, color: `var(--${tone})` }}>{r.pct}%</strong><span>{r.correct} de {r.total} · {r.answered} respondidas</span></div>
+        <span className={'badge ' + tone}>{goalText}</span>
+        <span className={'badge ' + (r.passed ? 'lime' : 'orange')}>{r.passed ? 'Passou nos mínimos dos blocos do edital' : 'Abaixo do mínimo do edital em algum bloco'}</span>
       </div>
       <div className="section-title"><h2>Por bloco</h2></div>
       <div className="grid" style={{ gap: 10 }}>
