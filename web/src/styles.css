@@ -13,6 +13,7 @@
   --muted: #8d95b3;
   --faint: #5d6587;
   --violet: #a974ff;
+  --bold: #c792ff; /* negrito do conteúdo (questões e apostilas): roxo neon, mais claro que --violet para ler no fundo escuro */
   --magenta: #e45cf0;
   --cyan: #2ad4e8;
   --orange: #ff8a4c;
@@ -375,6 +376,12 @@ a.task-title:hover { color: var(--cyan); }
 .guide-map-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
 .guide-map-grid > div { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
 .guide-map-grid ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
+/* Negrito do conteúdo em roxo neon: enunciado, texto associado e alternativas das questões; rótulos e termos da apostila.
+   Destaques com cor própria (mnemônicos, ramos do mapa, "como a banca cobra") e a letra da alternativa ficam como estão. */
+:is(.q-body, .q-texts, .q-opt-text) :is(b, strong),
+.guide :is(section > p, section li, .guide-examples p, .guide-q > p, .guide-a) > :is(b, strong) {
+  color: var(--bold); font-weight: 700; text-shadow: 0 0 10px rgba(199, 146, 255, .45);
+}
 /* Mapa mental: tema no centro, tronco e ramos coloridos com as palavras-chave. */
 .mindmap { display: grid; justify-items: center; }
 .mm-center { padding: 10px 18px; border-radius: 999px; border: 1.5px solid var(--violet); background: rgba(169, 116, 255, .12); font-weight: 700; text-align: center; max-width: 520px; }
@@ -427,6 +434,7 @@ a.task-title:hover { color: var(--cyan); }
   .warning-card { border-color: #c60; background: #fff7ed; color: #111; }
   .mm-branch li { background: #eee; }
   .mm-branch b, .guide-mnemo strong { color: #234; }
+  .guide :is(b, strong) { color: #4b1d8f !important; text-shadow: none !important; }
 }
 
 /* ---------- E4.5: materiais e leitor de PDF ---------- */
