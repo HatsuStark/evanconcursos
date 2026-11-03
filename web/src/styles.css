@@ -131,6 +131,20 @@ a { color: var(--cyan); }
 }
 .nav-spacer { flex: 1; }
 .main { padding: 34px 36px 60px; min-width: 0; }
+.contest-switch { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; margin-bottom: 14px; padding: 4px 6px 4px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 13px; }
+.contest-switch svg { color: var(--lime); flex-shrink: 0; }
+.contest-switch > span:not(.spinner) { padding-right: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contest-switch .select { width: auto; max-width: min(420px, 70vw); padding: 4px 28px 4px 4px; border: 0; background-color: transparent; font-size: 13px; color: var(--text); text-overflow: ellipsis; }
+.evo { display: grid; gap: 10px; }
+.evo-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.evo-plot { position: relative; }
+.evo-plot svg { display: block; width: 100%; height: auto; overflow: visible; }
+.evo-plot circle { cursor: pointer; outline: none; }
+.evo-plot circle:focus-visible { stroke: var(--text); }
+.evo-axis { fill: var(--faint); font-size: 11px; }
+.evo-ref { fill: var(--muted); font-size: 11px; }
+.evo-tip { position: absolute; transform: translate(-50%, calc(-100% - 12px)); pointer-events: none; white-space: nowrap; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg-2); font-size: 13px; z-index: 2; }
+.evo-table summary { cursor: pointer; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 26px; }
 .page-head h1 { margin: 0; font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
 .page-head p { margin: 4px 0 0; color: var(--muted); }
@@ -356,6 +370,19 @@ a.task-title:hover { color: var(--cyan); }
 .guide .lead { margin: 0; color: var(--muted); font-size: 17px; }
 .guide section p { margin: 0 0 10px; }
 .guide ul { margin: 0; padding-left: 22px; display: grid; gap: 6px; }
+.guide-goals { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: 10px; background: rgba(42, 212, 232, .05); }
+.guide-goals ul { margin: 6px 0 0; padding-left: 20px; }
+.guide-map-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.guide-map-grid > div { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.guide-map-grid ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
+.guide-table { overflow-x: auto; }
+.guide-table th[scope="row"] { text-align: left; font-weight: 600; }
+.guide-memo { padding: 12px 14px; border-left: 3px solid var(--cyan); background: rgba(42, 212, 232, .06); border-radius: 8px; }
+.guide-options { display: grid; gap: 6px; }
+.guide-option { text-align: left; padding: 8px 12px; border: 1px solid var(--line-2); border-radius: 10px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.guide-option:disabled { cursor: default; }
+.guide-option.right { border-color: var(--lime); background: rgba(181, 229, 80, .1); }
+.guide-option.wrong { border-color: var(--orange); background: rgba(255, 138, 76, .1); }
 .guide-examples { padding: 12px 14px; border-left: 3px solid var(--violet); background: rgba(169, 116, 255, .07); border-radius: 8px; }
 .guide-examples p:last-child { margin: 0; }
 .guide-board { margin-top: 12px; padding: 12px 14px; border-left: 3px solid var(--orange); background: rgba(255, 138, 76, .08); border-radius: 8px; }

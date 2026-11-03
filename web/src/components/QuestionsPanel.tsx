@@ -74,7 +74,7 @@ export function QuestionsPanel({ source, goal = 0, answered = 0, paged = false }
       // Cada questão nova custa créditos: a busca livre traz só o que a página vai mostrar.
       // Na revisão semanal, os erros já mostrados não voltam no mesmo lote.
       const r = source.kind === 'task' ? await nextQuestions(source.taskId, 5, queueRef.current.map((q) => q.qid))
-        : source.kind === 'free' ? await searchFree(source.filters, Math.max(sizeRef.current, 5))
+        : source.kind === 'free' ? await searchFree(source.filters, Math.max(sizeRef.current, 5), queueRef.current.map((q) => q.qid))
         : source.kind === 'id' ? await questionById(source.qid)
         : { ...(await reviewDue(20)), reason: 'revisao' as string | null };
       setQueue((q) => [...q, ...r.questions.filter((n) => !q.some((o) => o.qid === n.qid))]);
@@ -187,6 +187,7 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
       patch({ result: r, tab: 'explicacao' });
       void qc.invalidateQueries({ queryKey: ['study'] });
       void qc.invalidateQueries({ queryKey: ['due-counts'] });
+      void qc.invalidateQueries({ queryKey: ['error-due-dates'] });
     } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
   }
   async function explain() {

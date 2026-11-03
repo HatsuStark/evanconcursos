@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mixedPlaces, placeFilter, placesIn } from './places.ts';
+import { mixedPlaces, organSearch, placeFilter, placesIn } from './places.ts';
 
 const ufs = (s: string) => [...placesIn(s).ufs].sort();
 const cities = (s: string) => [...placesIn(s).cities];
@@ -49,5 +49,14 @@ describe('placeFilter', () => {
     expect(mixedPlaces('Conhecimentos Específicos dos Municípios')).toBe(true);
     expect(mixedPlaces('Legislação Estadual, Distrital e Municipal')).toBe(true);
     expect(placeFilter('Prefeitura Municipal de Suzano')('Conhecimentos Específicos dos Estados')).toBe(false);
+  });
+});
+
+describe('organSearch', () => {
+  it('nomeia o órgão como a API', () => {
+    expect(organSearch('Tribunal de Justiça do Estado de São Paulo')).toEqual({ queries: ['TJ SP', 'Tribunal de Justiça de São Paulo'], marks: ['tj sp', 'tjsp'] });
+    expect(organSearch('Tribunal Regional do Trabalho da 2ª Região').queries[0]).toBe('TRT 2');
+    expect(organSearch('Ministério Público do Estado de São Paulo').queries[0]).toBe('MPE SP');
+    expect(organSearch('Prefeitura Municipal de Suzano')).toEqual({ queries: [], marks: [] });
   });
 });

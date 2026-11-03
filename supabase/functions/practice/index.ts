@@ -11,7 +11,7 @@ import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import { interleave, mapSubject, MEDIUM_OR_HARD, pickBoard, QMAP_PROMPT_VERSION, SESSION_DIFFICULTIES } from '../../../shared/qbank/map.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-import { activePlan, cacheQuestions, mapDeps, publicQuestion, questFailure, recordAnswer, takeNewest, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
+import { activePlan, cacheQuestions, fromCache, mapDeps, publicQuestion, questFailure, recordAnswer, takeNewest, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
 
 const str = (v: unknown, n = 160) => String(v ?? '').trim().slice(0, n);
 const hash = (s: string) => { let h = 0; for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) >>> 0; return h.toString(36); };
@@ -65,11 +65,20 @@ Deno.serve(async (req) => {
       if (!params.materia) return json(400, { error: 'Escolha ao menos a matéria.' });
       const count = Math.max(1, Math.min(20, Number(body.count) || 10));
       const seen = f.onlyNew === false ? new Set<string>() : await seenQids();
-      let items: QuestQuestion[];
-      if (f.dificuldade === MEDIUM_OR_HARD) {
+      // As que já estão na tela voltam fora; depois, as já compradas que servem ao filtro, sem créditos.
+      for (const id of Array.isArray(body.exclude) ? (body.exclude as unknown[]).map(String).slice(0, 500) : []) seen.add(id);
+      const cached = await fromCache(admin, {
+        materia: params.materia, assunto: params.assunto, banca: params.banca, tipo: params.tipo, ano: params.ano, orgao: params.orgao, cargo: params.cargo,
+        dificuldades: f.dificuldade === MEDIUM_OR_HARD ? SESSION_DIFFICULTIES : params.dificuldade ? [params.dificuldade] : undefined,
+      }, count, (id) => !seen.has(id));
+      for (const c of cached) seen.add(c.qid);
+      const toBuy = count - cached.length;
+      let items: QuestQuestion[] = [];
+      if (toBuy <= 0) items = [];
+      else if (f.dificuldade === MEDIUM_OR_HARD) {
         // A API só aceita uma dificuldade por busca: divide o pedido entre elas, e a que faltar passa para as seguintes.
         const lists: QuestQuestion[][] = [];
-        let left = count;
+        let left = toBuy;
         for (const [i, dificuldade] of SESSION_DIFFICULTIES.entries()) {
           const got = await fetchFresh('free', { ...params, dificuldade }, Math.ceil(left / (SESSION_DIFFICULTIES.length - i)), seen);
           lists.push(got);
@@ -77,9 +86,10 @@ Deno.serve(async (req) => {
           if (left <= 0) break;
         }
         items = interleave(lists);
-      } else items = await fetchFresh('free', params, count, seen);
+      } else items = await fetchFresh('free', params, toBuy, seen);
       await log('qbank_free', 'ok');
-      return json(200, { questions: await withMnemo(admin, items.map(publicQuestion)), reason: items.length ? null : 'esgotado' });
+      const questions = [...cached, ...items.map(publicQuestion)];
+      return json(200, { questions: await withMnemo(admin, questions), reason: questions.length ? null : 'esgotado' });
     }
 
     if (body.action === 'by_id') {

@@ -2,11 +2,14 @@
 // (alguns navegadores interrompem falas longas). Cada seção corresponde a um bloco da tela (key).
 export interface SpeechSection { key: string; title: string; chunks: string[] }
 
+// Campos da versão guide-v4 (objetivos, quadros, memorizar, questoes) são opcionais: apostilas antigas não os têm.
 interface SpeakableGuide {
-  titulo: string; introducao: string;
+  titulo: string; introducao: string; objetivos?: string[];
   secoes: { titulo: string; texto: string; exemplos: string[]; como_banca_cobra?: string }[];
+  quadros?: { titulo: string; colunas: string[]; linhas: string[][] }[];
   legislacao: { ref: string; comentario: string }[];
-  pontos_banca: string[]; pegadinhas: string[]; resumo: string[];
+  memorizar?: string[]; pontos_banca: string[]; pegadinhas: string[]; resumo: string[];
+  questoes?: { enunciado: string; alternativas: string[]; gabarito: string; comentario: string }[];
   perguntas: { pergunta: string; resposta: string }[];
 }
 
@@ -76,12 +79,15 @@ export function guideSpeech(g: SpeakableGuide): SpeechSection[] {
   const section = (key: string, title: string, texts: string[]): SpeechSection => ({ key, title, chunks: [heading(title), ...texts].flatMap(speechChunks) });
   const list = (key: string, title: string, items: string[]) => (items.length ? [section(key, title, items)] : []);
   return [
-    section('intro', g.titulo, [g.introducao]),
+    section('intro', g.titulo, [g.introducao, ...(g.objetivos?.length ? [`Ao final, você vai saber: ${g.objetivos.join('; ')}.`] : [])]),
     ...g.secoes.map((s, i) => section(`s${i}`, s.titulo, [s.texto, ...s.exemplos.map((e) => `Exemplo: ${e}`), ...(s.como_banca_cobra ? [`Como a banca cobra: ${s.como_banca_cobra}`] : [])])),
+    ...(g.quadros ?? []).map((q, i) => section(`q${i}`, q.titulo, q.linhas.map((l) => l.map((c, j) => (j ? `${q.colunas[j] ?? ''}: ${c}` : c)).join('; ') + '.'))),
     ...list('lei', 'Lei seca comentada', g.legislacao.map((l) => `${l.ref}: ${l.comentario}`)),
+    ...list('memorizar', 'Para memorizar', g.memorizar ?? []),
     ...list('banca', 'O que mais cai', g.pontos_banca),
     ...list('pegadinhas', 'Pegadinhas', g.pegadinhas),
     ...list('resumo', 'Resumo', g.resumo),
+    ...list('questoes', 'Questões de fixação', (g.questoes ?? []).map((q, i) => `Questão ${i + 1}: ${q.enunciado} ${q.alternativas.map((a, j) => `${String.fromCharCode(65 + j)}: ${a}`).join('. ')} Gabarito: ${q.gabarito === 'C' && !q.alternativas.length ? 'certo' : q.gabarito === 'E' && !q.alternativas.length ? 'errado' : q.gabarito}. ${q.comentario}`)),
     ...list('perguntas', 'Perguntas de revisão', g.perguntas.map((q, i) => `Pergunta ${i + 1}: ${q.pergunta} Resposta: ${q.resposta}`)),
   ];
 }

@@ -45,6 +45,15 @@ export const goalLabel = (g: ScoreGoal) => `${g.fromCutoff ? 'nota de corte' : '
 // Cor do acerto: meta (verde), mínimo (ciano), abaixo (laranja).
 export const goalTone = (acc: number, g: ScoreGoal) => (acc >= g.target ? 'lime' : acc >= g.min ? 'cyan' : 'orange');
 
+// Nota mínima de um bloco da prova a partir da regra do edital ("mínimo de 50% de acertos" → 50); 0 sem regra.
+export const blockMinPct = (rule: string) => { const m = /(\d{1,3})\s*%/.exec(rule ?? ''); return m ? Math.min(100, Number(m[1])) : /metade/i.test(rule ?? '') ? 50 : 0; };
+// Nota mínima da matéria: a do bloco com o mesmo nome (ou do único bloco da prova).
+export function subjectMinPct(block: string, blocks: { name: string; rule: string }[]) {
+  const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+  const b = blocks.find((x) => norm(x.name) === norm(block)) ?? (blocks.length === 1 ? blocks[0] : undefined);
+  return b ? blockMinPct(b.rule) : 0;
+}
+
 export type Verdict = { text: string; level: '' | 'ok' | 'warning' | 'bad' };
 export function evaluate(acc: number | null, g: ScoreGoal = DEFAULT_GOAL): Verdict {
   if (acc == null) return { text: 'Sem questões registradas', level: '' };

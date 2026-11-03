@@ -4,22 +4,38 @@ import { z } from 'zod';
 import { findLawRefs, inRanges, type LawRef } from '../legal/refs.ts';
 import { lawByKey } from '../legal/registry.ts';
 
-export const GUIDE_PROMPT_VERSION = 'guide-v3';
+export const GUIDE_PROMPT_VERSION = 'guide-v4';
 export type GuideDepth = 'completa' | 'revisao';
 
+// Apostila como um professor especialista em concursos monta: objetivos, mapa do tema, seções com prioridade, quadros
+// comparativos, o que memorizar, lei seca comentada, pegadinhas, resumo e questões de fixação no formato da banca.
 export const Guide = z.object({
   titulo: z.string(),
   introducao: z.string().describe('Contexto e por que o tema importa para a prova, em até 4 frases.'),
+  objetivos: z.array(z.string()).describe('O que o aluno saberá fazer ao final, em 3 a 5 itens curtos ("Diferenciar…", "Identificar…").'),
+  esquema: z.array(z.object({ topico: z.string(), itens: z.array(z.string()) })).describe('Mapa do tema: 3 a 6 tópicos, cada um com 2 a 5 itens de poucas palavras.'),
   secoes: z.array(z.object({
     titulo: z.string(),
+    prioridade: z.enum(['alta', 'media', 'baixa']).describe('Quanto o assunto da seção cai em prova deste cargo e banca.'),
     texto: z.string().describe('Explicação didática em parágrafos separados por linha em branco.'),
     exemplos: z.array(z.string()).describe('Exemplos práticos curtos.'),
     como_banca_cobra: z.string().describe('Como a banca cobra o assunto desta seção, pelo que se vê nas questões fornecidas, em até 2 frases. Vazio se nenhuma questão fornecida tratar dele.'),
   })),
+  quadros: z.array(z.object({
+    titulo: z.string(), colunas: z.array(z.string()).describe('2 a 4 colunas; a primeira é o critério de comparação.'),
+    linhas: z.array(z.array(z.string())).describe('Cada linha com uma célula por coluna, em poucas palavras.'),
+  })).describe('Quadros comparativos entre institutos, espécies ou prazos parecidos, que a banca costuma confundir.'),
   legislacao: z.array(z.object({ ref: z.string().describe('Exatamente como no colchete do trecho fornecido, ex.: "CP, art. 312".'), comentario: z.string() })),
+  memorizar: z.array(z.string()).describe('Prazos, números, quóruns e listas que precisam ser decorados, tirados dos trechos de lei ou do edital.'),
   pontos_banca: z.array(z.string()).describe('O que a banca mais cobra neste tema.'),
   pegadinhas: z.array(z.string()),
   resumo: z.array(z.string()).describe('Revisão em tópicos curtos.'),
+  questoes: z.array(z.object({
+    enunciado: z.string(),
+    alternativas: z.array(z.string()).describe('Alternativas sem a letra; vazio em questão de certo ou errado.'),
+    gabarito: z.string().describe('Letra da alternativa correta (A, B…) ou C/E em certo ou errado.'),
+    comentario: z.string().describe('Por que o gabarito está certo e o erro das outras, em até 3 frases.'),
+  })).describe('Questões de fixação inéditas, no formato e no estilo da banca.'),
   perguntas: z.array(z.object({ pergunta: z.string(), resposta: z.string() })),
   depende_legislacao: z.boolean().describe('true se o conteúdo depende de lei que pode ser alterada.'),
 });
@@ -50,9 +66,10 @@ export function applyBoardEvidence(g: Guide, banca: string, questions: number) {
   return { ...g, secoes, perfil_banca: questions ? { banca, questoes: questions } : null };
 }
 
-export function guidePrompt(p: { depth: GuideDepth; banca: string; cargo: string; subject: string; title: string; topics: string[]; law: GuideSource[]; boardQuestions?: BoardQuestion[] }) {
-  const full = p.depth === 'completa', board = p.boardQuestions ?? [];
-  return `Você é professor de cursinho para concursos públicos brasileiros. Escreva uma apostila ${full ? 'completa, para quem está começando' : 'de revisão curta, para quem já estudou o tema'}.
+// format: formato predominante da banca na matéria ('certo e errado' ou múltipla escolha), para as questões de fixação.
+export function guidePrompt(p: { depth: GuideDepth; banca: string; cargo: string; subject: string; title: string; topics: string[]; law: GuideSource[]; boardQuestions?: BoardQuestion[]; format?: string }) {
+  const full = p.depth === 'completa', board = p.boardQuestions ?? [], ce = /certo/i.test(p.format ?? '');
+  return `Você é professor especialista em concursos públicos brasileiros, autor de material de cursinho que aprova. Escreva uma apostila ${full ? 'completa, para quem está começando o tema (cerca de 20 minutos de leitura antes de resolver questões)' : 'de revisão curta, para quem já estudou o tema (cerca de 8 minutos de leitura)'}.
 Concurso: ${p.cargo || 'não informado'}${p.banca ? `, banca ${p.banca}` : ''}.
 Matéria: ${p.subject}
 Tema da sessão: ${p.title}
@@ -64,7 +81,12 @@ Regras obrigatórias:
 - Cite artigos SOMENTE dos trechos fornecidos, no formato do colchete (ex.: "CP, art. 312"). Se não houver trecho, não cite números de artigos.
 - Não cite jurisprudência, súmulas, autores ou posições doutrinárias. Não invente leis, prazos ou números.
 - Siga o texto da lei fornecido; ele é a versão vigente.
-- ${full ? 'secoes: 3 a 6 seções, explicação didática com exemplos; perguntas: 5 a 8.' : 'secoes: até 3 seções curtas; perguntas: 5; foco em resumo e pontos de prova.'}
+- Ordem didática: do conceito e da regra geral para as exceções e os detalhes; cada seção explica, dá exemplo prático e destaca o que a prova costuma perguntar. Priorize o que mais cai: seção de prioridade alta ganha mais texto, a de baixa só o essencial.
+- ${full ? 'secoes: 3 a 6 seções; quadros: 1 ou 2; questoes: 4 ou 5; perguntas: 4 a 6.' : 'secoes: até 3 seções curtas; quadros: 0 ou 1; questoes: 3; perguntas: 4; foco em resumo, memorizar e pontos de prova.'}
+- objetivos e esquema: curtos; o esquema é o mapa mental do tema, na ordem das seções.
+- quadros: compare só o que a banca costuma confundir (espécies, prazos, requisitos, diferenças entre institutos). Sem quadro se o tema não tiver o que comparar.
+- memorizar: só números, prazos, quóruns e listas que estejam nos trechos de lei ou no conteúdo do edital, nunca de memória. Vazio se não houver.
+- questoes: inéditas, ${ce ? 'no formato certo ou errado (alternativas vazias; gabarito "C" ou "E")' : 'de múltipla escolha com 5 alternativas (gabarito A a E)'}, no estilo ${board.length ? 'das questões reais fornecidas' : `da ${p.banca || 'banca'}`}, cobrando o que a apostila ensinou. Uma única resposta correta, sem ambiguidade; o comentário explica o gabarito pela apostila ou pelo artigo fornecido.
 - legislacao: comente os artigos fornecidos mais importantes para a prova (ref exatamente como no colchete).
 - pontos_banca e pegadinhas: o que costuma cair e as confusões comuns${p.banca ? ` da ${p.banca}` : ''}.
 - ${board.length ? 'secoes[].como_banca_cobra: diga como as questões fornecidas abordam o assunto da seção (letra da lei, caso prático, conceito, exceção, tipo de distrator). Só o que se observa nelas: sem percentuais, sem "sempre" ou "nunca", sem copiar enunciados. Deixe vazio na seção que nenhuma questão trata. As questões são só amostra de estilo, nunca fonte do conteúdo.' : 'secoes[].como_banca_cobra: deixe vazio em todas as seções.'}
@@ -95,7 +117,11 @@ export function unverifiedLawRefs(text: string, provided: ProvidedArticle[], sub
 export function verifyGuide(g: Guide, provided: ProvidedArticle[], subject = '') {
   const refs = new Set(provided.map((p) => sourceRef(p.lawKey, p.label).toLowerCase()));
   const legislacao = g.legislacao.filter((l) => refs.has(l.ref.trim().toLowerCase()));
-  const text = [g.introducao, ...g.secoes.flatMap((s) => [s.texto, ...s.exemplos, s.como_banca_cobra]), ...g.legislacao.map((l) => l.comentario), ...g.pontos_banca, ...g.pegadinhas, ...g.resumo, ...g.perguntas.flatMap((q) => [q.pergunta, q.resposta])].join('\n');
+  const text = [
+    g.introducao, ...(g.objetivos ?? []), ...(g.esquema ?? []).flatMap((e) => [e.topico, ...e.itens]), ...g.secoes.flatMap((s) => [s.texto, ...s.exemplos, s.como_banca_cobra]),
+    ...(g.quadros ?? []).flatMap((q) => q.linhas.flat()), ...g.legislacao.map((l) => l.comentario), ...(g.memorizar ?? []), ...g.pontos_banca, ...g.pegadinhas, ...g.resumo,
+    ...(g.questoes ?? []).flatMap((q) => [q.enunciado, ...q.alternativas, q.comentario]), ...g.perguntas.flatMap((q) => [q.pergunta, q.resposta]),
+  ].join('\n');
   return { guide: { ...g, legislacao }, unverified: unverifiedLawRefs(text, provided, subject), droppedRefs: g.legislacao.length - legislacao.length };
 }
 

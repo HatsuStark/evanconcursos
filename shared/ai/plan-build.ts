@@ -1,48 +1,86 @@
 // Montagem do cronograma: une as sessões (IA, já corrigidas) ao calendário determinístico do scheduler
-// e produz o payload de create_plan_version. Duas passadas: a 1ª dá quantos dias de teoria cada matéria
-// recebe (n de sessões pedido à IA); a 2ª encaixa as sessões, uma por dia, na ordem.
+// e produz o payload de create_plan_version. Duas passadas: a 1ª dá quantos blocos de teoria cada matéria
+// recebe (n de sessões pedido à IA); a 2ª encaixa as sessões, uma por bloco, na ordem, e a lei seca nas que citam lei.
+import { findLawRefs } from '../legal/refs.ts';
 import { parseYmd, ymd } from '../domain/dates.ts';
-import { generateSchedule, theoryGoal, topicKeyword, type DayKind, type ScheduleConfig, type ScheduleInput } from '../domain/scheduler.ts';
+import { generateSchedule, theoryGoal, topicKeyword, type BlockKind, type ScheduleConfig, type ScheduleInput } from '../domain/scheduler.ts';
 import type { PlanInputs, Session } from './plan.ts';
 
-export const GENERATOR_VERSION = 'scheduler-v1';
+export const GENERATOR_VERSION = 'scheduler-v2';
 export const REVIEW_PREFIX = 'Revisão: ';
 
-export interface PlanSubject { id: string; name: string; core: boolean; questions: number; weight: number; topics: { id: string; text: string }[] }
-export interface PlanBase { examDate: string; openEnded?: boolean; totalQuestions: number; subjects: PlanSubject[]; inputs: PlanInputs; weights: Record<string, number> }
+// questions: questões na prova; weight: peso no edital; minPct: nota mínima do bloco da prova (eliminatória).
+// block: bloco da prova; blocks: questões de cada bloco (para dividir entre as matérias sem número no edital).
+export interface PlanSubject { id: string; name: string; core: boolean; questions: number; weight: number; minPct?: number; block?: string; topics: { id: string; text: string }[] }
+export interface PlanBase {
+  examDate: string; openEnded?: boolean; totalQuestions: number; subjects: PlanSubject[]; inputs: PlanInputs; weights: Record<string, number>;
+  blocks?: { name: string; questions: number }[];
+}
 
-export interface SessionRow { key: string; subjectId: string; position: number; title: string; keyword: string; topicIds: string[] }
-export interface TaskRow { date: string; position: number; minutes: number; kind: Exclude<DayKind, '' | 'rest'>; subjectId: string | null; sessionKey: string | null; title: string; keyword: string; goal: number }
+export type TaskKind = BlockKind | 'weekly_review' | 'simulado' | 'eve' | 'exam';
+export interface SessionRow { key: string; subjectId: string; position: number; title: string; keyword: string; topicIds: string[]; incidence: number }
+export interface TaskRow { date: string; position: number; minutes: number; kind: TaskKind; subjectId: string | null; sessionKey: string | null; title: string; keyword: string; goal: number }
 
-const TITLES: Partial<Record<DayKind, string>> = {
+const TITLES: Partial<Record<TaskKind, string>> = {
   consolidation: 'Questões dos pontos fracos', final_review: 'Revisão final dos pontos fracos',
   weekly_review: 'Revisão da semana e caderno de erros', simulado: 'Simulado completo + correção',
   eve: 'Revisão leve e descanso', exam: 'Dia da prova',
 };
 
+// Lei seca diária quando pelo menos um quarto das matérias cita lei no edital (concurso de legislação).
+export function needsLawReading(b: PlanBase) {
+  const withLaw = b.subjects.filter((s) => s.topics.some((t) => findLawRefs(t.text, s.name).length) || findLawRefs(s.name).length).length;
+  return withLaw >= Math.max(1, Math.ceil(b.subjects.length / 4));
+}
+
+// Matéria sem número de questões no edital (comum quando a prova dá questões por bloco): a parte que falta do bloco dela,
+// dividida entre as matérias sem número do bloco; sem bloco, a parte que falta do total da prova.
+export function questionsOf(b: PlanBase) {
+  const share = (list: PlanSubject[], total: number) => {
+    const missing = list.filter((s) => !s.questions).length, left = total - list.reduce((a, s) => a + s.questions, 0);
+    return missing && left > 0 ? Math.max(1, Math.round(left / missing)) : 0;
+  };
+  const byBlock = new Map((b.blocks ?? []).filter((x) => x.questions > 0).map((x) => [x.name.trim().toLowerCase(), x.questions]));
+  const overall = share(b.subjects, b.totalQuestions);
+  return Object.fromEntries(b.subjects.map((s) => {
+    if (s.questions) return [s.id, s.questions];
+    const total = byBlock.get((s.block ?? '').trim().toLowerCase());
+    const fill = total ? share(b.subjects.filter((x) => (x.block ?? '').trim().toLowerCase() === (s.block ?? '').trim().toLowerCase()), total) : 0;
+    return [s.id, fill || overall];
+  }));
+}
+
 // No scheduler, as matérias são identificadas pelo id (nomes podem se repetir).
-function scheduleArgs(b: PlanBase, topicsById: (id: string) => string[]): [ScheduleInput, ScheduleConfig] {
+function scheduleArgs(b: PlanBase, sessions?: Record<string, Session[]>): [ScheduleInput, ScheduleConfig] {
+  const questions = questionsOf(b);
   return [
     { startDate: b.inputs.startDate, examDate: b.examDate, openEnded: b.openEnded, subjects: b.subjects.map((s) => ({ name: s.id, core: s.core })) },
     {
-      hours: b.inputs.hours, weeklyReview: b.inputs.weeklyReview,
-      subjects: Object.fromEntries(b.subjects.map((s) => [s.id, { weight: b.weights[s.id] ?? s.weight, level: b.inputs.levels[s.id] ?? 1, topics: topicsById(s.id) }])),
+      hours: b.inputs.hours, weeklyReview: b.inputs.weeklyReview, lawReading: needsLawReading(b),
+      subjects: Object.fromEntries(b.subjects.map((s) => {
+        const list = sessions?.[s.id] ?? [];
+        return [s.id, {
+          weight: b.weights[s.id] ?? s.weight, level: b.inputs.levels[s.id] ?? 1, topics: list.map((x) => x.title),
+          topicCount: s.topics.length, questions: questions[s.id], stake: s.weight, minPct: s.minPct,
+          lawItems: list.map((x) => findLawRefs(x.title, s.name).some((r) => r.ranges.length)), incidence: list.map((x) => x.incidence ?? 2),
+        }];
+      })),
     },
   ];
 }
 
-// 1ª passada: dias de teoria por matéria e minutos médios por dia (para o prompt das sessões).
+// 1ª passada: blocos de teoria por matéria e minutos médios por bloco (para o prompt das sessões).
 export function theoryPlan(b: PlanBase) { return firstPass(b).counts; }
 // Semanas e horas totais do calendário (contexto para a estratégia da IA).
 export function calendarSummary(b: PlanBase) { return firstPass(b).summary; }
 
 function firstPass(b: PlanBase) {
-  const sched = generateSchedule(...scheduleArgs(b, () => []));
+  const sched = generateSchedule(...scheduleArgs(b));
   const minutes: Record<string, number[]> = {};
-  for (const d of sched.weeks.flatMap((w) => w.days)) if (d.kind === 'theory') (minutes[d.subject] ??= []).push(d.hours * 60);
+  for (const block of sched.weeks.flatMap((w) => w.days.flatMap((d) => d.blocks))) if (block.kind === 'theory') (minutes[block.subject] ??= []).push(block.minutes);
   const counts = Object.fromEntries(b.subjects.map((s) => {
     const m = minutes[s.id] ?? [];
-    return [s.id, { days: m.length, avgMinutes: m.length ? Math.round(m.reduce((a, x) => a + x, 0) / m.length) : 120 }];
+    return [s.id, { days: m.length, avgMinutes: m.length ? Math.round(m.reduce((a, x) => a + x, 0) / m.length) : 75 }];
   })) as Record<string, { days: number; avgMinutes: number }>;
   return { counts, summary: sched.summary };
 }
@@ -55,16 +93,16 @@ export function carryOverSessions(list: Session[], topicIds: string[], studied: 
   return { sessions: ordered, review: new Set(ordered.flatMap((s, i) => (isKnown(s) ? [i] : []))) };
 }
 
-// 2ª passada: cronograma final com sessões. `sessions[subjectId]` precisa ter exatamente os dias da 1ª passada.
+// 2ª passada: cronograma final com sessões. `sessions[subjectId]` precisa ter exatamente os blocos da 1ª passada.
 // `review`: sessões já estudadas, por matéria e posição, cuja tarefa é de revisão.
 export function buildPlanPayload(b: PlanBase, sessions: Record<string, Session[]>, review: Record<string, Set<number>> = {}) {
   const counts = theoryPlan(b);
   for (const s of b.subjects) {
     if ((sessions[s.id]?.length ?? 0) !== counts[s.id]!.days) throw Error(`${s.name}: esperadas ${counts[s.id]!.days} sessões, vieram ${sessions[s.id]?.length ?? 0}.`);
   }
-  const sched = generateSchedule(...scheduleArgs(b, (id) => sessions[id]!.map((x) => x.title)));
+  const sched = generateSchedule(...scheduleArgs(b, sessions));
   const sessionRows: SessionRow[] = b.subjects.flatMap((s) => sessions[s.id]!.map((x, i) => ({
-    key: `${s.id}:${i}`, subjectId: s.id, position: i, title: x.title, keyword: x.keyword || topicKeyword(x.title),
+    key: `${s.id}:${i}`, subjectId: s.id, position: i, title: x.title, keyword: x.keyword || topicKeyword(x.title), incidence: x.incidence ?? 2,
     topicIds: x.topics.map((t) => s.topics[t]?.id).filter((id): id is string => !!id),
   })));
   const monday = parseYmd(sched.startDate)!;
@@ -72,13 +110,22 @@ export function buildPlanPayload(b: PlanBase, sessions: Record<string, Session[]
   sched.weeks.forEach((w, wi) => w.days.forEach((d, di) => {
     if (d.kind === '' || d.kind === 'rest') return;
     const date = new Date(monday); date.setDate(monday.getDate() + wi * 7 + di);
-    const subjectId = d.subject || null, session = d.kind === 'theory' && subjectId ? sessions[subjectId]![d.item] : undefined;
-    tasks.push({
-      date: ymd(date), position: 0, minutes: Math.round(d.hours * 60), kind: d.kind, subjectId,
-      sessionKey: session ? `${subjectId}:${d.item}` : null,
-      title: session ? `${review[subjectId!]?.has(d.item) ? REVIEW_PREFIX : ''}${session.title}` : TITLES[d.kind] ?? d.text,
-      keyword: session ? (session.keyword || topicKeyword(session.title)) : '',
-      goal: d.kind === 'theory' ? theoryGoal(Math.round(d.hours * 60)) : d.kind === 'simulado' ? b.totalQuestions : d.goal,
+    if (d.kind !== 'study') {
+      tasks.push({ date: ymd(date), position: 0, minutes: Math.round(d.hours * 60), kind: d.kind, subjectId: null, sessionKey: null,
+        title: TITLES[d.kind] ?? d.text, keyword: '', goal: d.kind === 'simulado' ? b.totalQuestions : 0 });
+      return;
+    }
+    d.blocks.forEach((block, position) => {
+      const session = (block.kind === 'theory' || block.kind === 'lei_seca') && block.item >= 0 ? sessions[block.subject]![block.item] : undefined;
+      const key = session ? `${block.subject}:${block.item}` : null;
+      const title = !session ? TITLES[block.kind] ?? block.text
+        : block.kind === 'lei_seca' ? `Lei seca: ${session.title}`
+        : `${review[block.subject]?.has(block.item) ? REVIEW_PREFIX : ''}${session.title}`;
+      tasks.push({
+        date: ymd(date), position, minutes: block.minutes, kind: block.kind, subjectId: block.subject || null, sessionKey: key, title,
+        keyword: session ? (session.keyword || topicKeyword(session.title)) : block.keyword,
+        goal: block.kind === 'theory' ? theoryGoal(block.minutes) : block.goal,
+      });
     });
   }));
   const summary = {

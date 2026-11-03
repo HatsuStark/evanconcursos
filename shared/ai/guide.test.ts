@@ -6,8 +6,8 @@ const base = { depth: 'completa' as const, subject: 'Direito Penal', banca: 'VUN
 
 const question = (assunto: string, enunciado = 'Enunciado'): BoardQuestion => ({ assunto, ano: 2024, enunciado, alternativas: ['A) um', 'B) dois'] });
 const guide: Guide = {
-  titulo: 'T', introducao: 'I', secoes: [{ titulo: 'S', texto: 'X', exemplos: [], como_banca_cobra: 'Cobra a letra do art. 999 do CP.' }],
-  legislacao: [], pontos_banca: [], pegadinhas: [], resumo: [], perguntas: [], depende_legislacao: false,
+  titulo: 'T', introducao: 'I', objetivos: [], esquema: [], secoes: [{ titulo: 'S', prioridade: 'alta', texto: 'X', exemplos: [], como_banca_cobra: 'Cobra a letra do art. 999 do CP.' }],
+  quadros: [], legislacao: [], memorizar: [], pontos_banca: [], pegadinhas: [], resumo: [], questoes: [], perguntas: [], depende_legislacao: false,
 };
 const promptBase = { depth: 'completa' as const, banca: 'VUNESP', cargo: 'Escrevente', subject: 'Direito Penal', title: 'Peculato', topics: ['Peculato'], law: [] };
 

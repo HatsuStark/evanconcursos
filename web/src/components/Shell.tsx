@@ -1,6 +1,7 @@
 import { CalendarDays, ClipboardList, FileText, LayoutDashboard, Library, ListChecks, PenLine, UserRound } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link, NavLink } from 'react-router-dom';
+import { ContestSwitcher } from './ContestSwitcher.tsx';
 
 const NAV = [
   { to: '/', label: 'Hoje', icon: LayoutDashboard, end: true },
@@ -33,6 +34,7 @@ export function Shell({ title, subtitle, actions, rail, focus, children }: {
       </nav>
       <main className="main">
         {!focus && <Link to="/conta" className="account-link" title="Conta" aria-label="Conta"><UserRound size={18} /></Link>}
+        {!focus && <ContestSwitcher />}
         <header className="page-head">
           {!focus && (
             <div>

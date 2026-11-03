@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { topicKeyword } from '../domain/scheduler.ts';
 
-export const PLAN_PROMPT_VERSION = 'plan-v2';
+export const PLAN_PROMPT_VERSION = 'plan-v3';
 
 // ---------- questionário ----------
 export const PlanInputs = z.object({
@@ -48,6 +48,7 @@ export const SubjectSessions = z.object({
     title: z.string().trim().max(200).describe('Formato "Assunto curto: detalhes (lei e artigos)".'),
     keyword: z.string().trim().max(60).describe('1 a 4 palavras para buscar questões do assunto.'),
     topics: z.array(z.number().int()).describe('Números dos tópicos do edital cobertos pela sessão.'),
+    incidence: z.number().int().min(1).max(3).optional().describe('Quanto a banca cobra o assunto: 3 muito, 2 médio, 1 pouco.'),
   })),
 });
 export type SubjectSessions = z.infer<typeof SubjectSessions>;
@@ -60,11 +61,12 @@ Sobre o candidato: ${p.profile.trim() || 'não informado'}. Nível dele em ${p.s
 Questões desta matéria na prova: ${p.questions || 'não informado'}. Foco recomendado: ${p.focus || 'não informado'}.
 Conteúdo programático do edital (número. tópico):
 ${p.topics.map((t, i) => `${i + 1}. ${t}`).join('\n')}
-Divida a matéria em EXATAMENTE ${p.n} sessões de estudo de cerca de ${Math.round(p.minutesPerSession / 6) / 10} horas, na ordem ideal de aprendizado (fundamentos antes).
+Divida a matéria em EXATAMENTE ${p.n} sessões de estudo de cerca de ${Math.round(p.minutesPerSession / 6) / 10} horas (teoria e questões no fim), na ordem ideal de aprendizado (fundamentos antes).
 Regras:
 - Ordem de aprendizado: conceitos e definições de que outros assuntos dependem vêm antes deles (ex.: o conceito de funcionário público antes dos crimes funcionais; teoria geral antes das espécies), mesmo que o edital os liste depois.
 - Cada tópico do edital deve aparecer em pelo menos uma sessão (campo topics, com os números acima).
-- Tópicos longos ou muito cobrados podem ocupar várias sessões (repita o número do tópico); tópicos pequenos podem ser agrupados.
+- Distribua as sessões pela incidência${p.board ? ` na banca ${p.board}` : ''}: assunto que a banca mais cobra ganha mais sessões (repita o número do tópico); assunto pouco cobrado pode ser agrupado com outros numa sessão só.
+- incidence: 3 para assunto muito cobrado, 2 médio, 1 pouco cobrado. Baseie-se no histórico de provas da banca e do cargo.
 - Ajuste ao nível: iniciante precisa de mais sessões de base; avançado, de mais tempo nos pontos difíceis e mais cobrados.
 - title: até 120 caracteres, formato "Assunto curto: detalhes", citando lei e artigos quando houver. Sem repetir títulos.
 - keyword: o assunto em 1 a 4 palavras, como se busca em sites de questões (ex.: "inquérito policial").
@@ -72,7 +74,7 @@ Regras:
 }
 
 // ---------- correção determinística ----------
-export interface Session { title: string; keyword: string; topics: number[] } // topics: índices 0-based
+export interface Session { title: string; keyword: string; topics: number[]; incidence?: number } // topics: índices 0-based; incidence 1–3
 
 // Sessões sem IA: os tópicos em ordem, agrupados ou divididos em partes para dar exatamente n.
 export function fallbackSessions(topics: string[], n: number): Session[] {
@@ -101,7 +103,7 @@ export function fallbackSessions(topics: string[], n: number): Session[] {
 export function repairSessions(raw: SubjectSessions, n: number, topics: string[]): { sessions: Session[]; fixes: string[] } {
   const T = topics.length, fixes: string[] = [];
   let s: Session[] = raw.sessions
-    .map((x) => ({ title: x.title.trim(), keyword: x.keyword.trim(), topics: [...new Set(x.topics.filter((t) => Number.isInteger(t) && t >= 1 && t <= T).map((t) => t - 1))] }))
+    .map((x) => ({ title: x.title.trim(), keyword: x.keyword.trim(), incidence: x.incidence && [1, 2, 3].includes(x.incidence) ? x.incidence : 2, topics: [...new Set(x.topics.filter((t) => Number.isInteger(t) && t >= 1 && t <= T).map((t) => t - 1))] }))
     .filter((x) => x.title);
   if (s.length !== raw.sessions.length) fixes.push('sessões sem título removidas');
   if (!s.length) return { sessions: fallbackSessions(topics, n), fixes: [...fixes, 'resposta vazia: sessões montadas pelos tópicos'] };
@@ -124,7 +126,7 @@ export function repairSessions(raw: SubjectSessions, n: number, topics: string[]
     let best = 0;
     for (let i = 1; i < s.length - 1; i++) if (s[i]!.topics.length + s[i + 1]!.topics.length < s[best]!.topics.length + s[best + 1]!.topics.length) best = i;
     const a = s[best]!, b = s[best + 1]!;
-    s.splice(best, 2, { title: a.title, keyword: a.keyword || b.keyword, topics: [...new Set([...a.topics, ...b.topics])].sort((x, y) => x - y) });
+    s.splice(best, 2, { title: a.title, keyword: a.keyword || b.keyword, incidence: Math.max(a.incidence ?? 2, b.incidence ?? 2), topics: [...new Set([...a.topics, ...b.topics])].sort((x, y) => x - y) });
     fixes.push('sessões unidas');
   }
   while (s.length < n) {

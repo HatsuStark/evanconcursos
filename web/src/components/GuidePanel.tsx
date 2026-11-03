@@ -5,11 +5,14 @@ import { localVoiceSupported } from '../lib/piper.ts';
 import { supabase } from '../lib/supabase.ts';
 import { BROWSER_DEFAULT, CADU, RATES, useGuideVoice, voiceSupported } from '../lib/voice.ts';
 
+// Objetivos, esquema, prioridade, quadros, memorizar e questões vêm da guide-v4; apostilas antigas não os têm.
 interface GuideContent {
-  titulo: string; introducao: string;
-  secoes: { titulo: string; texto: string; exemplos: string[]; como_banca_cobra?: string }[];
+  titulo: string; introducao: string; objetivos?: string[]; esquema?: { topico: string; itens: string[] }[];
+  secoes: { titulo: string; prioridade?: 'alta' | 'media' | 'baixa'; texto: string; exemplos: string[]; como_banca_cobra?: string }[];
+  quadros?: { titulo: string; colunas: string[]; linhas: string[][] }[];
   legislacao: { ref: string; comentario: string }[];
-  pontos_banca: string[]; pegadinhas: string[]; resumo: string[];
+  memorizar?: string[]; pontos_banca: string[]; pegadinhas: string[]; resumo: string[];
+  questoes?: { enunciado: string; alternativas: string[]; gabarito: string; comentario: string }[];
   perguntas: { pergunta: string; resposta: string }[];
   depende_legislacao: boolean;
   perfil_banca?: { banca: string; questoes: number } | null;
@@ -46,6 +49,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [open, setOpen] = useState<number | null>(null);
+  const [shown, setShown] = useState<Record<number, string>>({}); // questão de fixação → alternativa escolhida
 
   // Trocar de profundidade ou sair da aba cancela a espera; a apostila continua sendo gerada no servidor.
   const loadId = useRef(0);
@@ -92,7 +96,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
           </div>
         )}
       </div>
-      {loading && <div className="glass card" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> Montando a apostila com base no edital e na lei seca… (até 40 segundos na primeira vez; pode sair desta tela, ela continua sendo feita)</div>}
+      {loading && <div className="glass card" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> Montando a apostila com base no edital e na lei seca… (até 1 minuto na primeira vez; pode sair desta tela, ela continua sendo feita)</div>}
       {error && <div className="glass card"><p className="error" style={{ margin: 0 }}>{error}</p><button className="btn sm" style={{ marginTop: 10 }} onClick={() => load()}>Tentar de novo</button></div>}
       {g && !loading && (
         <article ref={article} className="glass guide printable">
@@ -100,7 +104,13 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
             <span className="badge violet"><BookOpen size={12} /> Apostila · {guide!.depth === 'completa' ? 'completa' : 'revisão curta'}</span>
             <h2>{g.titulo}</h2>
             <p className="lead">{g.introducao}</p>
+            {!!g.objetivos?.length && <div className="guide-goals"><strong>Ao final, você vai saber</strong><ul>{g.objetivos.map((o, i) => <li key={i}>{o}</li>)}</ul></div>}
           </header>
+          {!!g.esquema?.length && (
+            <section className="guide-map"><h3>Mapa do tema</h3>
+              <div className="guide-map-grid">{g.esquema.map((e, i) => <div key={i}><b>{e.topico}</b><ul>{e.itens.map((x, j) => <li key={j}>{x}</li>)}</ul></div>)}</div>
+            </section>
+          )}
           {(!!guide!.unlisted_sources.length || !!guide!.unverified.length) && (
             <div className="warning-card">
               <AlertTriangle />
@@ -112,7 +122,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
           )}
           {g.secoes.map((s, i) => (
             <section key={i} {...reading(`s${i}`)}>
-              <h3>{s.titulo}</h3>
+              <h3>{s.titulo}{s.prioridade === 'alta' && <span className="badge orange" style={{ marginLeft: 8, verticalAlign: 2 }}>cai muito</span>}</h3>
               {paragraphs(s.texto).map((p, j) => <p key={j}>{p}</p>)}
               {!!s.exemplos.length && <div className="guide-examples">{s.exemplos.map((e, j) => <p key={j}><b>Exemplo:</b> {e}</p>)}</div>}
               {s.como_banca_cobra && g.perfil_banca && (
@@ -123,14 +133,45 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
               )}
             </section>
           ))}
+          {(g.quadros ?? []).filter((q) => q.linhas.length).map((q, i) => (
+            <section key={`q${i}`} {...reading(`q${i}`)}><h3>{q.titulo}</h3>
+              <div className="guide-table"><table className="sum-table"><thead><tr>{q.colunas.map((c, j) => <th key={j}>{c}</th>)}</tr></thead>
+                <tbody>{q.linhas.map((l, j) => <tr key={j}>{l.map((c, k) => (k ? <td key={k}>{c}</td> : <th key={k} scope="row">{c}</th>))}</tr>)}</tbody></table></div>
+            </section>
+          ))}
           {!!g.legislacao.length && (
             <section {...reading('lei')}><h3>Lei seca comentada</h3>
               <ul>{g.legislacao.map((l, i) => <li key={i}><b>{l.ref}:</b> {l.comentario}</li>)}</ul>
             </section>
           )}
+          {!!g.memorizar?.length && <section {...reading('memorizar')} className={'guide-memo' + (voice.activeKey === 'memorizar' ? ' speaking' : '')}><h3>Para memorizar</h3><ul>{g.memorizar.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
           {!!g.pontos_banca.length && <section {...reading('banca')}><h3>O que mais cai</h3><ul>{g.pontos_banca.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
           {!!g.pegadinhas.length && <section data-voice="pegadinhas" className={'guide-traps' + (voice.activeKey === 'pegadinhas' ? ' speaking' : '')}><h3>Pegadinhas</h3><ul>{g.pegadinhas.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
           {!!g.resumo.length && <section {...reading('resumo')}><h3>Resumo</h3><ul>{g.resumo.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
+          {!!g.questoes?.length && (
+            <section {...reading('questoes')}><h3>Questões de fixação</h3>
+              {g.questoes.map((q, i) => {
+                const options = q.alternativas.length ? q.alternativas.map((a, j) => ({ letra: String.fromCharCode(65 + j), texto: a })) : [{ letra: 'C', texto: 'Certo' }, { letra: 'E', texto: 'Errado' }];
+                const chosen = shown[i], right = q.gabarito.trim().slice(0, 1).toUpperCase();
+                return (
+                  <div key={i} className="guide-q guide-fix">
+                    <p style={{ margin: '0 0 6px' }}><b>{i + 1}.</b> {q.enunciado}</p>
+                    <div className="guide-options no-print">
+                      {options.map((o) => (
+                        <button key={o.letra} className={'guide-option' + (chosen ? (o.letra === right ? ' right' : o.letra === chosen ? ' wrong' : '') : '')} disabled={!!chosen} onClick={() => setShown({ ...shown, [i]: o.letra })}>
+                          <b>{o.letra})</b> {o.texto}
+                        </button>
+                      ))}
+                    </div>
+                    <ol className="print-only" type="A">{q.alternativas.map((a, j) => <li key={j}>{a}</li>)}</ol>
+                    {chosen && <p className="guide-a"><CheckCircle2 size={14} /> Gabarito: {right}{chosen === right ? ' — você acertou.' : '.'} {q.comentario}</p>}
+                    <p className="guide-a print-only">Gabarito: {right}. {q.comentario}</p>
+                  </div>
+                );
+              })}
+              <p className="faint small" style={{ margin: 0 }}>Questões criadas pela IA para fixar o conteúdo, no formato da banca. As questões reais ficam na aba Questões.</p>
+            </section>
+          )}
           {!!g.perguntas.length && (
             <section {...reading('perguntas')}><h3>Perguntas de revisão</h3>
               {g.perguntas.map((q, i) => (

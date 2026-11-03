@@ -19,7 +19,7 @@ export function NoticesPage() {
   const activeNotice = active.data?.notice.id;
   // Só edital com cronograma pode ser o concurso ativo.
   const withPlan = useQuery({
-    queryKey: ['notices-with-plan'],
+    queryKey: ['contests-with-plan'],
     queryFn: async () => new Set(((await supabase.from('study_plans').select('notice_id').eq('status', 'active')).data ?? []).map((p) => p.notice_id as string)),
   });
 

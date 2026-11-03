@@ -36,7 +36,8 @@ function useDebounced<T>(v: T, ms = 350) {
   useEffect(() => { const t = setTimeout(() => setD(v), ms); return () => clearTimeout(t); }, [v, ms]);
   return d;
 }
-export const searchFree = (filters: FreeFilters, count = 10) => practice<{ questions: Question[]; reason: string | null }>({ action: 'search', filters, count });
+// exclude: questões já na tela, para não voltarem no próximo lote.
+export const searchFree = (filters: FreeFilters, count = 10, exclude: string[] = []) => practice<{ questions: Question[]; reason: string | null }>({ action: 'search', filters, count, exclude });
 export const questionById = (qid: string) => practice<{ questions: Question[]; reason: string | null }>({ action: 'by_id', qid });
 export const reviewDue = (count = 15) => practice<{ questions: Question[]; stages: Record<string, { stage: number; wrong: number }> }>({ action: 'review', count });
 
@@ -61,6 +62,17 @@ export const useDueCounts = (planId: string | undefined) => useQuery({
       supabase.from('flashcards').select('id', { count: 'exact', head: true }).eq('plan_id', planId!).lte('due_on', today),
     ]);
     return { errors: e.count ?? 0, cards: f.count ?? 0 };
+  },
+});
+
+// Datas de vencimento dos erros pendentes do concurso: a revisão semanal mostra quantos esperam por ela.
+export const useErrorDueDates = (planId: string | undefined) => useQuery({
+  queryKey: ['error-due-dates', planId],
+  enabled: !!planId,
+  queryFn: async () => {
+    const { data, error } = await supabase.from('error_book').select('due_on').eq('plan_id', planId!).eq('resolved', false).limit(5000);
+    if (error) throw new Error(error.message);
+    return (data as { due_on: string }[]).map((d) => d.due_on);
   },
 });
 

@@ -3,6 +3,8 @@ import { BarChart3, Layers, ListChecks, Plus, RotateCcw, Search, Trash2, Trophy,
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { goalLabel, goalTone, scoreGoal } from '../../../shared/domain/adaptive.ts';
+import { fromFirstAnswer, weeklyAccuracy } from '../../../shared/domain/evolution.ts';
+import { EvolutionChart } from '../components/EvolutionChart.tsx';
 import { ERROR_REASONS } from '../../../shared/domain/replan.ts';
 import { MEDIUM_OR_HARD } from '../../../shared/qbank/map.ts';
 import { resolveMateria } from '../../../shared/qbank/materias.ts';
@@ -10,7 +12,7 @@ import { QuestionsPanel, type Source } from '../components/QuestionsPanel.tsx';
 import { SearchSelect } from '../components/SearchSelect.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { SimuladoStarter } from '../components/SimuladoStarter.tsx';
-import { useActivePlan } from '../lib/plans.ts';
+import { today, useActivePlan } from '../lib/plans.ts';
 import {
   createSimulado, deleteCard, filterLists, reviewCard, useAttemptStats, useDueCounts, useFlashcards, useMappedMaterias, useMateriaOptions, useSimulados,
   type Ctx, type FreeFilters,
@@ -240,7 +242,11 @@ export function PerformanceTab({ planId }: { planId: string | undefined }) {
   const stats = useAttemptStats(planId);
   const goal = scoreGoal(useActivePlan().data?.notice.cutoff_pct);
   const [ctx, setCtx] = useState<Ctx | 'all'>('plan');
+  const [materia, setMateria] = useState('');
   const rows = useMemo(() => (stats.data ?? []).filter((a) => ctx === 'all' || a.context === ctx), [stats.data, ctx]);
+  const materias = useMemo(() => [...new Set(rows.map((a) => a.materia).filter(Boolean))].sort(), [rows]);
+  const picked = materias.includes(materia) ? materia : '';
+  const evolution = useMemo(() => fromFirstAnswer(weeklyAccuracy(rows.filter((a) => !picked || a.materia === picked), today())), [rows, picked]);
   const right = rows.filter((a) => a.correct).length, pct = rows.length ? Math.round((right / rows.length) * 100) : 0;
   const by = new Map<string, { t: number; c: number }>();
   for (const a of rows) { const k = a.materia || 'Sem matéria', e = by.get(k) ?? { t: 0, c: 0 }; e.t++; if (a.correct) e.c++; by.set(k, e); }
@@ -255,6 +261,16 @@ export function PerformanceTab({ planId }: { planId: string | undefined }) {
         <div className="stat"><strong style={{ color: 'var(--cyan)' }}>{by.size}</strong><span>matérias</span></div>
       </div>
       <p className="faint small" style={{ margin: 0 }}><ListChecks size={12} style={{ verticalAlign: -2 }} /> {week} questões nos últimos 7 dias · {goalLabel(goal)}.</p>
+      {!!rows.length && (
+        <>
+          <label className="field" style={{ maxWidth: 360 }}>Evolução de
+            <select className="select" value={picked} onChange={(e) => setMateria(e.target.value)}>
+              <option value="">Todas as matérias</option>{materias.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </label>
+          <EvolutionChart points={evolution} goal={goal} title={picked || 'Todas as matérias'} />
+        </>
+      )}
       {!rows.length ? <div className="glass card muted">Sem questões neste contexto ainda.</div> : (
         <table className="sum-table glass"><thead><tr><th>Matéria</th><th>Acertos nas respondidas</th><th /></tr></thead><tbody>
           {[...by].sort((a, b) => a[1].c / a[1].t - b[1].c / b[1].t).map(([m, e]) => (

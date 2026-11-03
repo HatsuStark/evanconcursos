@@ -34,8 +34,8 @@ describe('primeira volta', () => {
       { startDate: TODAY, examDate: end, openEnded: true, subjects: names.map((name) => ({ name, core: false })) },
       { hours, weeklyReview: true, subjects: Object.fromEntries(names.map((n, i) => [n, { weight: 3, level: 1, topics: Array.from({ length: topics[i]! }, (_, k) => `t${k}`) }])) },
     );
-    const kinds = new Set(r.weeks.flatMap((w) => w.days.map((d) => d.kind)));
-    for (const k of ['exam', 'eve', 'simulado', 'consolidation', 'final_review'] as const) expect(kinds.has(k)).toBe(false);
+    const days = r.weeks.flatMap((w) => w.days), kinds = new Set<string>([...days.map((d) => d.kind), ...days.flatMap((d) => d.blocks.map((b) => b.kind))]);
+    for (const k of ['exam', 'eve', 'simulado', 'consolidation', 'final_review']) expect(kinds.has(k)).toBe(false);
     expect(kinds.has('theory')).toBe(true);
     expect(kinds.has('weekly_review')).toBe(true);
     expect(r.summary.theory).toBeGreaterThanOrEqual(54); // 30 + 20 + o mínimo de 4 sessões
@@ -43,11 +43,11 @@ describe('primeira volta', () => {
   });
   it('limita o tamanho em editais enormes', () => {
     const end = openEndDate(TODAY, [3, 0, 0, 0, 0, 0, 0], false, [1000]);
-    expect(end).toBe('2030-04-22'); // 180 semanas + 1
+    expect(end).toBe('2028-07-31'); // 180 sessões em 2 blocos por semana: 90 semanas + 1
   });
   it('estima o ritmo pelos dias de estudo', () => {
-    expect(firstPassWeeks(60, hours)).toBe(10);
-    expect(firstPassWeeks(61, hours)).toBe(11);
+    expect(firstPassWeeks(65, hours)).toBe(5); // 13 blocos por semana
+    expect(firstPassWeeks(66, hours)).toBe(6);
     expect(firstPassWeeks(5, [0, 0, 0, 0, 0, 0, 0])).toBe(5);
   });
 });

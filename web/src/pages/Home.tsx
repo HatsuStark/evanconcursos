@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cycleProgress, cycleQueue } from '../../../shared/domain/cycle.ts';
 import { groupReviews } from '../../../shared/domain/theory-reviews.ts';
+import { RebalanceCard } from '../components/RebalanceCard.tsx';
 import { OpenPlanCard } from '../components/OpenPlanCard.tsx';
 import { ReplanBanner } from '../components/ReplanBanner.tsx';
 import { Shell } from '../components/Shell.tsx';
@@ -131,6 +132,7 @@ export function HomePage() {
         </div>
       </div>
       <OpenPlanCard active={active.data} />
+      <RebalanceCard active={active.data} />
       <ReplanBanner active={active.data} />
       {!!(due.data?.errors || due.data?.cards) && (
         <div className="glass card review-today">

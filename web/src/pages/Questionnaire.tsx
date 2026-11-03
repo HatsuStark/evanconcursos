@@ -117,10 +117,10 @@ export function QuestionnairePage() {
       <section>
         <h3>Como funciona</h3>
         <p className="muted small" style={{ margin: 0, lineHeight: 1.6 }}>
-          A IA define a prioridade das matérias pelo peso no edital, seu nível e seu perfil, e divide o conteúdo em sessões na ordem de aprendizado.
+          O tempo de cada matéria sai dos pontos em jogo (questões e peso), do seu nível e da prioridade que a IA dá pelo seu perfil; a IA divide o conteúdo em sessões na ordem de aprendizado, com mais sessões para o que a banca mais cobra. Cada dia tem 2 ou 3 blocos de matérias diferentes, sempre com questões.
           {openEnded
             ? ' Depois da primeira volta pelo conteúdo, o plano segue em rodadas de duas semanas, montadas pelo seu desempenho, respeitando suas horas.'
-            : ' O calendário (teoria, consolidação com questões, revisões semanais, simulados e véspera) é montado até a data da prova, respeitando suas horas.'}
+            : ' Até a prova: simulado diagnóstico na 2ª semana e depois a cada 2 ou 3; reforço dos pontos fracos desde a 3ª semana, ajustado ao seu desempenho a cada 2 semanas; lei seca diária em concurso de legislação; revisão semanal com o caderno de erros; semana leve a cada 5; e reta final com simulado semanal. Com pouco tempo, menos teoria nova e mais questões.'}
         </p>
       </section>
     </>

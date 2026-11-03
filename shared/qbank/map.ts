@@ -6,7 +6,7 @@ import { normalizeText } from '../ai/notice.ts';
 import { findLawRefs } from '../legal/refs.ts';
 import { lawByKey } from '../legal/registry.ts';
 import { fullMaterias, subjectMateria } from './materias.ts';
-import { placeFilter } from './places.ts';
+import { organSearch, placeFilter } from './places.ts';
 
 export const QMAP_PROMPT_VERSION = 'qmap-v3';
 
@@ -153,6 +153,21 @@ export async function mapSession(d: MapDeps, subjectMateria: string | null,
     const materia = local.find((c) => normalizeText(c) === normalizeText(pick.materia));
     const assuntos = materia ? (await d.assuntosOf(materia)).slice(0, 5) : [];
     return materia && assuntos.length ? { materia, assuntos, how: 'matéria do município' } : none;
+  }
+  // Sessão que cita o órgão do edital ("Normas TJSP"): primeiro as matérias dele ("Legislação Aplicada - TJ SP"); a corregedoria
+  // entra quando a sessão fala em normas ou corregedoria. Matéria de outro lugar fica de fora pela trava de lugar.
+  const organ = organSearch(s.organization ?? ''), plainText = ` ${normalizeText(text)} `;
+  if (organ.marks.some((m) => plainText.includes(` ${m} `))) {
+    const queries = [...organ.queries, ...(/corregedoria|\bcgj\b|\bnormas\b/i.test(text) ? ['Corregedoria'] : [])];
+    const found: string[] = [];
+    for (const q of queries) found.push(...(await d.materias(q)));
+    const cands = [...new Set(found)].filter(fits).slice(0, 12);
+    if (cands.length) {
+      const pick = await d.ai(MateriaChoice, materiaJsonSchema(), materiaPrompt(`${s.subject} — sessão "${s.title}"`, s.topics, cands));
+      const materia = cands.find((c) => normalizeText(c) === normalizeText(pick.materia));
+      const assuntos = materia ? (await d.assuntosOf(materia)).slice(0, 5) : [];
+      if (materia && assuntos.length) return { materia, assuntos, how: 'matéria do órgão' };
+    }
   }
   const tryMateria = async (materia: string) => {
     const lista = fits(materia) ? (await d.assuntosOf(materia)).filter(fits) : [];

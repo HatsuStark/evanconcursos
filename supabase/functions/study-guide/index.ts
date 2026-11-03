@@ -113,8 +113,10 @@ async function generate(admin: Admin, ownerId: string, jobId: string, ctx: Guide
   let usage: GeminiUsage | null = null;
   try {
     const boardQuestions = await boardEvidence(admin, ownerId, ctx);
+    // Formato predominante da banca na matéria: as questões de fixação seguem ele.
+    const { data: sm } = await admin.from('qbank_subject_maps').select('banca_tipo').eq('subject_id', ctx.subjectId).maybeSingle();
     const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: Guide, jsonSchema: guideJsonSchema(), temperature: 0.3,
-      parts: [{ text: guidePrompt({ ...input, cargo, boardQuestions }) }] });
+      parts: [{ text: guidePrompt({ ...input, cargo, boardQuestions, format: String(sm?.banca_tipo ?? '') }) }] });
     usage = r.usage;
     const v = verifyGuide(applyBoardEvidence(r.data, input.banca, boardQuestions.length), articles, input.subject);
     const { error } = await admin.from('study_guides').upsert({

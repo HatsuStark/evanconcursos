@@ -65,3 +65,20 @@ export function placeFilter(context: string) {
     return [...p.ufs].every((u) => allowed.ufs.has(u)) && [...p.cities].every((c) => allowed.cities.has(c));
   };
 }
+
+// Órgão do edital como a API o nomeia: "Tribunal de Justiça do Estado de São Paulo" → "TJ SP" ("Legislação Aplicada - TJ SP"),
+// "Tribunal Regional do Trabalho da 2ª Região" → "TRT 2". `marks`: como a sessão cita o órgão ("Normas TJSP").
+const ORGANS: [RegExp, string, 'uf' | 'region'][] = [
+  [/tribunal de justi[cç]a/i, 'TJ', 'uf'], [/minist[eé]rio p[uú]blico/i, 'MPE', 'uf'], [/pol[ií]cia civil/i, 'PC', 'uf'],
+  [/pol[ií]cia militar/i, 'PM', 'uf'], [/tribunal de contas d[oa] estado/i, 'TCE', 'uf'], [/defensoria p[uú]blica/i, 'DPE', 'uf'],
+  [/tribunal regional do trabalho/i, 'TRT', 'region'], [/tribunal regional federal/i, 'TRF', 'region'], [/tribunal regional eleitoral/i, 'TRE', 'uf'],
+];
+export function organSearch(organization: string): { queries: string[]; marks: string[] } {
+  const organ = ORGANS.find(([re]) => re.test(organization));
+  if (!organ) return { queries: [], marks: [] };
+  const [, acr, by] = organ;
+  const where = by === 'region' ? /(\d{1,2})\s*[ªa°º]?\s*regi[aã]o/i.exec(organization)?.[1] : [...placesIn(organization).ufs][0];
+  if (!where) return { queries: [], marks: [] };
+  const short = `${acr} ${where}`;
+  return { queries: [short, organization.replace(/ do estado (de|do|da) /i, ' de ')], marks: [normalizeText(short), normalizeText(`${acr}${where}`)] };
+}

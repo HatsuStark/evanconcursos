@@ -72,7 +72,7 @@ export function SchedulePage() {
         </section>
       )}
       <section>
-        <h3>Dias de teoria por matéria</h3>
+        <h3>Blocos de teoria por matéria</h3>
         <div className="grid" style={{ gap: 10 }}>
           {perSubject.map((p) => {
             const i = subjects.findIndex((s) => s.id === p.subjectId), focus = version?.strategy.subjects.find((s) => s.subjectId === p.subjectId)?.focus;

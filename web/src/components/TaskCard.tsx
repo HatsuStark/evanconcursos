@@ -1,12 +1,13 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { CalendarDays, Check, Clock, Target } from 'lucide-react';
+import { CalendarDays, Check, Clock, RotateCcw, Target } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { KIND_LABEL, setTaskDone, type SubjectRow, type TaskRow } from '../lib/plans.ts';
+import { KIND_LABEL, setTaskDone, today, useActivePlan, type SubjectRow, type TaskRow } from '../lib/plans.ts';
+import { useErrorDueDates } from '../lib/practice.ts';
 import { fmtDate, subjectColor, SubjectIcon } from './ui.tsx';
 
 export const KIND_COLOR: Record<string, string> = {
-  simulado: 'var(--magenta)', weekly_review: 'var(--lime)', consolidation: 'var(--orange)', final_review: 'var(--orange)', eve: 'var(--cyan)', exam: '#fff',
+  simulado: 'var(--magenta)', weekly_review: 'var(--lime)', lei_seca: 'var(--cyan)', consolidation: 'var(--orange)', final_review: 'var(--orange)', eve: 'var(--cyan)', exam: '#fff',
 };
 export const taskColor = (t: TaskRow, subjects: SubjectRow[]) => {
   const i = subjects.findIndex((s) => s.id === t.subject_id);
@@ -21,6 +22,12 @@ export function TaskCard({ task, subjects, showDate }: { task: TaskRow; subjects
   const [busy, setBusy] = useState(false);
   const idx = subjects.findIndex((s) => s.id === task.subject_id), subject = subjects[idx];
   const done = !!task.done_at, color = taskColor(task, subjects);
+  // Revisão semanal: erros do concurso que vencem até o dia dela (ou até hoje, se ficou para trás).
+  const review = task.kind === 'weekly_review' && !done;
+  const planId = useActivePlan().data?.plan.id;
+  const dueDates = useErrorDueDates(review ? planId : undefined).data;
+  const until = task.date > today() ? task.date : today();
+  const errors = review && dueDates ? dueDates.filter((d) => d <= until).length : 0;
 
   async function toggle() {
     setBusy(true);
@@ -43,6 +50,7 @@ export function TaskCard({ task, subjects, showDate }: { task: TaskRow; subjects
           {showDate && <span className="chip"><CalendarDays /> {fmtDate(task.date)}</span>}
           {task.minutes > 0 &&<span className="chip"><Clock /> {fmtMinutes(task.minutes)}</span>}
           {task.goal_questions > 0 && <span className="chip"><Target /> {task.goal_questions} questões</span>}
+          {review && dueDates && <span className="chip" style={{ color: errors ? 'var(--orange)' : undefined }}><RotateCcw /> {errors ? `${errors} ${errors === 1 ? 'erro' : 'erros'} para revisar` : 'Nenhum erro para revisar'}</span>}
         </div>
       </div>
       {task.kind !== 'exam' && <Link className="btn sm study-btn" to={`/estudo/${task.id}`}>Estudar</Link>}

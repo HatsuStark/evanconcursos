@@ -15,7 +15,7 @@ export type ErrorReason = (typeof ERROR_REASONS)[number]['key'];
 
 export interface ReplanTask {
   id: string; date: string; minutes: number; kind: string; subject_id: string | null; session_id: string | null;
-  title: string; keyword: string; goal_questions: number; done_at: string | null;
+  title: string; keyword: string; goal_questions: number; done_at: string | null; position?: number;
 }
 export interface ReplanSubject { id: string; weight: number }
 export interface ReplanAttempt { subject_id: string | null; correct: boolean; error_reason: string | null; created_at: string }
@@ -104,8 +104,8 @@ export function replan(tasks: ReplanTask[], subjects: ReplanSubject[], attempts:
     });
   }
 
-  // Revisão semanal que não virou teoria, simulado, véspera e prova ficam como estão; o que passou sem ser feito sai.
-  for (const t of open) if (['weekly_review', 'simulado', 'eve', 'exam'].includes(t.kind) && !taken.has(t.id)) kept.add(t.id);
+  // Revisão semanal que não virou teoria, lei seca, simulado, véspera e prova ficam como estão; o que passou sem ser feito sai.
+  for (const t of open) if (['weekly_review', 'lei_seca', 'simulado', 'eve', 'exam'].includes(t.kind) && !taken.has(t.id)) kept.add(t.id);
   const overdue = overdueTasks(tasks, today);
   const weakest = subjects.filter((s) => weak.get(s.id)!.count >= 5).sort((a, b) => weak.get(b.id)!.weakness - weak.get(a.id)!.weakness).slice(0, 2).map((s) => s.id);
   return {
@@ -117,4 +117,45 @@ export function replan(tasks: ReplanTask[], subjects: ReplanSubject[], attempts:
       absorbed, crowdedDays, unplaced: days.length ? 0 : sessions.length, weakest,
     },
   };
+}
+
+// ---------- rebalanceamento a cada 2 semanas (plano com data) ----------
+// Os blocos futuros de reforço e de revisão final mudam de matéria conforme o desempenho: mais tempo onde há mais pontos a
+// ganhar até a meta (questões na prova × distância até a meta) e prioridade a quem está abaixo da nota mínima eliminatória.
+// A teoria não muda: a ordem das sessões continua a mesma.
+export const REBALANCE_EVERY_DAYS = 14;
+const REBALANCE_MIN_ATTEMPTS = 20;
+const BELOW_MIN_BOOST = 1.5;
+const REBALANCE_KINDS = ['consolidation', 'final_review'];
+
+export interface RebalanceSubject { id: string; questions: number; weight: number; minPct?: number }
+export interface RebalanceSummary { kind: 'rebalance'; at: string; changed: number; focus: { subjectId: string; rate: number }[] }
+
+export function rebalance(tasks: ReplanTask[], subjects: RebalanceSubject[], attempts: ReplanAttempt[], goal: { target: number }, today: string, now = Date.now()) {
+  if (attempts.filter((a) => a.subject_id).length < REBALANCE_MIN_ATTEMPTS || !subjects.length) return null;
+  const open = tasks.filter((t) => !t.done_at && t.date >= today && REBALANCE_KINDS.includes(t.kind)).sort((a, b) => a.date.localeCompare(b.date));
+  if (!open.length) return null;
+  const weak = subjectWeakness(subjects, attempts, now);
+  const rate = (id: string) => 1 - weak.get(id)!.weakness;
+  const demand = subjects.map((s) => {
+    const stake = Math.pow(Math.max(1, s.questions || 5) * Math.max(1, s.weight), 0.75);
+    return stake * Math.max(0.05, goal.target - rate(s.id)) * (s.minPct && rate(s.id) < s.minPct / 100 ? BELOW_MIN_BOOST : 1);
+  });
+  const order = interleave(apportion(demand, Math.max(open.length, subjects.length)));
+  // No mesmo dia, matérias diferentes sempre que der.
+  const usedIn = new Map<string, Set<string>>(), out: NewTask[] = [], supersede: string[] = [];
+  for (const t of open) {
+    const used = usedIn.get(t.date) ?? new Set(tasks.filter((x) => x.date === t.date && !REBALANCE_KINDS.includes(x.kind) && x.subject_id).map((x) => x.subject_id!));
+    let k = order.findIndex((si) => !used.has(subjects[si]!.id));
+    if (k < 0) k = 0;
+    const subjectId = subjects[order.splice(k, 1)[0]!]!.id;
+    used.add(subjectId); usedIn.set(t.date, used);
+    if (subjectId === t.subject_id) continue;
+    supersede.push(t.id);
+    out.push({ date: t.date, position: t.position ?? 0, minutes: t.minutes, kind: t.kind, subjectId, sessionId: null, title: t.title, keyword: t.keyword, goal: t.goal_questions, fromTaskId: t.id });
+  }
+  if (!out.length) return null;
+  const focus = subjects.map((s, i) => ({ subjectId: s.id, rate: Math.round(rate(s.id) * 100), d: demand[i]! })).sort((a, b) => b.d - a.d).slice(0, 2).map(({ subjectId, rate: r }) => ({ subjectId, rate: r }));
+  const summary: RebalanceSummary = { kind: 'rebalance', at: today, changed: out.length, focus };
+  return { supersede, tasks: out, summary };
 }

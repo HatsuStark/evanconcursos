@@ -214,3 +214,17 @@ describe('sessão do município do edital', () => {
     expect(r.how).toBe('matéria da disciplina');
   });
 });
+
+describe('sessão do órgão do edital', () => {
+  const asked: string[] = [];
+  const deps: MapDeps = {
+    materias: async (q) => { asked.push(q); return q === 'TJ SP' ? ['Legislação Aplicada - TJ SP'] : q === 'Corregedoria' ? ['Normas da Corregedoria-Geral de Justiça do Estado de Minas Gerais', 'Corregedoria Geral da Justiça de São Paulo - CGJ SP - Legislação Aplicada'] : []; },
+    assuntosOf: async (m) => (m === 'Legislação Especial' ? ['Lei de Drogas'] : ['Legislação dos Órgãos']),
+    ai: (async (_s: unknown, _j: unknown, prompt: string) => ({ materia: prompt.includes('Minas Gerais') ? 'Normas da Corregedoria-Geral de Justiça do Estado de Minas Gerais' : 'Corregedoria Geral da Justiça de São Paulo - CGJ SP - Legislação Aplicada', assuntos: [] })) as MapDeps['ai'],
+  };
+  it('"Normas TJSP" usa as matérias do TJ SP e da corregedoria de SP, nunca a de outro estado', async () => {
+    const r = await mapSession(deps, 'Legislação Especial', { subject: 'Legislação Especial', title: 'Normas TJSP - Disposições Gerais', keyword: 'Normas Corregedoria TJSP', topics: [], organization: 'Tribunal de Justiça do Estado de São Paulo' });
+    expect(r).toEqual({ materia: 'Corregedoria Geral da Justiça de São Paulo - CGJ SP - Legislação Aplicada', assuntos: ['Legislação dos Órgãos'], how: 'matéria do órgão' });
+    expect(asked).toContain('TJ SP');
+  });
+});

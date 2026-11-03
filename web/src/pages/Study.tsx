@@ -68,7 +68,8 @@ function StudyView({ d }: { d: StudyData }) {
   const lawRefs = sessionLawRefs(d.task.title, d.topics, d.subject?.name ?? '');
   const hasSession = !!d.task.session_id;
   const tabs = TABS.filter((t) => (t.key === 'lei' ? lawRefs.length > 0 : t.key === 'apostila' || t.key === 'videos' || t.key === 'material' ? hasSession : true));
-  const [tab, setTab] = useState<TabKey>(tabs[0]!.key);
+  // Lei seca abre direto nos artigos.
+  const [tab, setTab] = useState<TabKey>(d.task.kind === 'lei_seca' && tabs.some((t) => t.key === 'lei') ? 'lei' : tabs[0]!.key);
   const [videosOpened, setVideosOpened] = useState(false);
   const color = d.subjectIndex >= 0 ? subjectColor(d.subjectIndex) : 'var(--magenta)';
   const mine = latestAnswers(d.attempts.filter((a) => a.task_id === d.task.id));

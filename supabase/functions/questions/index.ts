@@ -12,11 +12,11 @@ import { lawByKey } from '../../../shared/legal/registry.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import {
   equalIncidence, EXPLAIN_PROMPT_VERSION, Explanation, explainPrompt, explanationJsonSchema, inTurn, measureIncidence, planPicks,
-  QMAP_PROMPT_VERSION, roleKeyword, searchFilters, type Incidence, type SessionFilter,
+  QMAP_PROMPT_VERSION, roleKeyword, searchFilters, SESSION_DIFFICULTIES, type Incidence, type SessionFilter,
 } from '../../../shared/qbank/map.ts';
 import { conceptKey, MNEMONIC_PROMPT_VERSION, MnemonicChoice, mnemonicJsonSchema, mnemonicPrompt, pickExisting } from '../../../shared/qbank/mnemonic.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-import { activePlan, ensureBoardFormat, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, questFailure, recordAnswer, takeNewest, upsertFlashcard, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
+import { activePlan, ensureBoardFormat, fromCache, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, questFailure, recordAnswer, takeNewest, upsertFlashcard, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
 
 // Com alguma questão pronta, não faz o estudante esperar por mais; sem nenhuma, desiste antes do limite da função.
 const SOFT_LIMIT_MS = 15_000, HARD_LIMIT_MS = 90_000;
@@ -180,9 +180,8 @@ Deno.serve(async (req) => {
       filter = { materia: sm.materia, assuntos: weak, how: 'reforço' };
     }
     const { data: notice } = await auth.client.from('notices').select('education_level, role_name').eq('id', subject.notice_id).single();
-    const filters = searchFilters(filter, sm.banca, {
-      level: String(notice?.education_level ?? ''), role: roleKeyword(String(notice?.role_name ?? '')), format: await ensureBoardFormat(admin, quest, subject.id, sm),
-    });
+    const format = await ensureBoardFormat(admin, quest, subject.id, sm);
+    const filters = searchFilters(filter, sm.banca, { level: String(notice?.education_level ?? ''), role: roleKeyword(String(notice?.role_name ?? '')), format });
     if (!filters.length) { await log('qbank_fetch', 'ok'); return json(200, { questions: [], reason: 'sem-assunto' }); }
 
     // Peso de cada assunto: medido uma vez por sessão. Se a medição falhar, divide igual e tenta de novo na próxima busca.
@@ -197,11 +196,11 @@ Deno.serve(async (req) => {
 
     // Pula o que o estudante já respondeu; o que ele respondeu nesta sessão define a vez de cada assunto.
     const { data: done } = await admin.from('question_attempts').select('qid, assunto, session_id').eq('owner_id', auth.user.id).eq('subject_id', subject.id).limit(5000);
-    const seen = new Set((done ?? []).map((d) => d.qid));
+    // Também as que já estão na tela, ainda sem resposta (o app manda em `exclude`).
+    const seen = new Set([...(done ?? []).map((d) => d.qid as string), ...(Array.isArray(body.exclude) ? (body.exclude as unknown[]).map(String).slice(0, 500) : [])]);
     const served = new Map<string, number>();
     for (const d of done ?? []) if (task.session_id && d.session_id === task.session_id) served.set(normalizeText(d.assunto), (served.get(normalizeText(d.assunto)) ?? 0) + 1);
     const out: QuestQuestion[] = [];
-    const wantedTotal = count;
     // Traz até `limit` questões no total, das mais recentes para as mais antigas.
     let timedOut = false;
     const take = async (f: (typeof filters)[number], limit: number) => {
@@ -211,22 +210,30 @@ Deno.serve(async (req) => {
       out.push(...await takeNewest(admin, quest, auth.user.id, scope, f.key, f.params, limit - out.length, (q) => !seen.has(q.id) && !out.some((o) => o.id === q.id)));
     };
     // Cada assunto busca a sua parte (banca e, se faltar, outras bancas); o que sobrar vem de qualquer assunto com questões.
+    // Primeiro as já compradas e não vistas, sem créditos; a API só completa o que faltar.
     const wanted = new Map<string, number>();
-    for (const a of planPicks(incidence, served, wantedTotal)) wanted.set(a, (wanted.get(a) ?? 0) + 1);
+    for (const a of planPicks(incidence, served, count)) wanted.set(a, (wanted.get(a) ?? 0) + 1);
+    const cached: PublicQuestion[] = [];
+    for (const [assunto, n] of wanted) {
+      const got = await fromCache(admin, { materia: filter.materia!, assunto, dificuldades: SESSION_DIFFICULTIES, tipo: format, preferBanca: sm.banca }, n, (id) => !seen.has(id) && !cached.some((c) => c.qid === id));
+      cached.push(...got);
+      wanted.set(assunto, n - got.length);
+    }
+    const wantedTotal = count - cached.length;
     // A dificuldade alterna a cada questão e continua de onde parou na sessão.
     let turn = [...served.values()].reduce((a, b) => a + b, 0);
     for (const [assunto, n] of wanted) {
-      for (let i = 0; i < n; i++) {
+      for (let i = 0; i < n && wantedTotal > 0; i++) {
         const limit = out.length + 1;
         for (const f of inTurn(filters.filter((x) => x.assunto === assunto), turn)) await take(f, limit);
         turn++;
       }
     }
-    for (const f of inTurn(filters, turn)) await take(f, wantedTotal);
+    if (wantedTotal > 0) for (const f of inTurn(filters, turn)) await take(f, wantedTotal);
     await log('qbank_fetch', 'ok');
     // Dentro do lote, primeiro as questões que caíram em mais provas.
     out.sort((a, b) => (b.provas?.length ?? 0) - (a.provas?.length ?? 0));
-    const batch = await withMnemo(admin, out.slice(0, wantedTotal).map(publicQuestion));
+    const batch = await withMnemo(admin, [...cached, ...out.slice(0, wantedTotal).map(publicQuestion)]);
     return json(200, { questions: batch, filter: { materia: filter.materia, assuntos: filter.assuntos, how: filter.how }, reason: batch.length ? null : timedOut ? 'demorou' : 'esgotado-dificeis' });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

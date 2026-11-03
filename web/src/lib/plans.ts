@@ -1,7 +1,8 @@
 // Planos de estudo: geração (IA no backend + scheduler determinístico) e leitura do cronograma ativo.
 import { useQuery } from '@tanstack/react-query';
+import { subjectMinPct } from '../../../shared/domain/adaptive.ts';
 import { ymd } from '../../../shared/domain/dates.ts';
-import type { Replan } from '../../../shared/domain/replan.ts';
+import type { RebalanceSummary, Replan } from '../../../shared/domain/replan.ts';
 import { isOpenEnded, openEndDate, type RoundAttempt, type RoundSummary } from '../../../shared/domain/rounds.ts';
 import { buildPlanPayload, calendarSummary, carryOverSessions, GENERATOR_VERSION, theoryPlan, type PlanBase } from '../../../shared/ai/plan-build.ts';
 import { fallbackSessions, PLAN_PROMPT_VERSION, type PlanInputs, type Session } from '../../../shared/ai/plan.ts';
@@ -17,9 +18,9 @@ const must = <T,>(r: { data: T | null; error: { message: string } | null }): T =
 export interface Strategy { advice: string[]; subjects: { subjectId: string; weight: number; focus: string }[]; fallbacks?: string[] }
 export interface TaskRow {
   id: string; date: string; minutes: number; kind: string; subject_id: string | null; session_id: string | null;
-  title: string; keyword: string; goal_questions: number; done_at: string | null;
+  title: string; keyword: string; goal_questions: number; done_at: string | null; position?: number;
 }
-export interface SubjectRow { id: string; name: string; position: number; is_core: boolean; questions: number; weight: number }
+export interface SubjectRow { id: string; name: string; position: number; is_core: boolean; questions: number; weight: number; block?: string }
 
 // Chamada a uma Edge Function com a mensagem de erro do servidor; 429 (limite da IA) espera e tenta de novo.
 async function invoke<T>(name: string, body: Record<string, unknown>, tries = 3): Promise<T> {
@@ -46,16 +47,16 @@ export type GenProgress = { step: 'strategy' | 'sessions' | 'saving' | 'material
 // direto dos tópicos (o plano nunca fica pela metade) e isso fica registrado na estratégia.
 // Com `carry` (novo edital), o conteúdo novo vem antes, o já estudado vira revisão, e edital sem data fica sem prazo.
 export async function generatePlan(noticeId: string, inputs: PlanInputs, onProgress: (p: GenProgress) => void, carry?: { studied: Set<string> }) {
-  const notice = must(await supabase.from('notices').select('id, title, exam_date, total_questions').eq('id', noticeId).single()) as { id: string; title: string; exam_date: string | null; total_questions: number };
+  const notice = must(await supabase.from('notices').select('id, title, exam_date, total_questions, structure').eq('id', noticeId).single()) as { id: string; title: string; exam_date: string | null; total_questions: number; structure: { blocks?: { name: string; rule: string; questions: number }[] } | null };
   if (!notice.exam_date && !carry) throw new Error('Defina a data da prova na conferência do edital.');
-  const subs = must(await supabase.from('notice_subjects').select('id, name, is_core, questions, weight, notice_topics(id, text, position)').eq('notice_id', noticeId).order('position')) as
-    (SubjectRow & { notice_topics: { id: string; text: string; position: number }[] })[];
+  const subs = must(await supabase.from('notice_subjects').select('id, name, block, is_core, questions, weight, notice_topics(id, text, position)').eq('notice_id', noticeId).order('position')) as
+    (SubjectRow & { block: string; notice_topics: { id: string; text: string; position: number }[] })[];
   // Prova já realizada: plano sem prazo, com a primeira volta dimensionada pelo tamanho do conteúdo.
   const openEnded = isOpenEnded(notice.exam_date, ymd(new Date())) || !notice.exam_date;
   const base: PlanBase = {
     examDate: openEnded ? openEndDate(inputs.startDate, inputs.hours, inputs.weeklyReview, subs.map((s) => s.notice_topics.length)) : notice.exam_date!,
-    openEnded, totalQuestions: notice.total_questions, inputs, weights: {},
-    subjects: subs.map((s) => ({ id: s.id, name: s.name, core: s.is_core, questions: s.questions, weight: s.weight,
+    openEnded, totalQuestions: notice.total_questions, inputs, weights: {}, blocks: notice.structure?.blocks ?? [],
+    subjects: subs.map((s) => ({ id: s.id, name: s.name, core: s.is_core, questions: s.questions, weight: s.weight, minPct: subjectMinPct(s.block, notice.structure?.blocks ?? []) || undefined, block: s.block,
       topics: [...s.notice_topics].sort((a, b) => a.position - b.position).map((t) => ({ id: t.id, text: t.text })) })),
   };
   const cal = calendarSummary(base); // valida datas/horas antes de gastar IA
@@ -128,8 +129,8 @@ export async function updatePlanFromNotice(noticeId: string, inputs: PlanInputs,
 export type Pacing = 'agenda' | 'ciclo';
 export interface ActivePlan {
   plan: { id: string; name: string; notice_id: string; active_version_id: string | null; pacing: Pacing };
-  notice: { id: string; role_name: string; organization: string; board: string; exam_date: string | null; total_questions: number; education_level: Draft['educationLevel']; cutoff_pct: number | null };
-  version: { id: string; number: number; reason: string; inputs: PlanInputs; strategy: Strategy; summary: { weeks?: number; hours?: number; perSubject?: { subjectId: string; name: string; days: number }[]; replan?: { round?: RoundSummary }; openEnded?: boolean }; created_at: string } | null;
+  notice: { id: string; role_name: string; organization: string; board: string; exam_date: string | null; total_questions: number; education_level: Draft['educationLevel']; cutoff_pct: number | null; structure: { blocks?: { name: string; rule: string }[] } | null };
+  version: { id: string; number: number; reason: string; inputs: PlanInputs; strategy: Strategy; summary: { weeks?: number; hours?: number; perSubject?: { subjectId: string; name: string; days: number }[]; replan?: { round?: RoundSummary } & Partial<RebalanceSummary>; openEnded?: boolean }; created_at: string } | null;
   subjects: SubjectRow[];
   tasks: TaskRow[];
   openEnded: boolean; // prova já realizada: plano sem prazo, que se adapta ao desempenho
@@ -151,10 +152,10 @@ export const useActivePlan = (noticeId?: string) => useQuery({
     const plan = (must(await q) as ActivePlan['plan'][])[0];
     if (!plan) return null;
     const [notice, version, subjects, tasks] = await Promise.all([
-      supabase.from('notices').select('id, role_name, organization, board, exam_date, total_questions, education_level, cutoff_pct').eq('id', plan.notice_id).single(),
+      supabase.from('notices').select('id, role_name, organization, board, exam_date, total_questions, education_level, cutoff_pct, structure').eq('id', plan.notice_id).single(),
       plan.active_version_id ? supabase.from('plan_versions').select('id, number, reason, inputs, strategy, summary, created_at').eq('id', plan.active_version_id).single() : Promise.resolve({ data: null, error: null }),
-      supabase.from('notice_subjects').select('id, name, position, is_core, questions, weight').eq('notice_id', plan.notice_id).order('position'),
-      supabase.from('tasks').select('id, date, minutes, kind, subject_id, session_id, title, keyword, goal_questions, done_at')
+      supabase.from('notice_subjects').select('id, name, position, is_core, questions, weight, block').eq('notice_id', plan.notice_id).order('position'),
+      supabase.from('tasks').select('id, date, position, minutes, kind, subject_id, session_id, title, keyword, goal_questions, done_at')
         .eq('plan_id', plan.id).is('superseded_in_version', null).order('date').order('position').limit(5000),
     ]);
     const noticeRow = must(notice) as ActivePlan['notice'], versionRow = must(version) as ActivePlan['version'];
@@ -193,7 +194,7 @@ export async function setTaskDone(taskId: string, done: boolean) {
 }
 
 export const KIND_LABEL: Record<string, string> = {
-  theory: 'Teoria', consolidation: 'Consolidação', final_review: 'Revisão final', weekly_review: 'Revisão semanal',
+  theory: 'Teoria', consolidation: 'Reforço', final_review: 'Revisão final', weekly_review: 'Revisão semanal', lei_seca: 'Lei seca',
   simulado: 'Simulado', eve: 'Véspera', exam: 'Prova',
 };
 export const today = () => ymd(new Date());

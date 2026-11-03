@@ -2,7 +2,7 @@
 // curtas, montadas sem IA quando a fila acaba. Os dias vão para as matérias pelo peso no edital e pela fraqueza; dentro de
 // cada matéria, vêm primeiro as sessões mais fracas e há mais tempo sem ver.
 import { DAY_MS, parseYmd, ymd } from './dates.ts';
-import { apportion, interleave, theoryGoal } from './scheduler.ts';
+import { apportion, interleave, splitDay, theoryGoal } from './scheduler.ts';
 import { subjectWeakness, type NewTask, type ReplanAttempt, type ReplanSubject, type ReplanTask } from './replan.ts';
 
 const REFILL_BELOW = 3; // tarefas pendentes que disparam a próxima rodada
@@ -20,13 +20,15 @@ export interface RoundSummary { weakest: { subjectId: string; rate: number }[]; 
 export const isOpenEnded = (examDate: string | null | undefined, today: string) => !!examDate && examDate < today;
 
 const studyDaysPerWeek = (hours: number[]) => hours.filter((h) => h > 0).length;
+// Blocos de teoria por semana: cada dia de 1 h ou mais tem 1 a 3 blocos (`splitDay`).
+const blocksPerWeek = (hours: number[]) => hours.reduce((a, h) => a + (h * 60 >= 60 ? splitDay(h * 60).length : 0), 0);
 // Semanas para terminar as sessões de teoria pendentes, no ritmo informado no questionário.
-export const firstPassWeeks = (pending: number, hours: number[]) => Math.ceil(pending / Math.max(1, studyDaysPerWeek(hours)));
+export const firstPassWeeks = (pending: number, hours: number[]) => Math.ceil(pending / Math.max(1, blocksPerWeek(hours)));
 
 // Fim fictício da primeira volta, só para o calendário dimensionar as sessões pelo tamanho do conteúdo: não vira prazo.
 export function openEndDate(startDate: string, hours: number[], weeklyReview: boolean, topicsPerSubject: number[]) {
   const days = Math.min(MAX_FIRST_PASS_DAYS, topicsPerSubject.reduce((a, t) => a + Math.max(MIN_SUBJECT_SESSIONS, t), 0));
-  const perWeek = studyDaysPerWeek(hours), theoryPerWeek = Math.max(1, perWeek - (weeklyReview && perWeek >= 4 ? 1 : 0));
+  const perWeek = studyDaysPerWeek(hours), theoryPerWeek = Math.max(1, blocksPerWeek(hours) - (weeklyReview && perWeek >= 4 ? 1 : 0));
   const end = parseYmd(startDate) ?? new Date();
   end.setDate(end.getDate() + (Math.ceil(days / theoryPerWeek) + 1) * 7);
   return ymd(end);

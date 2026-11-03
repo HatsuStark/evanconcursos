@@ -32,6 +32,28 @@ export const questFailure = (message: string, fallback: string) => (/Quest API .
   ? 'A cota mensal do banco de questões acabou. Questões já respondidas e o caderno de erros continuam disponíveis.'
   : fallback);
 
+// Questões já compradas (cache) que servem ao filtro e o estudante ainda não viu: não gastam créditos. Antes de buscar na
+// API, usa estas: lotes buscados adiantados e amostras das apostilas ficavam pagos e nunca apareciam. Primeiro as da
+// banca (`preferBanca`), depois as provas mais recentes.
+export interface CacheFilter { materia: string; assunto?: string; dificuldades?: string[]; banca?: string; preferBanca?: string; tipo?: string; ano?: string; orgao?: string; cargo?: string }
+export async function fromCache(admin: SupabaseClient, f: CacheFilter, want: number, isNew: (qid: string) => boolean): Promise<PublicQuestion[]> {
+  if (want <= 0 || !f.materia) return [];
+  let q = admin.from('qbank_questions').select('qid, payload').eq('materia', f.materia);
+  if (f.assunto) q = q.eq('assunto', f.assunto);
+  if (f.dificuldades?.length) q = q.in('payload->>dificuldade', f.dificuldades);
+  if (f.banca) q = q.eq('payload->prova->>banca', f.banca);
+  if (f.tipo) q = q.ilike('payload->>tipo', f.tipo);
+  if (f.ano) q = q.eq('payload->prova->>ano', f.ano);
+  if (f.orgao) q = q.ilike('payload->prova->>orgao', `%${f.orgao}%`);
+  if (f.cargo) q = q.ilike('payload->prova->>cargo', `%${f.cargo}%`);
+  const { data, error } = await q.limit(300);
+  if (error) return [];
+  const board = normalizeText(f.preferBanca ?? '');
+  return (data ?? []).map((r) => r.payload as PublicQuestion).filter((p) => isNew(p.qid))
+    .sort((a, b) => Number(!!board && normalizeText(b.prova?.banca ?? '') === board) - Number(!!board && normalizeText(a.prova?.banca ?? '') === board) || (b.prova?.ano ?? 0) - (a.prova?.ano ?? 0))
+    .slice(0, want);
+}
+
 // Questões novas para o estudante, das provas mais recentes para as mais antigas, com uma posição guardada por escopo e filtro.
 // O prefixo separa estas posições dos cursores antigos, que apontavam para ids.
 export async function takeNewest(admin: SupabaseClient, quest: QuestClient, ownerId: string, scope: string, key: string, params: Record<string, string>, want: number, isNew: (q: QuestQuestion) => boolean) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { theoryGoal } from '../domain/scheduler.ts';
-import { buildPlanPayload, carryOverSessions, theoryPlan, type PlanBase } from './plan-build.ts';
+import { buildPlanPayload, carryOverSessions, questionsOf, theoryPlan, type PlanBase } from './plan-build.ts';
 import { fallbackSessions, repairSessions, type SubjectSessions } from './plan.ts';
 
 function rng(seed: number) { return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32; }; }
@@ -73,7 +73,7 @@ describe('buildPlanPayload', () => {
     inputs: { hours: [2, 2, 2, 2, 2, 4, 0], startDate: '2026-11-04', weeklyReview: true, profile: '', levels: { p: 0, l: 2 } },
     weights: { p: 5, l: 3, i: 1 },
     subjects: [
-      { id: 'p', name: 'Penal', core: true, questions: 0, weight: 3, topics: topicsOf(12).map((text, i) => ({ id: `p${i}`, text })) },
+      { id: 'p', name: 'Penal', core: true, questions: 20, weight: 3, topics: topicsOf(12).map((text, i) => ({ id: `p${i}`, text })) },
       { id: 'l', name: 'Português', core: false, questions: 16, weight: 3, topics: topicsOf(8).map((text, i) => ({ id: `l${i}`, text })) },
       { id: 'i', name: 'Informática', core: false, questions: 9, weight: 2, topics: topicsOf(3).map((text, i) => ({ id: `i${i}`, text })) },
     ],
@@ -100,12 +100,23 @@ describe('buildPlanPayload', () => {
     expect(p.tasks.filter((t) => new Date(t.date + 'T12:00:00').getDay() === 0 && t.kind !== 'exam')).toHaveLength(0);
     expect(p.tasks.find((t) => t.kind === 'exam')?.date).toBe('2027-03-14');
     expect(p.tasks.find((t) => t.kind === 'eve')?.date).toBe('2027-03-13');
-    expect(new Set(p.tasks.map((t) => t.date)).size).toBe(p.tasks.length); // uma tarefa por dia
   });
-  it('minutos respeitam as horas do dia; metas coerentes', () => {
-    for (const t of p.tasks) {
-      const wd = (new Date(t.date + 'T12:00:00').getDay() + 6) % 7;
-      if (t.kind !== 'exam') expect(t.minutes).toBe(base.inputs.hours[wd]! * 60);
+  it('dia com vários blocos, em posições seguidas, de matérias diferentes (Penal domina: repetição rara e espalhada)', () => {
+    const byDate = new Map<string, typeof p.tasks>();
+    for (const t of p.tasks) byDate.set(t.date, [...(byDate.get(t.date) ?? []), t]);
+    const lists = [...byDate.values()], multi = lists.filter((l) => l.length >= 2);
+    expect(multi.length).toBeGreaterThan(byDate.size / 2);
+    for (const l of lists) expect(l.map((t) => t.position)).toEqual(l.map((_, i) => i));
+    const repeated = multi.map((l, i) => ({ i, s: l.filter((t) => t.kind !== 'lei_seca' && t.subjectId).map((t) => t.subjectId) })).filter((x) => new Set(x.s).size !== x.s.length);
+    expect(repeated.length).toBeLessThanOrEqual(multi.length * 0.15);
+    expect(repeated.filter((x) => x.i >= multi.length * 0.66).length).toBeLessThan(Math.max(2, repeated.length));
+  });
+  it('minutos do dia somam as horas (70% na semana leve); metas coerentes', () => {
+    const byDate = new Map<string, number>();
+    for (const t of p.tasks) if (t.kind !== 'exam') byDate.set(t.date, (byDate.get(t.date) ?? 0) + t.minutes);
+    for (const [date, minutes] of byDate) {
+      const h = base.inputs.hours[(new Date(date + 'T12:00:00').getDay() + 6) % 7]! * 60;
+      expect([h, Math.round(h * 0.7)], date).toContain(minutes);
     }
     expect(theory.every((t) => t.goal === theoryGoal(t.minutes))).toBe(true);
     expect(p.tasks.filter((t) => t.kind === 'simulado').every((t) => t.goal === 70)).toBe(true);
@@ -116,5 +127,21 @@ describe('buildPlanPayload', () => {
   });
   it('recusa sessões em número diferente do reservado', () => {
     expect(() => buildPlanPayload(base, { ...sessions, i: sessions.i!.slice(1) })).toThrow(/esperadas/);
+  });
+});
+
+describe('questionsOf', () => {
+  const sub = (id: string, questions: number, block?: string) => ({ id, name: id, core: false, questions, weight: 2, block, topics: [] });
+  const base = (subjects: ReturnType<typeof sub>[], blocks?: { name: string; questions: number }[]): PlanBase => ({
+    examDate: '2027-03-14', totalQuestions: 70, weights: {}, blocks, subjects,
+    inputs: { hours: [2, 2, 2, 2, 2, 0, 0], startDate: '2026-11-02', weeklyReview: false, profile: '', levels: {} },
+  });
+  it('divide as questões do bloco entre as matérias dele sem número no edital', () => {
+    const r = questionsOf(base([sub('pt', 15, 'Bloco I'), sub('dp', 0, 'Bloco II'), sub('dc', 0, 'Bloco II'), sub('mat', 7, 'Bloco III')],
+      [{ name: 'Bloco I', questions: 15 }, { name: 'BLOCO II', questions: 40 }, { name: 'Bloco III', questions: 15 }]));
+    expect(r).toEqual({ pt: 15, dp: 20, dc: 20, mat: 7 });
+  });
+  it('sem bloco, usa o que falta no total da prova', () => {
+    expect(questionsOf(base([sub('a', 30), sub('b', 0), sub('c', 0)]))).toEqual({ a: 30, b: 20, c: 20 });
   });
 });
