@@ -2,6 +2,7 @@
 // Uso: node scripts/users.mjs add <email>     → cria a conta (ou gera nova senha) e libera o e-mail em ALLOWED_EMAILS
 //      node scripts/users.mjs reset <email>   → gera nova senha temporária (senha esquecida)
 //      node scripts/users.mjs remove <email>  → encerra o acesso (bloqueia a conta, sem apagar os dados)
+//      node scripts/users.mjs rename <email> <novo-email> → troca o e-mail da conta (mesma conta, dados e senha)
 //      node scripts/users.mjs list            → contas, último acesso e gasto de IA em 30 dias
 // A senha temporária aparece só neste terminal: envie por um canal privado. A troca é obrigatória no primeiro acesso.
 import { randomBytes } from 'node:crypto';
@@ -76,10 +77,11 @@ function showPassword(email, password) {
   console.log(`\nE-mail: ${email}\nSenha temporária: ${password}\n\nEnvie por um canal privado. A pessoa troca a senha no primeiro acesso.`);
 }
 
-const [cmd, rawEmail] = process.argv.slice(2);
-const email = rawEmail?.trim().toLowerCase();
-if (cmd !== 'list' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email ?? '')) {
-  console.error('Uso: node scripts/users.mjs add|reset|remove <email> | list');
+const [cmd, rawEmail, rawNew] = process.argv.slice(2);
+const email = rawEmail?.trim().toLowerCase(), newEmail = rawNew?.trim().toLowerCase();
+const validEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e ?? '');
+if ((cmd !== 'list' && !validEmail(email)) || (cmd === 'rename' && !validEmail(newEmail))) {
+  console.error('Uso: node scripts/users.mjs add|reset|remove <email> | rename <email> <novo-email> | list');
   process.exit(1);
 }
 
@@ -99,6 +101,14 @@ try {
     else await auth('/users', { method: 'POST', body: JSON.stringify({ ...fields, email, email_confirm: true }) });
     if (cmd === 'add') setAllowed((list) => [...list, email]);
     showPassword(email, password);
+  } else if (cmd === 'rename') {
+    const auth = await authClient();
+    const user = await findUser(auth, email);
+    if (!user) throw new Error('Conta não encontrada.');
+    if (await findUser(auth, newEmail)) throw new Error(`Já existe uma conta com ${newEmail}.`);
+    await auth(`/users/${user.id}`, { method: 'PUT', body: JSON.stringify({ email: newEmail, email_confirm: true }) });
+    setAllowed((list) => [...list.filter((e) => e !== email), newEmail]);
+    console.log(`E-mail trocado: ${email} → ${newEmail}. A senha e os dados continuam os mesmos.`);
   } else if (cmd === 'remove') {
     const auth = await authClient();
     const user = await findUser(auth, email);
@@ -106,7 +116,7 @@ try {
     setAllowed((list) => list.filter((e) => e !== email));
     console.log(`Acesso de ${email} encerrado. Os dados continuam no banco; add libera de novo.`);
   } else {
-    console.error('Uso: node scripts/users.mjs add|reset|remove <email> | list');
+    console.error('Uso: node scripts/users.mjs add|reset|remove <email> | rename <email> <novo-email> | list');
     process.exit(1);
   }
 } catch (e) {

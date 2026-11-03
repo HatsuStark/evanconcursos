@@ -135,6 +135,7 @@ O site fica na Netlify, ligada ao GitHub: cada push na `main` publica (`netlify.
 node scripts/users.mjs add email@exemplo.com     # cria a conta, libera em ALLOWED_EMAILS e mostra a senha temporária
 node scripts/users.mjs reset email@exemplo.com   # nova senha temporária (não há "esqueci a senha")
 node scripts/users.mjs remove email@exemplo.com  # encerra o acesso; os dados ficam no banco
+node scripts/users.mjs rename antigo@x.com novo@y.com  # troca o e-mail da conta (mesma senha e dados)
 node scripts/users.mjs list                      # contas, último acesso e gasto de IA em 30 dias
 ```
 
