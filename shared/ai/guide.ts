@@ -67,6 +67,34 @@ export function applyBoardEvidence(g: Guide, banca: string, questions: number) {
   return { ...g, secoes, perfil_banca: questions ? { banca, questoes: questions } : null };
 }
 
+// Revisão curta (cerca de um terço da completa): o prompt pede estes tetos e `trimReview` os garante, também nas revisões
+// já gravadas (cortadas ao servir). Sem questões de fixação: a revisão de teoria usa as questões reais da aba Questões.
+// Medido em 2026-11-03: as revisões guide-v4 tinham 74% do tamanho da completa, quase metade em seções e questões.
+export const REVIEW_LIMITS = {
+  objetivos: 3, esquema: 4, secoes: 3, paragrafos: 2, textoChars: 700, exemplos: 1, quadros: 1, legislacao: 3, comentarioChars: 220,
+  memorizar: 8, pontos_banca: 4, pegadinhas: 4, resumo: 8, questoes: 0, perguntas: 3, respostaChars: 250,
+} as const;
+// Corta no fim da última frase que cabe; sem frase que caiba pela metade, corta na palavra com reticências.
+export function clipText(t: string, max: number) {
+  if (t.length <= max) return t;
+  const s = t.slice(0, max), end = Math.max(s.lastIndexOf('. '), s.lastIndexOf('.\n'), s.endsWith('.') ? s.length - 1 : -1);
+  return end >= max / 2 ? s.slice(0, end + 1) : s.slice(0, s.lastIndexOf(' ') > 0 ? s.lastIndexOf(' ') : max).trimEnd() + '…';
+}
+export function trimReview<G extends Partial<Guide>>(g: G): G {
+  const L = REVIEW_LIMITS, cut = <T,>(list: T[] | undefined, n: number) => list?.slice(0, n);
+  return {
+    ...g,
+    objetivos: cut(g.objetivos, L.objetivos), esquema: cut(g.esquema, L.esquema),
+    secoes: cut(g.secoes, L.secoes)?.map((s) => ({
+      ...s, texto: clipText(s.texto.split(/\n\s*\n/).slice(0, L.paragrafos).join('\n\n'), L.textoChars), exemplos: cut(s.exemplos, L.exemplos) ?? [],
+    })),
+    quadros: cut(g.quadros, L.quadros), legislacao: cut(g.legislacao, L.legislacao)?.map((l) => ({ ...l, comentario: clipText(l.comentario, L.comentarioChars) })),
+    memorizar: cut(g.memorizar, L.memorizar), pontos_banca: cut(g.pontos_banca, L.pontos_banca), pegadinhas: cut(g.pegadinhas, L.pegadinhas),
+    resumo: cut(g.resumo, L.resumo), questoes: cut(g.questoes, L.questoes),
+    perguntas: cut(g.perguntas, L.perguntas)?.map((p) => ({ ...p, resposta: clipText(p.resposta, L.respostaChars) })),
+  };
+}
+
 // format: formato predominante da banca na matéria ('certo e errado' ou múltipla escolha), para as questões de fixação.
 // duties/otherRoles: atribuições do cargo no edital e os outros cargos dele, para a apostila não descrever outro cargo.
 export function guidePrompt(p: { depth: GuideDepth; banca: string; cargo: string; subject: string; title: string; topics: string[]; law: GuideSource[]; boardQuestions?: BoardQuestion[]; format?: string; duties?: string; otherRoles?: string[] }) {
@@ -86,11 +114,11 @@ Regras obrigatórias:
 - Não cite jurisprudência, súmulas, autores ou posições doutrinárias. Não invente leis, prazos ou números.
 - Siga o texto da lei fornecido; ele é a versão vigente.
 - Ordem didática: do conceito e da regra geral para as exceções e os detalhes; cada seção explica, dá exemplo prático e destaca o que a prova costuma perguntar. Priorize o que mais cai: seção de prioridade alta ganha mais texto, a de baixa só o essencial.
-- ${full ? 'secoes: 3 a 6 seções; quadros: 1 ou 2; questoes: 4 ou 5; perguntas: 4 a 6.' : 'secoes: até 3 seções curtas; quadros: 0 ou 1; questoes: 3; perguntas: 4; foco em resumo, memorizar e pontos de prova.'}
+- ${full ? 'secoes: 3 a 6 seções; quadros: 1 ou 2; questoes: 4 ou 5; perguntas: 4 a 6.' : `Revisão curta: no máximo um terço do tamanho de uma apostila completa. introducao: 1 ou 2 frases; objetivos: ${REVIEW_LIMITS.objetivos}; esquema: até ${REVIEW_LIMITS.esquema} tópicos; secoes: até ${REVIEW_LIMITS.secoes}, cada uma com 1 ou 2 parágrafos curtos (até ${REVIEW_LIMITS.textoChars} caracteres no total) e no máximo 1 exemplo; quadros: 0 ou 1; legislacao: até ${REVIEW_LIMITS.legislacao} artigos, com comentário de 1 frase; memorizar: até ${REVIEW_LIMITS.memorizar}; pontos_banca e pegadinhas: até ${REVIEW_LIMITS.pontos_banca} cada; resumo: 5 a ${REVIEW_LIMITS.resumo} tópicos; questoes: vazio (a revisão usa questões reais); perguntas: ${REVIEW_LIMITS.perguntas}, com resposta de 1 ou 2 frases. Foco em resumo, memorizar e pontos de prova; não repita a mesma informação em seções, resumo e pontos de prova.`}
 - objetivos e esquema: curtos; o esquema é o mapa mental do tema, na ordem das seções.
 - quadros: compare só o que a banca costuma confundir (espécies, prazos, requisitos, diferenças entre institutos). Sem quadro se o tema não tiver o que comparar.
 - memorizar: só números, prazos, quóruns e listas que estejam nos trechos de lei ou no conteúdo do edital, nunca de memória. Vazio se não houver.
-- questoes: inéditas, ${ce ? 'no formato certo ou errado (alternativas vazias; gabarito "C" ou "E")' : 'de múltipla escolha com 5 alternativas (gabarito A a E)'}, no estilo ${board.length ? 'das questões reais fornecidas' : `da ${p.banca || 'banca'}`}, cobrando o que a apostila ensinou. Uma única resposta correta, sem ambiguidade; o comentário explica o gabarito pela apostila ou pelo artigo fornecido.
+- questoes${full ? '' : ' (só na apostila completa; aqui, vazio)'}: inéditas, ${ce ? 'no formato certo ou errado (alternativas vazias; gabarito "C" ou "E")' : 'de múltipla escolha com 5 alternativas (gabarito A a E)'}, no estilo ${board.length ? 'das questões reais fornecidas' : `da ${p.banca || 'banca'}`}, cobrando o que a apostila ensinou. Uma única resposta correta, sem ambiguidade; o comentário explica o gabarito pela apostila ou pelo artigo fornecido.
 - legislacao: comente os artigos fornecidos mais importantes para a prova (ref exatamente como no colchete).
 - pontos_banca e pegadinhas: o que costuma cair e as confusões comuns${p.banca ? ` da ${p.banca}` : ''}.
 - ${board.length ? 'secoes[].como_banca_cobra: diga como as questões fornecidas abordam o assunto da seção (letra da lei, caso prático, conceito, exceção, tipo de distrator). Só o que se observa nelas: sem percentuais, sem "sempre" ou "nunca", sem copiar enunciados. Deixe vazio na seção que nenhuma questão trata. As questões são só amostra de estilo, nunca fonte do conteúdo.' : 'secoes[].como_banca_cobra: deixe vazio em todas as seções.'}

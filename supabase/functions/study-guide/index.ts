@@ -7,7 +7,7 @@
 // Reaproveita apostilas idênticas (mesmo tema, fontes e profundidade) entre sessões e estudantes.
 // Não há "gerar de novo" pelo estudante (economia de créditos): uma apostila existente é sempre reaproveitada.
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide, GUIDE_PROMPT_VERSION, guideCacheKey, guideJsonSchema, guidePrompt, lawKeys, pickSimilarGuide, topicKeys, unlistedLaws, verifyGuide, type BoardQuestion, type GuideDepth } from '../../../shared/ai/guide.ts';
+import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide, GUIDE_PROMPT_VERSION, guideCacheKey, guideJsonSchema, guidePrompt, lawKeys, pickSimilarGuide, topicKeys, trimReview, unlistedLaws, verifyGuide, type BoardQuestion, type GuideDepth } from '../../../shared/ai/guide.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient } from '../../../shared/qbank/client.ts';
 import { QMAP_PROMPT_VERSION } from '../../../shared/qbank/map.ts';
@@ -122,7 +122,8 @@ async function generate(admin: Admin, ownerId: string, jobId: string, ctx: Guide
     const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: Guide, jsonSchema: guideJsonSchema(), temperature: 0.3,
       parts: [{ text: guidePrompt({ ...input, cargo, boardQuestions, format: String(sm?.banca_tipo ?? ''), duties, otherRoles }) }] });
     usage = r.usage;
-    const v = verifyGuide(applyBoardEvidence(r.data, input.banca, boardQuestions.length), articles, input.subject);
+    const data = input.depth === 'revisao' ? trimReview(r.data) : r.data;
+    const v = verifyGuide(applyBoardEvidence(data, input.banca, boardQuestions.length), articles, input.subject);
     const { error } = await admin.from('study_guides').upsert({
       cache_key: key, depth: input.depth, subject_name: input.subject, subject_key: normalizeText(input.subject), banca: normalizeText(input.banca), topic_keys: topicKeys(input.topics),
       title: input.title, content: v.guide, sources: input.law.map((l) => l.ref), unlisted_sources: unlistedLaws([input.title, ...input.topics].join('\n')), unverified: v.unverified,
@@ -201,7 +202,8 @@ Deno.serve(async (req) => {
     const ctx = task && await resolve(auth, admin, task, depth);
     if (!ctx) return json(400, { error: 'A apostila é gerada para tarefas de teoria (com sessão de conteúdo).' });
     const guide = await findGuide(admin, ctx);
-    if (guide) return json(200, { guide });
+    // Revisões gravadas antes dos tetos também saem curtas.
+    if (guide) return json(200, { guide: depth === 'revisao' ? { ...guide, content: trimReview(guide.content) } : guide });
     if (body.poll) {
       const job = await lastJob(admin, ctx.key);
       if (!isRunning(job) && job?.status !== 'succeeded') return json(502, { error: 'Não foi possível gerar a apostila agora.' });

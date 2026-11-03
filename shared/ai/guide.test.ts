@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyBoardEvidence, boardSample, guideCacheKey, guidePrompt, lawKeys, pickSimilarGuide, roleSpecific, topicKeys, unlistedLaws, verifyGuide, type BoardQuestion, type Guide } from './guide.ts';
+import { applyBoardEvidence, boardSample, guideCacheKey, guidePrompt, lawKeys, pickSimilarGuide, roleSpecific, topicKeys, trimReview, clipText, REVIEW_LIMITS, unlistedLaws, verifyGuide, type BoardQuestion, type Guide } from './guide.ts';
 
 const law = [{ ref: 'CP, art. 312', text: 'x'.repeat(100) }, { ref: 'CP, art. 313', text: 'y'.repeat(80) }];
 const base = { depth: 'completa' as const, subject: 'Direito Penal', banca: 'VUNESP', topics: ['Peculato', 'Concussão'], law };
@@ -88,5 +88,42 @@ describe('cargo nas apostilas', () => {
     expect(p).toContain('Executar a limpeza e a conservação das instalações');
     expect(p).toContain('Agente de Segurança Escolar');
     expect(p).toMatch(/não use atribuições/);
+  });
+});
+
+describe('revisão curta', () => {
+  const many = <T,>(n: number, f: (i: number) => T) => Array.from({ length: n }, (_, i) => f(i));
+  const big: Guide = {
+    ...guide, objetivos: many(5, String), esquema: many(6, (i) => ({ topico: String(i), itens: ['a'] })),
+    secoes: many(5, (i) => ({ titulo: String(i), prioridade: 'alta' as const, texto: 'p1\n\np2\n\np3', exemplos: ['e1', 'e2'], como_banca_cobra: '' })),
+    quadros: many(2, () => ({ titulo: 'q', colunas: ['a', 'b'], linhas: [] })), legislacao: many(6, (i) => ({ ref: String(i), comentario: 'c' })),
+    memorizar: many(12, String), pontos_banca: many(7, String), pegadinhas: many(7, String), resumo: many(12, String),
+    questoes: many(5, () => ({ enunciado: 'e', alternativas: [], gabarito: 'C', comentario: 'c' })), perguntas: many(6, () => ({ pergunta: 'p', resposta: 'r' })),
+  };
+  it('trimReview aplica os tetos, corta parágrafos e exemplos', () => {
+    const r = trimReview(big);
+    expect(r.secoes).toHaveLength(REVIEW_LIMITS.secoes);
+    expect(r.secoes[0]!.texto).toBe('p1\n\np2');
+    expect(r.secoes[0]!.exemplos).toEqual(['e1']);
+    expect(r.legislacao).toHaveLength(REVIEW_LIMITS.legislacao);
+    expect(r.resumo).toHaveLength(REVIEW_LIMITS.resumo);
+    expect(r.questoes).toHaveLength(REVIEW_LIMITS.questoes);
+    expect(JSON.stringify(r).length).toBeLessThan(JSON.stringify(big).length * 0.7);
+  });
+  it('apostila antiga sem os campos novos continua sem eles', () => {
+    const { objetivos: _o, quadros: _q, memorizar: _m, questoes: _qs, ...old } = big;
+    const r = trimReview(old as Partial<Guide>);
+    expect(r.objetivos).toBeUndefined();
+    expect(r.secoes).toHaveLength(REVIEW_LIMITS.secoes);
+  });
+  it('clipText corta no fim da frase, ou na palavra com reticências', () => {
+    expect(clipText('Curto.', 50)).toBe('Curto.');
+    expect(clipText('Primeira frase aqui. Segunda frase bem mais longa que passa.', 30)).toBe('Primeira frase aqui.');
+    expect(clipText('palavras sem ponto nenhum que passam do limite', 20)).toBe('palavras sem ponto…');
+  });
+  it('o prompt da revisão pede os tetos', () => {
+    const p = guidePrompt({ ...promptBase, depth: 'revisao' });
+    expect(p).toMatch(/um terço/);
+    expect(p).toMatch(new RegExp(`legislacao: até ${REVIEW_LIMITS.legislacao}`));
   });
 });
