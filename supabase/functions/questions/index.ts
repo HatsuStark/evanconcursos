@@ -6,7 +6,7 @@
 //   {action:'mnemonic', qid, taskId?}     → mnemônico compartilhado (ou nenhum), vira flashcard do estudante
 // A chave da Quest API e o gabarito ficam só no servidor. taskId é opcional fora do cronograma.
 import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { GENERATED_MAX, GeneratedQuestions, generatedJsonSchema, generatedPrompt, generatedTheme, toPublic } from '../../../shared/qbank/generated.ts';
+import { GENERATED_EXAMPLES, GENERATED_MAX, GENERATED_PROMPT_VERSION, GeneratedQuestions, generatedJsonSchema, generatedPrompt, generatedTheme, toPublic } from '../../../shared/qbank/generated.ts';
 import { loadLawSources } from '../_shared/law.ts';
 import { prunedAssuntos, rejectedIds, RELEVANCE_PROMPT_VERSION, RelevanceVerdicts, relevanceJsonSchema, relevancePrompt } from '../../../shared/qbank/relevance.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
@@ -25,8 +25,9 @@ import { activePlan, ensureBoardFormat, fromCache, ensureSessionMap, ensureSubje
 const SOFT_LIMIT_MS = 15_000, HARD_LIMIT_MS = 90_000;
 // Rodadas de busca por pedido: a 2ª e a 3ª repõem as questões que a triagem de relevância descartou.
 const RELEVANCE_ROUNDS = 3;
-// Questões inéditas da IA levam até ~40 s: só começam se ainda houver tempo antes do limite da função.
-const GENERATE_BEFORE_MS = 60_000;
+// Questões inéditas da IA levam até ~55 s (casos concretos, com questões reais de modelo): só começam se ainda houver tempo
+// antes do limite da função (150 s): 60 s de busca + 75 s de geração.
+const GENERATE_BEFORE_MS = 60_000, GENERATE_TIMEOUT_MS = 75_000;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -240,7 +241,8 @@ Deno.serve(async (req) => {
     };
     const generated = async (n: number): Promise<PublicQuestion[]> => {
       const theme = generatedTheme(filter.materia ?? subject.name, sess!.title);
-      const { data: made } = await admin.from('qbank_questions').select('payload').eq('payload->>ia_tema', theme).limit(200);
+      // Só as da versão atual do prompt: as antigas saíam genéricas demais.
+      const { data: made } = await admin.from('qbank_questions').select('payload').eq('payload->>ia_tema', theme).eq('payload->>ia_versao', GENERATED_PROMPT_VERSION).limit(200);
       const all = (made ?? []).map((r) => r.payload as PublicQuestion);
       const reuse = all.filter((q) => !seen.has(q.qid)).slice(0, n);
       for (const q of reuse) seen.add(q.qid);
@@ -250,11 +252,22 @@ Deno.serve(async (req) => {
         const { data: tt } = ss?.topic_ids?.length ? await auth.client.from('notice_topics').select('text').in('id', ss.topic_ids) : { data: [] };
         const { law } = await loadLawSources(admin, { title: sess!.title, topics: (tt ?? []).map((t) => t.text as string), subject: subject.name });
         const { data: nt } = await auth.client.from('notices').select('board, role_name').eq('id', subject.notice_id).single();
+        // Modelos de estilo e nível: as questões reais que a triagem aprovou nesta sessão; sem elas, as do cache nos assuntos dela.
+        const { data: ok } = await admin.from('qbank_relevance').select('qid').eq('session_id', task.session_id).eq('relevant', true).limit(10);
+        const okIds = (ok ?? []).map((r) => r.qid as string).filter((id) => !id.startsWith('ia-'));
+        let { data: ex } = okIds.length ? await admin.from('qbank_questions').select('payload, gabarito').in('qid', okIds).limit(GENERATED_EXAMPLES) : { data: [] };
+        if (!ex?.length && filter.materia && filter.assuntos.length) {
+          ({ data: ex } = await admin.from('qbank_questions').select('payload, gabarito').eq('materia', filter.materia).in('assunto', filter.assuntos).not('qid', 'like', 'ia-%').limit(GENERATED_EXAMPLES));
+        }
+        const examples = (ex ?? []).map((r) => {
+          const q = r.payload as PublicQuestion;
+          return { enunciado: q.enunciado, alternativas: /certo/i.test(String(q.tipo ?? '')) ? [] : q.alternativas.map((a) => a.texto), gabarito: String(r.gabarito ?? ''), banca: q.prova?.banca ?? '' };
+        });
         // Pelo menos 3 por vez: as que sobram servem ao próximo lote e a outros estudantes.
         const k = Math.min(GENERATED_MAX, Math.max(3, n - reuse.length));
-        const r = await generateJson({ apiKey, model, schema: GeneratedQuestions, jsonSchema: generatedJsonSchema(), temperature: 0.5, timeoutMs: 60_000,
+        const r = await generateJson({ apiKey, model, schema: GeneratedQuestions, jsonSchema: generatedJsonSchema(), temperature: 0.5, timeoutMs: GENERATE_TIMEOUT_MS,
           parts: [{ text: generatedPrompt({ banca: String(nt?.board ?? ''), cargo: String(nt?.role_name ?? ''), subject: subject.name, title: sess!.title, keyword: sess!.keyword ?? '',
-            law, format, n: k, avoid: all.map((q) => plain(q.enunciado)).slice(-15) }) }] });
+            law, format, n: k, avoid: all.map((q) => plain(q.enunciado)).slice(-15), examples }) }] });
         usage.inputTokens += r.usage.inputTokens; usage.outputTokens += r.usage.outputTokens; usage.thinkingTokens += r.usage.thinkingTokens;
         const rows = r.data.questoes.map((q) => toPublic(q, {
           qid: `ia-${crypto.randomUUID()}`, format, materia: filter.materia ?? subject.name, assunto: filter.assuntos[0] ?? sess!.title, theme, year: new Date().getFullYear(),

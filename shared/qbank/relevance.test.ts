@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generatedPrompt, generatedTheme, toPublic, GENERATED_BANCA } from './generated.ts';
+import { generatedPrompt, generatedTheme, toPublic, GENERATED_BANCA, GENERATED_PROMPT_VERSION } from './generated.ts';
 import { prunedAssuntos, rejectedIds, relevancePrompt } from './relevance.ts';
 
 const session = { subject: 'Direito Processual Penal', title: 'Prazos Processuais e Atos em Geral: contagem contínua e suspensão (arts. 792, 798 e 798-A do CPP)', keyword: 'prazos processuais' };
@@ -23,15 +23,15 @@ describe('triagem de relevância', () => {
 describe('questões inéditas da IA', () => {
   const base = { qid: 'ia-1', materia: 'Direito Processual Penal', assunto: 'Prazos', theme: generatedTheme('Direito Processual Penal', session.title), year: 2026 };
   it('múltipla escolha: tira a letra do texto, valida o gabarito e marca como inédita', () => {
-    const r = toPublic({ enunciado: 'Sobre a contagem dos prazos no processo penal, é correto afirmar:', alternativas: ['A) um', 'B) dois', 'três', 'quatro', 'cinco'], gabarito: 'c' }, { ...base, format: 'multipla escolha' })!;
+    const r = toPublic({ enunciado: 'Sobre a contagem dos prazos no processo penal, é correto afirmar:', alternativas: ['A) um', 'B) dois', 'três', 'quatro', 'cinco'], gabarito: 'c', fundamento: '' }, { ...base, format: 'multipla escolha' })!;
     expect(r.gabarito).toBe('C');
     expect(r.payload.alternativas.map((a) => a.texto)).toEqual(['um', 'dois', 'três', 'quatro', 'cinco']);
     expect(r.payload.prova.banca).toBe(GENERATED_BANCA);
     expect(r.payload.ia_tema).toBe(base.theme);
   });
   it('certo ou errado e gabarito inválido', () => {
-    expect(toPublic({ enunciado: 'Os prazos processuais penais correm em cartório e são contínuos.', alternativas: [], gabarito: 'C' }, { ...base, format: 'certo e errado' })!.payload.tipo).toBe('certo e errado');
-    expect(toPublic({ enunciado: 'Sobre a contagem dos prazos no processo penal:', alternativas: ['a', 'b', 'c', 'd', 'e'], gabarito: 'Z' }, { ...base, format: 'multipla escolha' })).toBeNull();
+    expect(toPublic({ enunciado: 'Os prazos processuais penais correm em cartório e são contínuos.', alternativas: [], gabarito: 'C', fundamento: '' }, { ...base, format: 'certo e errado' })!.payload.tipo).toBe('certo e errado');
+    expect(toPublic({ enunciado: 'Sobre a contagem dos prazos no processo penal:', alternativas: ['a', 'b', 'c', 'd', 'e'], gabarito: 'Z', fundamento: '' }, { ...base, format: 'multipla escolha' })).toBeNull();
   });
   it('o prompt prende ao tema, às fontes e evita repetir questões já criadas', () => {
     const p = generatedPrompt({ banca: 'VUNESP', cargo: 'Escrevente', ...session, law: [{ ref: 'CPP, art. 798', text: 'Todos os prazos…' }], format: 'multipla escolha', n: 3, avoid: ['Questão antiga'] });
@@ -39,6 +39,18 @@ describe('questões inéditas da IA', () => {
     expect(p).toMatch(/\[CPP, art. 798\]/);
     expect(p).toMatch(/não repita/);
     expect(p).toMatch(/5 alternativas/);
+  });
+  it('média a difícil: caso concreto, distrator quase verdadeiro e questões reais como modelo', () => {
+    const p = generatedPrompt({ banca: 'VUNESP', cargo: '', ...session, law: [], format: 'multipla escolha', n: 3, avoid: [],
+      examples: [{ enunciado: '<p>Tício foi intimado numa sexta-feira…</p>', alternativas: ['segunda', 'terça'], gabarito: 'A', banca: 'VUNESP' }] });
+    expect(p).toMatch(/caso concreto/);
+    expect(p).toMatch(/troca um único detalhe/);
+    expect(p).toMatch(/Proibido distrator absurdo/);
+    expect(p).toMatch(/Exemplo 1 \(VUNESP\):\nTício foi intimado numa sexta-feira…\nA\) segunda\nB\) terça\nGabarito: A/);
+  });
+  it('marca a versão do prompt para não reaproveitar questões antigas', () => {
+    const r = toPublic({ enunciado: 'Sobre a contagem dos prazos no processo penal, é correto afirmar:', alternativas: ['um', 'dois', 'três', 'quatro', 'cinco'], gabarito: 'A', fundamento: 'CPP, art. 798' }, { ...base, format: 'multipla escolha' })!;
+    expect(r.payload.ia_versao).toBe(GENERATED_PROMPT_VERSION);
   });
 });
 
