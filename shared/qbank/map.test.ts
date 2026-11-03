@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { theoryGoal } from '../domain/scheduler.ts';
-import { dominantFormat, equalIncidence, interleave, inTurn, mapSession, mapSubject, measureIncidence, newestPage, planPicks, roleKeyword, searchFilters, type MapDeps } from './map.ts';
+import { dominantFormat, localPlace, pickBoard, equalIncidence, interleave, inTurn, mapSession, mapSubject, measureIncidence, newestPage, planPicks, roleKeyword, searchFilters, type MapDeps } from './map.ts';
 
 const tally = (picks: string[]) => picks.reduce<Record<string, number>>((m, a) => ({ ...m, [a]: (m[a] ?? 0) + 1 }), {});
 
@@ -164,5 +164,53 @@ describe('inTurn', () => {
   it('alterna a dificuldade a cada vez, sem sair da etapa', () => {
     expect([0, 1, 2, 3, 4].map((turn) => inTurn(filters, turn)[0]!.params.dificuldade)).toEqual(['3', '4', '5', '3', '4']);
     expect(inTurn(filters, 1).map((f) => f.tier)).toEqual([0, 0, 0, 1, 1, 1]);
+  });
+});
+
+describe('pickBoard', () => {
+  const api: Record<string, string[]> = {
+    Instituto: ['Instituto JK', 'Instituto AOCP'], nosso: ['NOSSO RUMO'], rumo: ['NOSSO RUMO'], fgv: ['FGV'], FGV: ['FGV'], fcc: ['FCC'],
+    VUNESP: ['VUNESP'], Cebraspe: ['CESPE CEBRASPE'], 'Instituto AOCP': ['Instituto AOCP'],
+  };
+  const search = async (q: string) => api[q] ?? [];
+  it('acha a banca pelo nome sem a palavra genérica, nunca a primeira de "Instituto"', async () => {
+    expect(await pickBoard('Instituto Nosso Rumo', search)).toBe('NOSSO RUMO');
+    expect(await pickBoard('Instituto AOCP', search)).toBe('Instituto AOCP');
+  });
+  it('acha pela sigla e pelo nome contido', async () => {
+    expect(await pickBoard('Fundação Getulio Vargas', search)).toBe('FGV');
+    expect(await pickBoard('Fundação Carlos Chagas', search)).toBe('FCC');
+    expect(await pickBoard('Cebraspe', search)).toBe('CESPE CEBRASPE');
+    expect(await pickBoard('VUNESP', search)).toBe('VUNESP');
+  });
+  it('sem correspondência, fica sem banca', async () => {
+    expect(await pickBoard('Instituto Desconhecido', search)).toBe('');
+  });
+});
+
+describe('sessão do município do edital', () => {
+  it('lê o município do órgão', () => {
+    expect(localPlace('Prefeitura Municipal de Suzano')).toBe('Suzano');
+    expect(localPlace('Câmara Municipal de Mogi das Cruzes/SP')).toBe('Mogi das Cruzes');
+    expect(localPlace('Prefeitura de São José dos Campos - SP')).toBe('São José dos Campos');
+    expect(localPlace('Tribunal de Justiça do Estado de São Paulo')).toBe('');
+  });
+  const deps = (found: string[], pick: string): MapDeps => ({
+    materias: async () => found,
+    assuntosOf: async () => ['Lei Orgânica', 'Estatuto'],
+    ai: (async () => ({ materia: pick, assuntos: ['Lei Orgânica'] })) as MapDeps['ai'],
+  });
+  const session = { subject: 'Conhecimentos Específicos', title: 'Lei Orgânica de Suzano', keyword: 'Lei Orgânica Suzano', topics: [], organization: 'Prefeitura Municipal de Suzano' };
+  it('usa só a matéria do município, nunca a genérica de municípios', async () => {
+    const r = await mapSession(deps(['Município de Suzano - Legislação Aplicada', 'Conhecimentos Específicos dos Municípios'], 'Município de Suzano - Legislação Aplicada'), 'Conhecimentos Específicos dos Estados', session);
+    expect(r).toEqual({ materia: 'Município de Suzano - Legislação Aplicada', assuntos: ['Lei Orgânica', 'Estatuto'], how: 'matéria do município' });
+  });
+  it('sem matéria do município, a sessão fica sem questões', async () => {
+    const r = await mapSession(deps(['Conhecimentos Específicos dos Municípios'], 'Conhecimentos Específicos dos Municípios'), 'Conhecimentos Específicos dos Estados', session);
+    expect(r.materia).toBeNull();
+  });
+  it('sessão que não fala do município segue a regra comum', async () => {
+    const r = await mapSession(deps([], ''), 'Pedagogia', { ...session, title: 'ECA na escola', keyword: 'ECA' });
+    expect(r.how).toBe('matéria da disciplina');
   });
 });

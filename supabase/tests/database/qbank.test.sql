@@ -13,7 +13,7 @@ end $$;
 
 -- Backend: questão com gabarito, plano de A e uma tentativa de A.
 insert into public.qbank_questions (qid, payload, gabarito) values ('q1', '{"enunciado":"x"}', 'C');
-insert into public.qbank_assunto_lists (materia, assuntos) values ('Direito Penal', '{Peculato}');
+insert into public.qbank_assunto_lists (materia, assuntos) values ('Matéria de teste pgTAP', '{Peculato}');
 insert into public.notices (id, owner_id, title, status) values ('40000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-0000000000a3', 'E', 'reviewed');
 insert into public.study_plans (id, owner_id, notice_id) values ('41000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-0000000000a3', '40000000-0000-4000-8000-000000000001');
 insert into public.question_attempts (owner_id, plan_id, qid, chosen, correct) values ('00000000-0000-4000-8000-0000000000a3', '41000000-0000-4000-8000-000000000001', 'q1', 'A', false);

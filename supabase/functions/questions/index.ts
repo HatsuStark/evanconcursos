@@ -140,8 +140,8 @@ Deno.serve(async (req) => {
 
     // Matéria da disciplina (uma vez) e banca do edital.
     const sm = await ensureSubjectMap(admin, quest, deps, auth.user.id, subject.id, async () => {
-      const { data: notice } = await auth.client.from('notices').select('board').eq('id', subject.notice_id).single();
-      return { name: subject.name, board: String(notice?.board ?? ''), topics };
+      const { data: notice } = await auth.client.from('notices').select('board, organization').eq('id', subject.notice_id).single();
+      return { name: subject.name, board: String(notice?.board ?? ''), topics, organization: String(notice?.organization ?? '') };
     });
 
     // Filtro: assuntos da sessão (uma vez por sessão); em dias de reforço, os assuntos em que o estudante mais erra.
@@ -152,7 +152,8 @@ Deno.serve(async (req) => {
       const m = await ensureSessionMap(admin, deps, auth.user.id, task.session_id, sm.materia, async () => {
         const { data: ss } = await auth.client.from('study_sessions').select('title, keyword, topic_ids').eq('id', task.session_id).single();
         const { data: tt } = ss?.topic_ids?.length ? await auth.client.from('notice_topics').select('text').in('id', ss.topic_ids) : { data: [] };
-        return { subject: subject.name, title: ss?.title ?? '', keyword: ss?.keyword ?? '', topics: (tt ?? []).map((t) => t.text) };
+        const { data: n } = await auth.client.from('notices').select('organization').eq('id', subject.notice_id).single();
+        return { subject: subject.name, title: ss?.title ?? '', keyword: ss?.keyword ?? '', topics: (tt ?? []).map((t) => t.text), organization: String(n?.organization ?? '') };
       });
       filter = m; incidence = m.incidence;
     } else if (sm.materia) {

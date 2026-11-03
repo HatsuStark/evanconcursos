@@ -31,7 +31,7 @@ async function resolve(auth: Auth, admin: Admin, task: { subject_id: string | nu
     auth.client.from('study_sessions').select('title, keyword, topic_ids').eq('id', task.session_id).single(),
     auth.client.from('notice_subjects').select('name, notice_id').eq('id', task.subject_id).single(),
   ]);
-  const { data: notice } = await auth.client.from('notices').select('board, role_name').eq('id', subject!.notice_id).single();
+  const { data: notice } = await auth.client.from('notices').select('board, role_name, organization').eq('id', subject!.notice_id).single();
   const { data: tt } = session?.topic_ids?.length ? await auth.client.from('notice_topics').select('id, text').in('id', session.topic_ids) : { data: [] };
   const topics = (tt ?? []).sort((a, b) => session!.topic_ids.indexOf(a.id) - session!.topic_ids.indexOf(b.id)).map((t) => t.text);
   const { articles, law } = await loadLawSources(admin, { title: session!.title, topics, subject: subject!.name });
@@ -39,6 +39,7 @@ async function resolve(auth: Auth, admin: Admin, task: { subject_id: string | nu
   return {
     input, key: guideCacheKey(input), articles, noticeId: subject!.notice_id as string, cargo: (notice?.role_name ?? '') as string,
     sessionId: task.session_id, subjectId: task.subject_id, keyword: (session?.keyword ?? '') as string,
+    organization: String(notice?.organization ?? ''),
   };
 }
 type GuideContext = NonNullable<Awaited<ReturnType<typeof resolve>>>;
@@ -82,9 +83,9 @@ async function boardEvidence(admin: Admin, ownerId: string, ctx: GuideContext): 
   try {
     const sm = await ensureSubjectMap(admin, quest, deps, ownerId, ctx.subjectId, async () => {
       const { data: all } = await admin.from('notice_topics').select('text, position').eq('subject_id', ctx.subjectId).order('position');
-      return { name: input.subject, board: input.banca, topics: (all ?? []).map((t) => t.text) };
+      return { name: input.subject, board: input.banca, topics: (all ?? []).map((t) => t.text), organization: ctx.organization };
     });
-    const filter = await ensureSessionMap(admin, deps, ownerId, ctx.sessionId, sm.materia, async () => ({ subject: input.subject, title: input.title, keyword: ctx.keyword, topics: input.topics }));
+    const filter = await ensureSessionMap(admin, deps, ownerId, ctx.sessionId, sm.materia, async () => ({ subject: input.subject, title: input.title, keyword: ctx.keyword, topics: input.topics, organization: ctx.organization }));
     // Atualidades envelhece rápido, e sem banca identificada não há o que observar.
     if (!sm.banca || !filter.materia || !filter.assuntos.length || /atualidade/i.test(filter.materia)) return [];
     const { data: cached } = await admin.from('qbank_questions').select('payload').eq('materia', filter.materia).in('assunto', filter.assuntos).limit(300);

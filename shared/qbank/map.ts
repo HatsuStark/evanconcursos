@@ -6,6 +6,7 @@ import { normalizeText } from '../ai/notice.ts';
 import { findLawRefs } from '../legal/refs.ts';
 import { lawByKey } from '../legal/registry.ts';
 import { fullMaterias, subjectMateria } from './materias.ts';
+import { placeFilter } from './places.ts';
 
 export const QMAP_PROMPT_VERSION = 'qmap-v3';
 
@@ -88,11 +89,13 @@ async function candidates(d: MapDeps, q: string) {
 
 // Matéria da disciplina: pontuação pelo nome, mas matéria "vazia" (≤ 2 assuntos) perde para a versão cheia
 // (ex.: "Direito Processual Civil" × "Direito Processual Civil - CPC 2015"). IA só nos casos ambíguos.
-export async function mapSubject(d: MapDeps, subject: { name: string; topics: string[] }): Promise<{ materia: string | null; how: string }> {
+// Matérias de outro estado, município ou órgão ficam de fora (`placeFilter`), com o órgão do edital como referência.
+export async function mapSubject(d: MapDeps, subject: { name: string; topics: string[]; organization?: string }): Promise<{ materia: string | null; how: string }> {
   const known = subjectMateria(subject.name);
   if (known) return { materia: known, how: 'nome' };
   const q = subject.name.replace(/^(noções|nocoes) (de|do|da|dos|das) /i, '');
-  const cands = await candidates(d, q);
+  const fits = placeFilter([subject.organization ?? '', subject.name, ...subject.topics].join(' | '));
+  const cands = (await candidates(d, q)).filter(fits);
   const ranked = cands.map((c) => ({ c, s: scoreMateria(subject.name, c) })).sort((x, y) => y.s - x.s).slice(0, 5);
   const scored: { c: string; s: number }[] = [];
   for (const r of ranked.filter((x) => x.s >= 40)) {
@@ -107,13 +110,52 @@ export async function mapSubject(d: MapDeps, subject: { name: string; topics: st
   return { materia: m, how: m ? 'ia' : 'ia: nenhuma' };
 }
 
+// Banca do edital com o nome da API: "Instituto Nosso Rumo" → "NOSSO RUMO", "Fundação Getulio Vargas" → "FGV".
+// Sem correspondência, fica sem banca: a primeira da busca por "Instituto" seria outra banca.
+const BOARD_WORDS = new Set(['instituto', 'fundacao', 'centro', 'consultoria', 'concursos', 'assessoria', 'organizacao', 'empresa']);
+export async function pickBoard(board: string, search: (q: string) => Promise<string[]>) {
+  const norm = normalizeText(board), words = norm.split(' ').filter((w) => w.length > 1 && !STOP.has(w));
+  if (!words.length) return '';
+  const initials = words.map((w) => w[0]).join('');
+  const fits = (b: string) => {
+    const n = normalizeText(b), t = n.split(' ');
+    return n === norm || n === initials || t.includes(norm) || (t.every((x) => words.includes(x)) && t.some((x) => !BOARD_WORDS.has(x)));
+  };
+  const queries = [board, ...(words.length > 1 ? [initials] : []), ...words.filter((w) => !BOARD_WORDS.has(w))];
+  for (const q of [...new Set(queries)].slice(0, 4)) {
+    const hit = (await search(q)).find(fits);
+    if (hit) return hit;
+  }
+  return '';
+}
+
+// Município do edital ("Prefeitura Municipal de Suzano" → "Suzano"); vazio se o órgão não é municipal.
+export function localPlace(organization: string) {
+  const m = organization.match(/(?:prefeitura|c[aâ]mara|munic[ií]pio)(?: municipal)? (?:de|do|da|dos|das) (.+)/i);
+  return m ? m[1]!.replace(/\s*[-–/(,].*$/, '').trim() : '';
+}
+
 // Assuntos da sessão: primeiro na matéria da disciplina; sem assunto, procura outra matéria pela
 // palavra-chave/título da sessão (ex.: Estatuto da PCD dentro de "Atualidades"). Sem nada, fica vazio.
+// Sessão sobre o município do edital usa só matéria dele ("Município de Suzano - Legislação Aplicada"): as genéricas de
+// municípios misturam outras cidades. Sem matéria do município, a sessão fica sem questões.
+// Em qualquer caso, matéria ou assunto de outro estado, município ou órgão fica de fora (`placeFilter`).
 export async function mapSession(d: MapDeps, subjectMateria: string | null,
-  s: { subject: string; title: string; keyword: string; topics: string[] }): Promise<SessionFilter> {
+  s: { subject: string; title: string; keyword: string; topics: string[]; organization?: string }): Promise<SessionFilter> {
   const text = [s.title, s.keyword, ...s.topics].join(' ');
+  const fits = placeFilter([s.organization ?? '', s.subject, text].join(' | '));
+  const city = localPlace(s.organization ?? ''), place = normalizeText(city);
+  if (place && ` ${normalizeText(text)} `.includes(` ${place} `)) {
+    const local = (await d.materias(city)).filter((c) => ` ${normalizeText(c)} `.includes(` ${place} `) && fits(c));
+    const none = { materia: null, assuntos: [], how: 'sem matéria do município' };
+    if (!local.length) return none;
+    const pick = await d.ai(MateriaChoice, materiaJsonSchema(), materiaPrompt(`${s.subject} — sessão "${s.title}"`, s.topics, local));
+    const materia = local.find((c) => normalizeText(c) === normalizeText(pick.materia));
+    const assuntos = materia ? (await d.assuntosOf(materia)).slice(0, 5) : [];
+    return materia && assuntos.length ? { materia, assuntos, how: 'matéria do município' } : none;
+  }
   const tryMateria = async (materia: string) => {
-    const lista = await d.assuntosOf(materia);
+    const lista = fits(materia) ? (await d.assuntosOf(materia)).filter(fits) : [];
     if (!lista.length) return [];
     const r = await d.ai(AssuntoChoice, assuntoJsonSchema(), assuntoPrompt({ subject: s.subject, materia, title: s.title, keyword: s.keyword, topics: s.topics, assuntos: prefilterAssuntos(lista, text) }));
     return keepValid(r.assuntos, lista);
@@ -127,7 +169,7 @@ export async function mapSession(d: MapDeps, subjectMateria: string | null,
   const laws = findLawRefs(text, s.subject).map((r) => lawByKey(r.law)?.name).filter((n): n is string => !!n);
   const found: string[] = [];
   for (const q of [...new Set([s.keyword, head, ...laws].filter(Boolean))].slice(0, 4)) found.push(...(await d.materias(q)));
-  const cands = fullMaterias(found).filter((c) => c !== subjectMateria).slice(0, 12);
+  const cands = fullMaterias(found).filter((c) => c !== subjectMateria && fits(c)).slice(0, 12);
   if (!cands.length) return { materia: null, assuntos: [], how: 'sem matéria' };
   const pick = await d.ai(MateriaChoice, materiaJsonSchema(), materiaPrompt(`${s.subject} — sessão "${s.title}"`, s.topics, cands));
   const materia = cands.find((c) => normalizeText(c) === normalizeText(pick.materia));

@@ -9,7 +9,7 @@
 import type { GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
-import { interleave, mapSubject, MEDIUM_OR_HARD, QMAP_PROMPT_VERSION, SESSION_DIFFICULTIES } from '../../../shared/qbank/map.ts';
+import { interleave, mapSubject, MEDIUM_OR_HARD, pickBoard, QMAP_PROMPT_VERSION, SESSION_DIFFICULTIES } from '../../../shared/qbank/map.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { cacheQuestions, mapDeps, publicQuestion, questFailure, recordAnswer, takeNewest, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
 
@@ -109,14 +109,11 @@ Deno.serve(async (req) => {
         const { data: plan } = await auth.client.from('study_plans').select('id, notice_id').eq('id', str(body.planId, 40)).maybeSingle();
         if (!plan) return json(404, { error: 'Plano não encontrado.' });
         planId = plan.id;
-        const { data: notice } = await auth.client.from('notices').select('board, role_name, total_questions, structure, education_level').eq('id', plan.notice_id).single();
+        const { data: notice } = await auth.client.from('notices').select('board, role_name, organization, total_questions, structure, education_level').eq('id', plan.notice_id).single();
         level = String(notice?.education_level ?? '');
         const { data: subs } = await auth.client.from('notice_subjects').select('id, name, block, questions, weight, notice_topics(text)').eq('notice_id', plan.notice_id).order('position');
         const deps = mapDeps(admin, quest, usage);
-        if (!banca && notice?.board) {
-          const bs = await quest.bancas(String(notice.board).split(/[\s/-]/)[0]!);
-          banca = bs.find((b) => normalizeText(b) === normalizeText(notice.board)) ?? bs[0] ?? '';
-        }
+        if (!banca && notice?.board) banca = await pickBoard(String(notice.board), (q) => quest.bancas(q));
         title = `Simulado ${body.size === 'reduzido' ? 'reduzido' : 'completo'} · ${notice?.role_name ?? ''}`.trim();
         const structure = (notice?.structure ?? {}) as { blocks?: { name: string; questions: number; rule: string }[] };
         const list = (subs ?? []) as { id: string; name: string; block: string; questions: number; weight: number; notice_topics: { text: string }[] }[];
@@ -130,7 +127,7 @@ Deno.serve(async (req) => {
             const n = s.questions || Math.max(1, Math.round(Math.max(0, g.questions - fixed) / Math.max(1, loose.length)));
             let { data: sm } = await admin.from('qbank_subject_maps').select('materia').eq('subject_id', s.id).maybeSingle();
             if (!sm) {
-              const r = await mapSubject(deps, { name: s.name, topics: (s.notice_topics ?? []).map((t) => t.text) });
+              const r = await mapSubject(deps, { name: s.name, topics: (s.notice_topics ?? []).map((t) => t.text), organization: String(notice?.organization ?? '') });
               sm = { materia: r.materia };
               await admin.from('qbank_subject_maps').upsert({ subject_id: s.id, owner_id: auth.user.id, materia: r.materia, banca, how: r.how, prompt_version: QMAP_PROMPT_VERSION });
             }

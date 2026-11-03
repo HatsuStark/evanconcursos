@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
-import { dominantFormat, mapSession, mapSubject, newestPage, QMAP_PROMPT_VERSION, QUESTION_FORMATS, type Incidence, type MapDeps, type SessionFilter } from '../../../shared/qbank/map.ts';
+import { dominantFormat, mapSession, mapSubject, newestPage, pickBoard, QMAP_PROMPT_VERSION, QUESTION_FORMATS, type Incidence, type MapDeps, type SessionFilter } from '../../../shared/qbank/map.ts';
 
 export const plain = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -71,13 +71,12 @@ export function mapDeps(admin: SupabaseClient, quest: QuestClient, usage: Gemini
 }
 
 // Matéria da disciplina (uma vez) e banca do edital. Os dados só são lidos se ainda não houver mapeamento.
-export async function ensureSubjectMap(admin: SupabaseClient, quest: QuestClient, deps: MapDeps, ownerId: string, subjectId: string, load: () => Promise<{ name: string; board: string; topics: string[] }>) {
+export async function ensureSubjectMap(admin: SupabaseClient, quest: QuestClient, deps: MapDeps, ownerId: string, subjectId: string, load: () => Promise<{ name: string; board: string; topics: string[]; organization: string }>) {
   const { data: sm } = await admin.from('qbank_subject_maps').select('materia, banca, banca_tipo').eq('subject_id', subjectId).maybeSingle();
   if (sm) return sm as { materia: string | null; banca: string; banca_tipo: string | null };
   const s = await load();
-  const bancas = s.board ? await quest.bancas(s.board.split(/[\s/-]/)[0]!) : [];
-  const banca = bancas.find((b) => normalizeText(b) === normalizeText(s.board)) ?? bancas[0] ?? '';
-  const r = await mapSubject(deps, { name: s.name, topics: s.topics });
+  const banca = s.board ? await pickBoard(s.board, (q) => quest.bancas(q)) : '';
+  const r = await mapSubject(deps, { name: s.name, topics: s.topics, organization: s.organization });
   await admin.from('qbank_subject_maps').upsert({ subject_id: subjectId, owner_id: ownerId, materia: r.materia, banca, how: r.how, prompt_version: QMAP_PROMPT_VERSION });
   return { materia: r.materia, banca, banca_tipo: null };
 }
@@ -95,7 +94,7 @@ export async function ensureBoardFormat(admin: SupabaseClient, quest: QuestClien
 }
 
 // Assuntos da sessão (uma vez por sessão).
-export async function ensureSessionMap(admin: SupabaseClient, deps: MapDeps, ownerId: string, sessionId: string, materia: string | null, load: () => Promise<{ subject: string; title: string; keyword: string; topics: string[] }>) {
+export async function ensureSessionMap(admin: SupabaseClient, deps: MapDeps, ownerId: string, sessionId: string, materia: string | null, load: () => Promise<{ subject: string; title: string; keyword: string; topics: string[]; organization: string }>) {
   const { data: m } = await admin.from('qbank_session_maps').select('materia, assuntos, how, incidence').eq('session_id', sessionId).maybeSingle();
   if (m) return m as SessionFilter & { incidence: Incidence[] | null };
   const filter = await mapSession(deps, materia, await load());
