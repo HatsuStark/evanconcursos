@@ -1,0 +1,43 @@
+import { describe, expect, it } from 'vitest';
+import { generatedPrompt, generatedTheme, toPublic, GENERATED_BANCA } from './generated.ts';
+import { rejectedIds, relevancePrompt } from './relevance.ts';
+
+const session = { subject: 'Direito Processual Penal', title: 'Prazos Processuais e Atos em Geral: contagem contínua e suspensão (arts. 792, 798 e 798-A do CPP)', keyword: 'prazos processuais' };
+
+describe('triagem de relevância', () => {
+  it('o prompt traz o tema, as alternativas sem HTML e é rigoroso na dúvida', () => {
+    const p = relevancePrompt(session, [{ id: '1', assunto: 'Prazos', enunciado: '<p>Assinale a <b>correta</b>.</p>', alternativas: ['<p>No procedimento ordinário…</p>'] }]);
+    expect(p).toMatch(/Tema da sessão: Prazos Processuais/);
+    expect(p).toMatch(/A\) No procedimento ordinário…/);
+    expect(p).not.toMatch(/<b>/);
+    expect(p).toMatch(/Na dúvida, false/);
+  });
+  it('descarta só os ids pedidos e marcados fora do tema', () => {
+    const bad = rejectedIds({ avaliacoes: [
+      { id: '1', treina_o_tema: false, motivo: 'procedimento ordinário' }, { id: '2', treina_o_tema: true, motivo: 'contagem' }, { id: '9', treina_o_tema: false, motivo: 'outro lote' },
+    ] }, ['1', '2', '3']);
+    expect([...bad.keys()]).toEqual(['1']);
+  });
+});
+
+describe('questões inéditas da IA', () => {
+  const base = { qid: 'ia-1', materia: 'Direito Processual Penal', assunto: 'Prazos', theme: generatedTheme('Direito Processual Penal', session.title), year: 2026 };
+  it('múltipla escolha: tira a letra do texto, valida o gabarito e marca como inédita', () => {
+    const r = toPublic({ enunciado: 'Sobre a contagem dos prazos no processo penal, é correto afirmar:', alternativas: ['A) um', 'B) dois', 'três', 'quatro', 'cinco'], gabarito: 'c' }, { ...base, format: 'multipla escolha' })!;
+    expect(r.gabarito).toBe('C');
+    expect(r.payload.alternativas.map((a) => a.texto)).toEqual(['um', 'dois', 'três', 'quatro', 'cinco']);
+    expect(r.payload.prova.banca).toBe(GENERATED_BANCA);
+    expect(r.payload.ia_tema).toBe(base.theme);
+  });
+  it('certo ou errado e gabarito inválido', () => {
+    expect(toPublic({ enunciado: 'Os prazos processuais penais correm em cartório e são contínuos.', alternativas: [], gabarito: 'C' }, { ...base, format: 'certo e errado' })!.payload.tipo).toBe('certo e errado');
+    expect(toPublic({ enunciado: 'Sobre a contagem dos prazos no processo penal:', alternativas: ['a', 'b', 'c', 'd', 'e'], gabarito: 'Z' }, { ...base, format: 'multipla escolha' })).toBeNull();
+  });
+  it('o prompt prende ao tema, às fontes e evita repetir questões já criadas', () => {
+    const p = generatedPrompt({ banca: 'VUNESP', cargo: 'Escrevente', ...session, law: [{ ref: 'CPP, art. 798', text: 'Todos os prazos…' }], format: 'multipla escolha', n: 3, avoid: ['Questão antiga'] });
+    expect(p).toMatch(/cobre SOMENTE este tema/);
+    expect(p).toMatch(/\[CPP, art. 798\]/);
+    expect(p).toMatch(/não repita/);
+    expect(p).toMatch(/5 alternativas/);
+  });
+});
