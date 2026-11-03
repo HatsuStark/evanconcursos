@@ -7,7 +7,7 @@ import { goalLabel, goalTone, scoreGoal, type ScoreGoal } from '../../../shared/
 import type { TopicRow, TopicStatus } from '../../../shared/domain/verticalized.ts';
 import { Shell } from '../components/Shell.tsx';
 import { fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
-import { saveCutoff, saveEducationLevel, type Draft } from '../lib/notices.ts';
+import { saveCutoff, saveEducationLevel, saveRoleDuties, type Draft } from '../lib/notices.ts';
 import { useActivePlan } from '../lib/plans.ts';
 import { useVerticalized } from '../lib/verticalized.ts';
 
@@ -88,6 +88,13 @@ export function VerticalizedPage() {
           {EDUCATION_LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
         </select>
         <p className="faint small" style={{ margin: '8px 0 0' }}>As questões das sessões seguem este nível, sempre com dificuldade média ou alta.</p>
+      </section>
+      <section>
+        <h3>Atribuições do cargo</h3>
+        <textarea key={active.data.notice.role_duties} className="textarea" rows={4} aria-label="Atribuições do cargo" defaultValue={active.data.notice.role_duties}
+          placeholder="Copie do edital (anexo de atribuições do cargo)"
+          onBlur={(e) => { if (e.target.value.trim() !== (active.data!.notice.role_duties ?? '').trim()) void saveRoleDuties(active.data!.notice.id, e.target.value).then(() => qc.invalidateQueries()); }} />
+        <p className="faint small" style={{ margin: '8px 0 0' }}>A IA usa estas atribuições nas apostilas e no cronograma{active.data.notice.role_duties ? '' : '; sem elas, deduz pelo nome do cargo e pode confundir com outro cargo do edital'}.</p>
       </section>
       <section>
         <h3>Nota de corte do cargo</h3>

@@ -6,7 +6,7 @@
 // Reaproveita apostilas idênticas (mesmo tema, fontes e profundidade) entre sessões e estudantes.
 // Não há "gerar de novo" pelo estudante (economia de créditos): uma apostila existente é sempre reaproveitada.
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { applyBoardEvidence, BOARD_SAMPLE_MAX, boardSample, Guide, GUIDE_PROMPT_VERSION, guideCacheKey, guideJsonSchema, guidePrompt, lawKeys, pickSimilarGuide, topicKeys, unlistedLaws, verifyGuide, type BoardQuestion, type GuideDepth } from '../../../shared/ai/guide.ts';
+import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide, GUIDE_PROMPT_VERSION, guideCacheKey, guideJsonSchema, guidePrompt, lawKeys, pickSimilarGuide, topicKeys, unlistedLaws, verifyGuide, type BoardQuestion, type GuideDepth } from '../../../shared/ai/guide.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient } from '../../../shared/qbank/client.ts';
 import { QMAP_PROMPT_VERSION } from '../../../shared/qbank/map.ts';
@@ -31,13 +31,14 @@ async function resolve(auth: Auth, admin: Admin, task: { subject_id: string | nu
     auth.client.from('study_sessions').select('title, keyword, topic_ids').eq('id', task.session_id).single(),
     auth.client.from('notice_subjects').select('name, notice_id').eq('id', task.subject_id).single(),
   ]);
-  const { data: notice } = await auth.client.from('notices').select('board, role_name, organization').eq('id', subject!.notice_id).single();
+  const { data: notice } = await auth.client.from('notices').select('board, role_name, organization, role_duties, structure').eq('id', subject!.notice_id).single();
   const { data: tt } = session?.topic_ids?.length ? await auth.client.from('notice_topics').select('id, text').in('id', session.topic_ids) : { data: [] };
   const topics = (tt ?? []).sort((a, b) => session!.topic_ids.indexOf(a.id) - session!.topic_ids.indexOf(b.id)).map((t) => t.text);
   const { articles, law } = await loadLawSources(admin, { title: session!.title, topics, subject: subject!.name });
   const input = { depth, banca: notice?.board ?? '', subject: subject!.name, title: session!.title, topics, law };
   return {
-    input, key: guideCacheKey(input), articles, noticeId: subject!.notice_id as string, cargo: (notice?.role_name ?? '') as string,
+    input, key: guideCacheKey({ ...input, cargo: String(notice?.role_name ?? '') }), articles, noticeId: subject!.notice_id as string, cargo: (notice?.role_name ?? '') as string,
+    duties: String(notice?.role_duties ?? ''), otherRoles: ((notice?.structure as { otherRoles?: string[] } | null)?.otherRoles ?? []) as string[],
     sessionId: task.session_id, subjectId: task.subject_id, keyword: (session?.keyword ?? '') as string,
     organization: String(notice?.organization ?? ''),
   };
@@ -49,6 +50,8 @@ type GuideContext = NonNullable<Awaited<ReturnType<typeof resolve>>>;
 async function findGuide(admin: Admin, { input, key }: GuideContext) {
   const { data: cached } = await admin.from('study_guides').select('*').eq('cache_key', key).maybeSingle();
   if (cached) return cached;
+  // Apostila de tema do cargo só serve para o mesmo cargo: aí não vale a de tema parecido.
+  if (roleSpecific(input)) return null;
   const { data: similar } = await admin.from('study_guides').select('*').eq('subject_key', normalizeText(input.subject)).eq('depth', input.depth)
     .eq('banca', normalizeText(input.banca)).eq('prompt_version', GUIDE_PROMPT_VERSION).order('created_at', { ascending: false }).limit(60);
   const hit = pickSimilarGuide({ title: input.title, topics: topicKeys(input.topics), law: lawKeys(input.law) }, similar ?? []);
@@ -108,7 +111,7 @@ async function boardEvidence(admin: Admin, ownerId: string, ctx: GuideContext): 
 }
 
 async function generate(admin: Admin, ownerId: string, jobId: string, ctx: GuideContext) {
-  const { input, key, articles, cargo } = ctx;
+  const { input, key, articles, cargo, duties, otherRoles } = ctx;
   const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash', started = Date.now();
   let usage: GeminiUsage | null = null;
   try {
@@ -116,7 +119,7 @@ async function generate(admin: Admin, ownerId: string, jobId: string, ctx: Guide
     // Formato predominante da banca na matéria: as questões de fixação seguem ele.
     const { data: sm } = await admin.from('qbank_subject_maps').select('banca_tipo').eq('subject_id', ctx.subjectId).maybeSingle();
     const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: Guide, jsonSchema: guideJsonSchema(), temperature: 0.3,
-      parts: [{ text: guidePrompt({ ...input, cargo, boardQuestions, format: String(sm?.banca_tipo ?? '') }) }] });
+      parts: [{ text: guidePrompt({ ...input, cargo, boardQuestions, format: String(sm?.banca_tipo ?? ''), duties, otherRoles }) }] });
     usage = r.usage;
     const v = verifyGuide(applyBoardEvidence(r.data, input.banca, boardQuestions.length), articles, input.subject);
     const { error } = await admin.from('study_guides').upsert({

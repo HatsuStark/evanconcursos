@@ -29,9 +29,16 @@ export type PlanStrategy = z.infer<typeof PlanStrategy>;
 export const strategyJsonSchema = () => z.toJSONSchema(PlanStrategy, { target: 'draft-7' });
 
 export interface StrategySubject { ref: string; name: string; core: boolean; questions: number; weight: number; level: number; topics: number }
-export function strategyPrompt(p: { role: string; board: string; examDate: string; weeks: number; hours: number; profile: string; notes: string[]; subjects: StrategySubject[] }) {
+// Cargo com as atribuições do edital: sem elas, a IA deduz pelo nome e pode confundir com outro cargo do mesmo edital.
+export const roleContext = (role: string, duties = '', otherRoles: string[] = []) => [
+  duties.trim() ? `Atribuições do cargo (edital): ${duties.trim().slice(0, 1500)}` : '',
+  otherRoles.length ? `O edital tem outros cargos (${otherRoles.slice(0, 12).join('; ')}): não use atribuições nem conteúdos deles para ${role || 'este cargo'}.` : '',
+].filter(Boolean).join('\n');
+
+export function strategyPrompt(p: { role: string; board: string; examDate: string; weeks: number; hours: number; profile: string; notes: string[]; subjects: StrategySubject[]; duties?: string; otherRoles?: string[] }) {
   return `Você é coordenador pedagógico de um cursinho para concursos públicos brasileiros.
 Concurso: ${p.role || 'não informado'}${p.board ? `, banca ${p.board}` : ''}. Prova em ${p.examDate || 'data a definir'}.
+${roleContext(p.role, p.duties, p.otherRoles)}
 Tempo disponível: ${p.weeks} semanas, ${p.hours} horas de estudo no total.
 Sobre o candidato: ${p.profile.trim() || 'não informado'}.
 Regras do edital: ${p.notes.slice(0, 15).join(' | ') || 'não informadas'}.
@@ -54,9 +61,10 @@ export const SubjectSessions = z.object({
 export type SubjectSessions = z.infer<typeof SubjectSessions>;
 export const sessionsJsonSchema = () => z.toJSONSchema(SubjectSessions, { target: 'draft-7' });
 
-export function sessionsPrompt(p: { role: string; board: string; profile: string; subject: string; level: number; questions: number; focus: string; n: number; minutesPerSession: number; topics: string[] }) {
+export function sessionsPrompt(p: { role: string; board: string; profile: string; subject: string; level: number; questions: number; focus: string; n: number; minutesPerSession: number; topics: string[]; duties?: string; otherRoles?: string[] }) {
   return `Você é professor de cursinho para concursos públicos brasileiros.
 Concurso: ${p.role || 'não informado'}${p.board ? `, banca ${p.board}` : ''}.
+${roleContext(p.role, p.duties, p.otherRoles)}
 Sobre o candidato: ${p.profile.trim() || 'não informado'}. Nível dele em ${p.subject}: ${LEVEL_NAMES[p.level] ?? 'não informado'}.
 Questões desta matéria na prova: ${p.questions || 'não informado'}. Foco recomendado: ${p.focus || 'não informado'}.
 Conteúdo programático do edital (número. tópico):

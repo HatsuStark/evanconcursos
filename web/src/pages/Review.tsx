@@ -110,6 +110,10 @@ export function ReviewPage() {
           <label className="field">Data da prova<input className="input" type="date" value={draft.examDate} onChange={(e) => set({ examDate: e.target.value })} /></label>
           <label className="field">Questões na prova<input className="input" type="number" min={0} value={draft.totalQuestions} onChange={(e) => set({ totalQuestions: Number(e.target.value) || 0 })} /></label>
         </div>
+        <label className="field">Atribuições do cargo
+          <textarea className="textarea" rows={3} value={draft.roleDuties} onChange={(e) => set({ roleDuties: e.target.value })} placeholder="Como o edital descreve o cargo escolhido (anexo de atribuições)" />
+          <span className="faint small">A IA usa estas atribuições no cronograma e nas apostilas. Confira se são do cargo certo.</span>
+        </label>
         {!!draft.structure.otherRoles.length && <p className="faint small" style={{ margin: 0 }}>Outros cargos neste edital: {draft.structure.otherRoles.join(' · ')}</p>}
       </div>
 

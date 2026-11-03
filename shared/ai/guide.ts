@@ -1,6 +1,7 @@
 // Apostila da sessão gerada pela IA: schema, prompt versionado e verificação das citações legais.
 // Fontes permitidas: o conteúdo do edital da sessão e os artigos oficiais fornecidos (lei seca).
 import { z } from 'zod';
+import { roleContext } from './plan.ts';
 import { findLawRefs, inRanges, type LawRef } from '../legal/refs.ts';
 import { lawByKey } from '../legal/registry.ts';
 
@@ -67,16 +68,19 @@ export function applyBoardEvidence(g: Guide, banca: string, questions: number) {
 }
 
 // format: formato predominante da banca na matéria ('certo e errado' ou múltipla escolha), para as questões de fixação.
-export function guidePrompt(p: { depth: GuideDepth; banca: string; cargo: string; subject: string; title: string; topics: string[]; law: GuideSource[]; boardQuestions?: BoardQuestion[]; format?: string }) {
+// duties/otherRoles: atribuições do cargo no edital e os outros cargos dele, para a apostila não descrever outro cargo.
+export function guidePrompt(p: { depth: GuideDepth; banca: string; cargo: string; subject: string; title: string; topics: string[]; law: GuideSource[]; boardQuestions?: BoardQuestion[]; format?: string; duties?: string; otherRoles?: string[] }) {
   const full = p.depth === 'completa', board = p.boardQuestions ?? [], ce = /certo/i.test(p.format ?? '');
   return `Você é professor especialista em concursos públicos brasileiros, autor de material de cursinho que aprova. Escreva uma apostila ${full ? 'completa, para quem está começando o tema (cerca de 20 minutos de leitura antes de resolver questões)' : 'de revisão curta, para quem já estudou o tema (cerca de 8 minutos de leitura)'}.
 Concurso: ${p.cargo || 'não informado'}${p.banca ? `, banca ${p.banca}` : ''}.
+${roleContext(p.cargo, p.duties, p.otherRoles)}
 Matéria: ${p.subject}
 Tema da sessão: ${p.title}
 Conteúdo do edital coberto: ${p.topics.join(' | ') || '—'}
 ${p.law.length ? `Trechos oficiais da lei (lei seca, única fonte legal permitida):\n${p.law.map((l) => `[${l.ref}] ${l.text}`).join('\n\n')}` : 'Nenhum trecho de lei foi fornecido para este tema.'}
 ${board.length ? `Questões reais da banca ${p.banca} sobre o tema (amostra, não o total):\n${board.map((q, i) => `Q${i + 1} (${[q.assunto, q.ano].filter(Boolean).join(', ')}): ${q.enunciado.slice(0, BOARD_TEXT_MAX)}${q.alternativas.length ? `\n${q.alternativas.map((a) => a.slice(0, BOARD_OPTION_MAX)).join(' | ')}` : ''}`).join('\n\n')}` : 'Nenhuma questão real da banca foi fornecida.'}
 Regras obrigatórias:
+- Quando o tema tratar do cargo (atribuições, rotina, conduta), use as atribuições do edital acima como base e não descreva funções de outros cargos. Sem atribuições informadas, fique no que o nome do cargo e o conteúdo do edital indicam, sem inventar funções.
 - Escreva só sobre o "Tema da sessão", e dê à apostila um título sobre ele. O conteúdo do edital pode listar assuntos e leis de outras sessões: ignore o que não pertence ao tema. Trecho de lei que não trate do tema também fica de fora.
 - Cite artigos SOMENTE dos trechos fornecidos, no formato do colchete (ex.: "CP, art. 312"). Se não houver trecho, não cite números de artigos.
 - Não cite jurisprudência, súmulas, autores ou posições doutrinárias. Não invente leis, prazos ou números.
@@ -134,8 +138,12 @@ export const topicKeys = (topics: string[]) => [...new Set(topics.map(norm).filt
 export const titleKeys = (title: string) => [...new Set(norm(title.replace(/\([^)]*\)/g, ' ')).split(' ').filter((w) => w.length > 3))].sort();
 export const lawKeys = (law: GuideSource[]) => [...new Set(law.map((l) => l.ref))].sort();
 
-export function guideCacheKey(p: { depth: GuideDepth; subject: string; title?: string; topics: string[]; law: GuideSource[]; banca: string }) {
-  const s = JSON.stringify([GUIDE_PROMPT_VERSION, p.depth, norm(p.banca), norm(p.subject), titleKeys(p.title ?? ''), topicKeys(p.topics), p.law.map((l) => l.ref + '|' + l.text.length).sort()]);
+// Tema que depende do cargo (atribuições, rotina, funções): a apostila é do cargo e não serve para outro, mesmo com o mesmo tema.
+export const roleSpecific = (p: { title?: string; topics: string[] }) => /atribui|do cargo|da fun[cç][aã]o|rotina funcional/i.test([p.title ?? '', ...p.topics].join(' '));
+
+export function guideCacheKey(p: { depth: GuideDepth; subject: string; title?: string; topics: string[]; law: GuideSource[]; banca: string; cargo?: string }) {
+  const s = JSON.stringify([GUIDE_PROMPT_VERSION, p.depth, norm(p.banca), norm(p.subject), titleKeys(p.title ?? ''), topicKeys(p.topics), p.law.map((l) => l.ref + '|' + l.text.length).sort(),
+    ...(roleSpecific(p) ? [norm(p.cargo ?? '')] : [])]);
   let h1 = 0x811c9dc5, h2 = 0;
   for (let i = 0; i < s.length; i++) { h1 = Math.imul(h1 ^ s.charCodeAt(i), 16777619) >>> 0; h2 = (h2 * 31 + s.charCodeAt(i)) >>> 0; }
   return `${h1.toString(16)}${h2.toString(16)}`;

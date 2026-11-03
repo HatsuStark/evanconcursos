@@ -44,7 +44,7 @@ não verbais, literários e não literários. 12. Crase. 13. Pontuação.
 BLOCO II: Conhecimentos em Direito (30) questões: 1. DIREITO PENAL: Código Penal - artigos 293 a 305; 307; 308.`;
 
 const base: NoticeExtraction = {
-  organization: 'TJSP', role: 'Escrevente', otherRoles: [], educationLevel: 'Médio', board: 'VUNESP', examDate: '2030-12-07', totalQuestions: 46,
+  organization: 'TJSP', role: 'Escrevente', otherRoles: [], roleDuties: '', educationLevel: 'Médio', board: 'VUNESP', examDate: '2030-12-07', totalQuestions: 46,
   stages: [{ kind: 'objetiva', description: '' }],
   blocks: [{ name: 'Bloco I', questions: 16, rule: '' }, { name: 'Bloco II', questions: 30, rule: '' }],
   subjects: [

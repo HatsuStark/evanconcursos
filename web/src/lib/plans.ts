@@ -129,7 +129,7 @@ export async function updatePlanFromNotice(noticeId: string, inputs: PlanInputs,
 export type Pacing = 'agenda' | 'ciclo';
 export interface ActivePlan {
   plan: { id: string; name: string; notice_id: string; active_version_id: string | null; pacing: Pacing };
-  notice: { id: string; role_name: string; organization: string; board: string; exam_date: string | null; total_questions: number; education_level: Draft['educationLevel']; cutoff_pct: number | null; structure: { blocks?: { name: string; rule: string }[] } | null };
+  notice: { id: string; role_name: string; organization: string; board: string; exam_date: string | null; total_questions: number; education_level: Draft['educationLevel']; cutoff_pct: number | null; role_duties: string; structure: { blocks?: { name: string; rule: string }[] } | null };
   version: { id: string; number: number; reason: string; inputs: PlanInputs; strategy: Strategy; summary: { weeks?: number; hours?: number; perSubject?: { subjectId: string; name: string; days: number }[]; replan?: { round?: RoundSummary } & Partial<RebalanceSummary>; openEnded?: boolean }; created_at: string } | null;
   subjects: SubjectRow[];
   tasks: TaskRow[];
@@ -152,7 +152,7 @@ export const useActivePlan = (noticeId?: string) => useQuery({
     const plan = (must(await q) as ActivePlan['plan'][])[0];
     if (!plan) return null;
     const [notice, version, subjects, tasks] = await Promise.all([
-      supabase.from('notices').select('id, role_name, organization, board, exam_date, total_questions, education_level, cutoff_pct, structure').eq('id', plan.notice_id).single(),
+      supabase.from('notices').select('id, role_name, organization, board, exam_date, total_questions, education_level, cutoff_pct, role_duties, structure').eq('id', plan.notice_id).single(),
       plan.active_version_id ? supabase.from('plan_versions').select('id, number, reason, inputs, strategy, summary, created_at').eq('id', plan.active_version_id).single() : Promise.resolve({ data: null, error: null }),
       supabase.from('notice_subjects').select('id, name, position, is_core, questions, weight, block').eq('notice_id', plan.notice_id).order('position'),
       supabase.from('tasks').select('id, date, position, minutes, kind, subject_id, session_id, title, keyword, goal_questions, done_at')

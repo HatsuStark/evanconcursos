@@ -22,7 +22,7 @@ Deno.serve(async (req) => {
   let usage: GeminiUsage | null = null, latencyMs: number | null = null;
   try {
     // Edital e matérias lidos como o usuário: a RLS garante que são dele.
-    const { data: notice } = await auth.client.from('notices').select('id, role_name, board, exam_date, notes, status').eq('id', String(body.noticeId ?? '')).maybeSingle();
+    const { data: notice } = await auth.client.from('notices').select('id, role_name, role_duties, structure, board, exam_date, notes, status').eq('id', String(body.noticeId ?? '')).maybeSingle();
     if (!notice || notice.status !== 'reviewed') return json(404, { error: 'Edital não encontrado ou ainda não conferido.' });
 
     if (body.step === 'strategy') {
@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
       }));
       const r = await generateJson({
         apiKey, model, schema: PlanStrategy, jsonSchema: strategyJsonSchema(),
-        parts: [{ text: strategyPrompt({ role: notice.role_name, board: notice.board, examDate: isOpenEnded(notice.exam_date, new Date().toISOString().slice(0, 10)) ? '' : notice.exam_date ?? '', weeks: int(body.weeks, 1, 260), hours: int(body.hours, 1, 20000), profile: inputs.data.profile, notes: notice.notes ?? [], subjects: refs }) }],
+        parts: [{ text: strategyPrompt({ role: notice.role_name, board: notice.board, examDate: isOpenEnded(notice.exam_date, new Date().toISOString().slice(0, 10)) ? '' : notice.exam_date ?? '', weeks: int(body.weeks, 1, 260), hours: int(body.hours, 1, 20000), profile: inputs.data.profile, notes: notice.notes ?? [], subjects: refs, duties: notice.role_duties ?? '', otherRoles: notice.structure?.otherRoles ?? [] }) }],
       });
       usage = r.usage; latencyMs = r.latencyMs;
       await logUsage(admin, { ownerId: auth.user.id, operation, model, promptVersion: PLAN_PROMPT_VERSION, usage, latencyMs, status: 'ok' });
@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
         parts: [{ text: sessionsPrompt({
           role: notice.role_name, board: notice.board, profile: String(body.profile ?? '').slice(0, 1500), subject: subject.name,
           level: int(body.level, 0, 3), questions: subject.questions, focus: String(body.focus ?? '').slice(0, 300), n,
-          minutesPerSession: int(body.minutes, 15, 960), topics,
+          minutesPerSession: int(body.minutes, 15, 960), topics, duties: notice.role_duties ?? '', otherRoles: notice.structure?.otherRoles ?? [],
         }) }],
       });
       usage = r.usage; latencyMs = r.latencyMs;

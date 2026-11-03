@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyBoardEvidence, boardSample, guideCacheKey, guidePrompt, lawKeys, pickSimilarGuide, topicKeys, unlistedLaws, verifyGuide, type BoardQuestion, type Guide } from './guide.ts';
+import { applyBoardEvidence, boardSample, guideCacheKey, guidePrompt, lawKeys, pickSimilarGuide, roleSpecific, topicKeys, unlistedLaws, verifyGuide, type BoardQuestion, type Guide } from './guide.ts';
 
 const law = [{ ref: 'CP, art. 312', text: 'x'.repeat(100) }, { ref: 'CP, art. 313', text: 'y'.repeat(80) }];
 const base = { depth: 'completa' as const, subject: 'Direito Penal', banca: 'VUNESP', topics: ['Peculato', 'Concussão'], law };
@@ -73,5 +73,20 @@ describe('reaproveitamento de apostilas', () => {
     const t = { topics: topicKeys(['Crase', 'Regência verbal']), law: [] };
     expect(pickSimilarGuide(t, [{ topic_keys: topicKeys(['Regência verbal', 'Crase']), sources: [] }])).toBe(0);
     expect(pickSimilarGuide(t, [{ topic_keys: topicKeys(['Crase']), sources: [] }])).toBe(-1);
+  });
+});
+
+describe('cargo nas apostilas', () => {
+  const t = { ...base, title: 'Atribuições do Cargo: rotina funcional', topics: ['Principais atribuições do cargo.'] };
+  it('tema do cargo não é reaproveitado entre cargos; tema comum é', () => {
+    expect(roleSpecific(t)).toBe(true);
+    expect(guideCacheKey({ ...t, cargo: 'Agente Escolar' })).not.toBe(guideCacheKey({ ...t, cargo: 'Agente de Segurança Escolar' }));
+    expect(guideCacheKey({ ...base, cargo: 'Agente Escolar' })).toBe(guideCacheKey({ ...base, cargo: 'Agente de Segurança Escolar' }));
+  });
+  it('o prompt leva as atribuições do edital e avisa dos outros cargos', () => {
+    const p = guidePrompt({ ...promptBase, cargo: 'Agente Escolar', duties: 'Executar a limpeza e a conservação das instalações', otherRoles: ['Agente de Segurança Escolar'] });
+    expect(p).toContain('Executar a limpeza e a conservação das instalações');
+    expect(p).toContain('Agente de Segurança Escolar');
+    expect(p).toMatch(/não use atribuições/);
   });
 });
