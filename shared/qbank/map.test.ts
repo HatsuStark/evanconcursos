@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { theoryGoal } from '../domain/scheduler.ts';
-import { dominantFormat, localPlace, pickBoard, equalIncidence, interleave, inTurn, mapSession, mapSubject, measureIncidence, newestPage, planPicks, roleKeyword, searchFilters, type MapDeps } from './map.ts';
+import { dominantFormat, localPlace, pickBoard, equalIncidence, interleave, inTurn, assuntoPrompt, prefilterAssuntos, mapSession, mapSubject, measureIncidence, newestPage, planPicks, roleKeyword, searchFilters, type MapDeps } from './map.ts';
 
 const tally = (picks: string[]) => picks.reduce<Record<string, number>>((m, a) => ({ ...m, [a]: (m[a] ?? 0) + 1 }), {});
 
@@ -226,5 +226,20 @@ describe('sessão do órgão do edital', () => {
     const r = await mapSession(deps, 'Legislação Especial', { subject: 'Legislação Especial', title: 'Normas TJSP - Disposições Gerais', keyword: 'Normas Corregedoria TJSP', topics: [], organization: 'Tribunal de Justiça do Estado de São Paulo' });
     expect(r).toEqual({ materia: 'Corregedoria Geral da Justiça de São Paulo - CGJ SP - Legislação Aplicada', assuntos: ['Legislação dos Órgãos'], how: 'matéria do órgão' });
     expect(asked).toContain('TJ SP');
+  });
+});
+
+describe('tema da sessão como foco (qmap-v4)', () => {
+  const item = 'Classes de palavras: emprego e sentido que imprimem às relações que estabelecem: substantivo, adjetivo, artigo, numeral, pronome, verbo, advérbio, preposição e conjunção.';
+  it('pré-filtro: palavras do tema pesam mais que as do item do edital', () => {
+    const lista = ['Pronomes', 'Conjunções', 'Verbos', ...Array.from({ length: 200 }, (_, i) => `Assunto ${i}`), 'Substantivos', 'Adjetivos'];
+    const out = prefilterAssuntos(lista, 'Substantivos e Adjetivos: flexão substantivos adjetivos', 4, item);
+    expect(out.slice(0, 2).sort()).toEqual(['Adjetivos', 'Substantivos']);
+  });
+  it('o prompt põe o tema como foco, o item do edital como contexto e evita o assunto genérico', () => {
+    const p = assuntoPrompt({ subject: 'Língua Portuguesa', materia: 'Língua Portuguesa', title: 'Substantivos e Adjetivos: flexão de gênero e número', keyword: 'substantivo e adjetivo', topics: [item], assuntos: ['Substantivos'] });
+    expect(p).toMatch(/Tema da sessão \(o foco\): Substantivos e Adjetivos/);
+    expect(p).toMatch(/só contexto/);
+    expect(p).toMatch(/Evite assunto genérico/);
   });
 });

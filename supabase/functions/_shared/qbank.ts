@@ -115,13 +115,16 @@ export async function ensureBoardFormat(admin: SupabaseClient, quest: QuestClien
   } catch { return ''; }
 }
 
-// Assuntos da sessão (uma vez por sessão).
+// Assuntos da sessão (uma vez por sessão e versão do prompt). Mapa de versão antiga é refeito na próxima abertura; a
+// incidência (3 créditos por assunto) só é medida de novo se os assuntos mudaram.
 export async function ensureSessionMap(admin: SupabaseClient, deps: MapDeps, ownerId: string, sessionId: string, materia: string | null, load: () => Promise<{ subject: string; title: string; keyword: string; topics: string[]; organization: string }>) {
-  const { data: m } = await admin.from('qbank_session_maps').select('materia, assuntos, how, incidence').eq('session_id', sessionId).maybeSingle();
-  if (m) return m as SessionFilter & { incidence: Incidence[] | null };
+  const { data: m } = await admin.from('qbank_session_maps').select('materia, assuntos, how, incidence, prompt_version').eq('session_id', sessionId).maybeSingle();
+  if (m && m.prompt_version === QMAP_PROMPT_VERSION) return m as SessionFilter & { incidence: Incidence[] | null };
   const filter = await mapSession(deps, materia, await load());
-  await admin.from('qbank_session_maps').upsert({ session_id: sessionId, owner_id: ownerId, materia: filter.materia, assuntos: filter.assuntos, how: filter.how, prompt_version: QMAP_PROMPT_VERSION });
-  return { ...filter, incidence: null };
+  const same = !!m && m.materia === filter.materia && [...((m.assuntos ?? []) as string[])].sort().join('|') === [...filter.assuntos].sort().join('|');
+  const incidence = same ? (m!.incidence as Incidence[] | null) : null;
+  await admin.from('qbank_session_maps').upsert({ session_id: sessionId, owner_id: ownerId, materia: filter.materia, assuntos: filter.assuntos, how: filter.how, incidence, prompt_version: QMAP_PROMPT_VERSION });
+  return { ...filter, incidence };
 }
 
 export type Context = 'plan' | 'free' | 'review' | 'simulado';

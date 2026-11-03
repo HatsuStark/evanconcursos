@@ -8,7 +8,9 @@ import { lawByKey } from '../legal/registry.ts';
 import { fullMaterias, subjectMateria } from './materias.ts';
 import { organSearch, placeFilter } from './places.ts';
 
-export const QMAP_PROMPT_VERSION = 'qmap-v3';
+// qmap-v4: o tema da sessão é o foco; o item do edital é só contexto (um item longo, como "Classes de palavras: substantivo,
+// adjetivo, …, conjunção", vira várias sessões) e assunto genérico só entra sem um específico do tema.
+export const QMAP_PROMPT_VERSION = 'qmap-v4';
 
 const STOP = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'a', 'o', 'as', 'os', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'ao', 'aos', 'art', 'arts', 'lei', 'nocoes', 'noções']);
 export const tokens = (s: string) => normalizeText(s).split(' ').filter((w) => w.length > 2 && !STOP.has(w));
@@ -31,10 +33,11 @@ export function pickMateria(subject: string, candidates: string[]) {
 }
 
 // Pré-filtro de assuntos pela sobreposição de palavras com a sessão (a lista de algumas matérias passa de mil).
-export function prefilterAssuntos(assuntos: string[], sessionText: string, max = 120) {
-  const st = new Set(tokens(sessionText));
-  if (!st.size || assuntos.length <= max) return assuntos.slice(0, max);
-  return assuntos.map((a, i) => ({ a, i, s: tokens(a).filter((t) => st.has(t)).length }))
+// focus: tema e palavra-chave da sessão (pesam o dobro); context: item do edital.
+export function prefilterAssuntos(assuntos: string[], focus: string, max = 120, context = '') {
+  const ft = new Set(tokens(focus)), ct = new Set(tokens(context));
+  if ((!ft.size && !ct.size) || assuntos.length <= max) return assuntos.slice(0, max);
+  return assuntos.map((a, i) => ({ a, i, s: tokens(a).reduce((n, t) => n + (ft.has(t) ? 2 : ct.has(t) ? 1 : 0), 0) }))
     .sort((x, y) => y.s - x.s || x.i - y.i).slice(0, max).map((x) => x.a);
 }
 
@@ -58,13 +61,15 @@ export const assuntoJsonSchema = () => z.toJSONSchema(AssuntoChoice, { target: '
 export function assuntoPrompt(p: { subject: string; materia: string; title: string; keyword: string; topics: string[]; assuntos: string[] }) {
   return `Estamos escolhendo questões de concurso para uma sessão de estudo.
 Disciplina: ${p.subject} (no banco de questões: ${p.materia})
-Sessão: ${p.title}
+Tema da sessão (o foco): ${p.title}
 Palavra-chave: ${p.keyword || '—'}
-Conteúdo do edital coberto: ${p.topics.join(' | ').slice(0, 1200) || '—'}
+Item do edital de onde o tema saiu (só contexto; pode listar assuntos que são de outras sessões): ${p.topics.join(' | ').slice(0, 1200) || '—'}
 Assuntos disponíveis no banco de questões (escolha somente desta lista, exatamente como escritos):
 ${p.assuntos.map((a) => `- ${a}`).join('\n')}
-Escolha até 5 assuntos cujas questões treinam exatamente o conteúdo desta sessão, do mais ao menos relevante.
-Não escolha assuntos de outras partes da matéria. Se nenhum servir, devolva lista vazia.`;
+Escolha até 5 assuntos cujas questões treinam exatamente o TEMA da sessão, do mais ao menos relevante.
+- O item do edital costuma ser maior que o tema: ignore o que ele lista fora do tema (ex.: tema "Substantivos e adjetivos" num item que cita todas as classes de palavras não leva pronome, verbo nem conjunção).
+- Evite assunto genérico que abrange a matéria ou vários temas (ex.: "Classes de palavras", "Morfologia", "Gramática") quando houver assunto específico do tema; use o genérico só se não houver nenhum específico.
+- Não escolha assuntos de outras partes da matéria. Se nenhum servir, devolva lista vazia.`;
 }
 
 // Mantém só escolhas que existem na lista (comparação sem acento/caixa), na forma oficial.
@@ -172,7 +177,7 @@ export async function mapSession(d: MapDeps, subjectMateria: string | null,
   const tryMateria = async (materia: string) => {
     const lista = fits(materia) ? (await d.assuntosOf(materia)).filter(fits) : [];
     if (!lista.length) return [];
-    const r = await d.ai(AssuntoChoice, assuntoJsonSchema(), assuntoPrompt({ subject: s.subject, materia, title: s.title, keyword: s.keyword, topics: s.topics, assuntos: prefilterAssuntos(lista, text) }));
+    const r = await d.ai(AssuntoChoice, assuntoJsonSchema(), assuntoPrompt({ subject: s.subject, materia, title: s.title, keyword: s.keyword, topics: s.topics, assuntos: prefilterAssuntos(lista, [s.title, s.keyword].join(' '), 120, s.topics.join(' ')) }));
     return keepValid(r.assuntos, lista);
   };
   if (subjectMateria) {

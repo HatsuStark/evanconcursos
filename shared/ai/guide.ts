@@ -137,12 +137,12 @@ Concurso: ${p.cargo || 'não informado'}${p.banca ? `, banca ${p.banca}` : ''}.
 ${roleContext(p.cargo, p.duties, p.otherRoles)}
 Matéria: ${p.subject}
 Tema da sessão: ${p.title}
-Conteúdo do edital coberto: ${p.topics.join(' | ') || '—'}
+Item do edital de onde o tema saiu (só contexto; pode citar assuntos de outras sessões): ${p.topics.join(' | ') || '—'}
 ${p.law.length ? `Trechos oficiais da lei (lei seca, única fonte legal permitida):\n${p.law.map((l) => `[${l.ref}] ${l.text}`).join('\n\n')}` : 'Nenhum trecho de lei foi fornecido para este tema.'}
 ${board.length ? `Questões reais da banca ${p.banca} sobre o tema (amostra, não o total):\n${board.map((q, i) => `Q${i + 1} (${[q.assunto, q.ano].filter(Boolean).join(', ')}): ${q.enunciado.slice(0, BOARD_TEXT_MAX)}${q.alternativas.length ? `\n${q.alternativas.map((a) => a.slice(0, BOARD_OPTION_MAX)).join(' | ')}` : ''}`).join('\n\n')}` : 'Nenhuma questão real da banca foi fornecida.'}
 Regras obrigatórias:
 - Quando o tema tratar do cargo (atribuições, rotina, conduta), use as atribuições do edital acima como base e não descreva funções de outros cargos. Sem atribuições informadas, fique no que o nome do cargo e o conteúdo do edital indicam, sem inventar funções.
-- Escreva só sobre o "Tema da sessão", e dê à apostila um título sobre ele. O conteúdo do edital pode listar assuntos e leis de outras sessões: ignore o que não pertence ao tema. Trecho de lei que não trate do tema também fica de fora.
+- Escreva só sobre o "Tema da sessão", e dê à apostila um título sobre ele. O item do edital costuma ser maior que o tema (ex.: tema "Substantivos e adjetivos" num item que cita todas as classes de palavras) e pode listar assuntos e leis de outras sessões: ignore o que não pertence ao tema. Trecho de lei que não trate do tema também fica de fora.
 - Cite artigos SOMENTE dos trechos fornecidos, no formato do colchete (ex.: "CP, art. 312"). Se não houver trecho, não cite números de artigos.
 - Não cite jurisprudência, súmulas, autores ou posições doutrinárias. Não invente leis, prazos ou números.
 - Siga o texto da lei fornecido; ele é a versão vigente.
