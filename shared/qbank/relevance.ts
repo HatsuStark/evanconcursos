@@ -3,6 +3,7 @@
 // cada questão contra o tema e descarta a que cobra outro tema. Rigorosa: na dúvida, sai. Sem questão real no tema, a sessão
 // recebe questões inéditas da IA (generated.ts): o estudante prefere isso a responder fora do tema.
 import { z } from 'zod';
+import { normalizeText } from '../ai/notice.ts';
 
 export const RELEVANCE_PROMPT_VERSION = 'qrel-v1';
 const TEXT_MAX = 700, OPTION_MAX = 220;
@@ -32,6 +33,22 @@ Regras:
 - Na dúvida, false: quando faltar questão no tema, o app cria questões inéditas sobre ele.
 Questões (devolva uma avaliação para cada id):
 ${questions.map((q) => `id=${q.id} · assunto no banco: ${q.assunto || '—'}\n${plain(q.enunciado).slice(0, TEXT_MAX)}${q.alternativas.length ? `\n${q.alternativas.map((a, i) => `${String.fromCharCode(65 + i)}) ${plain(a).slice(0, OPTION_MAX)}`).join('\n')}` : ''}`).join('\n\n')}`;
+}
+
+// Corte de assunto ruim: o descarte já pago (6 créditos por questão) mostra quais assuntos do banco trazem outro tema para
+// a sessão. Com 5 ou mais questões julgadas e 60% ou mais descartadas, a sessão para de comprar daquele assunto; a parte
+// dele vai para os outros assuntos e, sem nenhum, para as questões inéditas da IA (sem créditos).
+export const PRUNE_MIN_JUDGED = 5, PRUNE_REJECT_SHARE = 0.6;
+export function prunedAssuntos(verdicts: { assunto: string; relevant: boolean }[]) {
+  const by = new Map<string, { n: number; bad: number }>();
+  for (const v of verdicts) {
+    const k = normalizeText(v.assunto);
+    if (!k) continue;
+    const e = by.get(k) ?? { n: 0, bad: 0 };
+    e.n++; if (!v.relevant) e.bad++;
+    by.set(k, e);
+  }
+  return new Set([...by].filter(([, e]) => e.n >= PRUNE_MIN_JUDGED && e.bad / e.n >= PRUNE_REJECT_SHARE).map(([k]) => k));
 }
 
 // Só descarta o que a IA marcou como fora do tema; id sem avaliação fica (na dúvida, fica).

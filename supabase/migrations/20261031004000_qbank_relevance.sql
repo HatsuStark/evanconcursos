@@ -5,6 +5,7 @@ create table public.qbank_relevance (
   session_id uuid not null,
   owner_id uuid not null,
   qid text not null,
+  assunto text not null default '',   -- assunto da questão no banco: assunto com muito descarte deixa de ser comprado na sessão
   relevant boolean not null,
   reason text not null default '' check (char_length(reason) <= 300),
   prompt_version text not null,

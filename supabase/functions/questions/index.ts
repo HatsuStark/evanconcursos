@@ -8,7 +8,7 @@
 import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { GENERATED_MAX, GeneratedQuestions, generatedJsonSchema, generatedPrompt, generatedTheme, toPublic } from '../../../shared/qbank/generated.ts';
 import { loadLawSources } from '../_shared/law.ts';
-import { rejectedIds, RELEVANCE_PROMPT_VERSION, RelevanceVerdicts, relevanceJsonSchema, relevancePrompt } from '../../../shared/qbank/relevance.ts';
+import { prunedAssuntos, rejectedIds, RELEVANCE_PROMPT_VERSION, RelevanceVerdicts, relevanceJsonSchema, relevancePrompt } from '../../../shared/qbank/relevance.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { findLawRefs, inRanges, type LawRef } from '../../../shared/legal/refs.ts';
 import { lawByKey } from '../../../shared/legal/registry.ts';
@@ -205,11 +205,11 @@ Deno.serve(async (req) => {
     // Pula o que o estudante já respondeu; o que ele respondeu nesta sessão define a vez de cada assunto.
     const { data: done } = await admin.from('question_attempts').select('qid, assunto, session_id').eq('owner_id', auth.user.id).eq('subject_id', subject.id).limit(5000);
     // Triagem de relevância da sessão: o que já foi julgado não é julgado de novo, e o que ficou fora do tema nunca volta.
-    const judged = new Set<string>(), rejected = new Set<string>();
+    const judged = new Set<string>(), rejected = new Set<string>(), verdicts: { assunto: string; relevant: boolean }[] = [];
     const { data: sess } = task.session_id ? await auth.client.from('study_sessions').select('title, keyword').eq('id', task.session_id).maybeSingle() : { data: null };
     if (sess) {
-      const { data: rel } = await admin.from('qbank_relevance').select('qid, relevant').eq('session_id', task.session_id);
-      for (const r of rel ?? []) { judged.add(r.qid); if (!r.relevant) rejected.add(r.qid); }
+      const { data: rel } = await admin.from('qbank_relevance').select('qid, assunto, relevant').eq('session_id', task.session_id);
+      for (const r of rel ?? []) { judged.add(r.qid); verdicts.push({ assunto: r.assunto, relevant: r.relevant }); if (!r.relevant) rejected.add(r.qid); }
     }
     // Também as que já estão na tela, ainda sem resposta (o app manda em `exclude`).
     const seen = new Set([...(done ?? []).map((d) => d.qid as string), ...(Array.isArray(body.exclude) ? (body.exclude as unknown[]).map(String).slice(0, 500) : []), ...rejected]);
@@ -226,9 +226,9 @@ Deno.serve(async (req) => {
         usage.inputTokens += r.usage.inputTokens; usage.outputTokens += r.usage.outputTokens; usage.thinkingTokens += r.usage.thinkingTokens;
         const bad = rejectedIds(r.data, fresh.map((q) => q.qid));
         await admin.from('qbank_relevance').upsert(fresh.map((q) => ({
-          session_id: task.session_id, owner_id: auth.user.id, qid: q.qid, relevant: !bad.has(q.qid), reason: bad.get(q.qid) ?? '', prompt_version: RELEVANCE_PROMPT_VERSION,
+          session_id: task.session_id, owner_id: auth.user.id, qid: q.qid, assunto: q.assunto, relevant: !bad.has(q.qid), reason: bad.get(q.qid) ?? '', prompt_version: RELEVANCE_PROMPT_VERSION,
         })));
-        for (const q of fresh) { judged.add(q.qid); if (bad.has(q.qid)) rejected.add(q.qid); }
+        for (const q of fresh) { judged.add(q.qid); verdicts.push({ assunto: q.assunto, relevant: !bad.has(q.qid) }); if (bad.has(q.qid)) rejected.add(q.qid); }
         return qs.filter((q) => !bad.has(q.qid));
       } catch (e) {
         console.error('relevance:', e);
@@ -268,11 +268,16 @@ Deno.serve(async (req) => {
     let timedOut = false;
     const result: PublicQuestion[] = [];
     // Até 3 rodadas: as questões descartadas pela triagem são repostas no mesmo pedido.
-    for (let round = 0; filters.length && round < RELEVANCE_ROUNDS && result.length < count && !timedOut; round++) {
+    // Assunto que trouxe muito descarte nesta sessão deixa de ser comprado (prunedAssuntos); sem assunto bom, vai para o plano B.
+    for (let round = 0; round < RELEVANCE_ROUNDS && result.length < count && !timedOut; round++) {
+      const pruned = prunedAssuntos(verdicts);
+      const live = filters.filter((f) => !pruned.has(normalizeText(f.assunto)));
+      const liveIncidence = (incidence ?? []).filter((i) => !pruned.has(normalizeText(i.assunto)));
+      if (!live.length || !liveIncidence.length) break;
       const need = count - result.length;
       const out: QuestQuestion[] = [];
       // Traz até `limit` questões no total, das mais recentes para as mais antigas.
-      const take = async (f: (typeof filters)[number], limit: number) => {
+      const take = async (f: (typeof live)[number], limit: number) => {
         if (out.length >= limit) return;
         const elapsed = Date.now() - started;
         if (elapsed > HARD_LIMIT_MS || ((out.length || result.length) && elapsed > SOFT_LIMIT_MS)) { timedOut = true; return; }
@@ -281,7 +286,7 @@ Deno.serve(async (req) => {
       // Cada assunto busca a sua parte (banca e, se faltar, outras bancas); o que sobrar vem de qualquer assunto com questões.
       // Primeiro as já compradas e não vistas, sem créditos; a API só completa o que faltar.
       const wanted = new Map<string, number>();
-      for (const a of planPicks(incidence!, served, need)) wanted.set(a, (wanted.get(a) ?? 0) + 1);
+      for (const a of planPicks(liveIncidence, served, need)) wanted.set(a, (wanted.get(a) ?? 0) + 1);
       const cached: PublicQuestion[] = [];
       for (const [assunto, n] of wanted) {
         const got = await fromCache(admin, { materia: filter.materia!, assunto, dificuldades: SESSION_DIFFICULTIES, tipo: format, preferBanca: sm.banca }, n, (id) => !seen.has(id) && !cached.some((c) => c.qid === id));
@@ -294,11 +299,11 @@ Deno.serve(async (req) => {
       for (const [assunto, n] of wanted) {
         for (let i = 0; i < n && wantedTotal > 0; i++) {
           const limit = out.length + 1;
-          for (const f of inTurn(filters.filter((x) => x.assunto === assunto), turn)) await take(f, limit);
+          for (const f of inTurn(live.filter((x) => x.assunto === assunto), turn)) await take(f, limit);
           turn++;
         }
       }
-      if (wantedTotal > 0) for (const f of inTurn(filters, turn)) await take(f, wantedTotal);
+      if (wantedTotal > 0) for (const f of inTurn(live, turn)) await take(f, wantedTotal);
       // Dentro do lote, primeiro as questões que caíram em mais provas.
       out.sort((a, b) => (b.provas?.length ?? 0) - (a.provas?.length ?? 0));
       const found = [...cached, ...out.slice(0, wantedTotal).map(publicQuestion)];

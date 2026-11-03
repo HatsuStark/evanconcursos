@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { generatedPrompt, generatedTheme, toPublic, GENERATED_BANCA } from './generated.ts';
-import { rejectedIds, relevancePrompt } from './relevance.ts';
+import { prunedAssuntos, rejectedIds, relevancePrompt } from './relevance.ts';
 
 const session = { subject: 'Direito Processual Penal', title: 'Prazos Processuais e Atos em Geral: contagem contínua e suspensão (arts. 792, 798 e 798-A do CPP)', keyword: 'prazos processuais' };
 
@@ -39,5 +39,20 @@ describe('questões inéditas da IA', () => {
     expect(p).toMatch(/\[CPP, art. 798\]/);
     expect(p).toMatch(/não repita/);
     expect(p).toMatch(/5 alternativas/);
+  });
+});
+
+describe('corte de assunto ruim', () => {
+  const v = (assunto: string, relevant: boolean) => ({ assunto, relevant });
+  it('corta com 5 ou mais julgadas e 60% ou mais descartadas', () => {
+    const pruned = prunedAssuntos([
+      v('Prazos', false), v('Prazos', false), v('Prazos', false), v('Prazos', true), v('PRAZOS', true),
+      v('Fluência dos prazos processuais', true), v('Fluência dos prazos processuais', false),
+    ]);
+    expect([...pruned]).toEqual(['prazos']);
+  });
+  it('não corta com poucas julgadas nem com descarte abaixo de 60%', () => {
+    expect(prunedAssuntos([v('Prazos', false), v('Prazos', false), v('Prazos', false), v('Prazos', false)]).size).toBe(0);
+    expect(prunedAssuntos([v('A', false), v('A', false), v('A', true), v('A', true), v('A', true)]).size).toBe(0);
   });
 });
