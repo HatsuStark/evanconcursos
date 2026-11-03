@@ -10,7 +10,8 @@ import { organSearch, placeFilter } from './places.ts';
 
 // qmap-v4: o tema da sessão é o foco; o item do edital é só contexto (um item longo, como "Classes de palavras: substantivo,
 // adjetivo, …, conjunção", vira várias sessões) e assunto genérico só entra sem um específico do tema.
-export const QMAP_PROMPT_VERSION = 'qmap-v4';
+// qmap-v5: assunto com o nome do tema ("Competência" numa sessão de competência) não conta como genérico.
+export const QMAP_PROMPT_VERSION = 'qmap-v5';
 
 const STOP = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'a', 'o', 'as', 'os', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'ao', 'aos', 'art', 'arts', 'lei', 'nocoes', 'noções']);
 export const tokens = (s: string) => normalizeText(s).split(' ').filter((w) => w.length > 2 && !STOP.has(w));
@@ -69,6 +70,8 @@ ${p.assuntos.map((a) => `- ${a}`).join('\n')}
 Escolha até 5 assuntos cujas questões treinam exatamente o TEMA da sessão, do mais ao menos relevante.
 - O item do edital costuma ser maior que o tema: ignore o que ele lista fora do tema (ex.: tema "Substantivos e adjetivos" num item que cita todas as classes de palavras não leva pronome, verbo nem conjunção).
 - Evite assunto genérico que abrange a matéria ou vários temas (ex.: "Classes de palavras", "Morfologia", "Gramática") quando houver assunto específico do tema; use o genérico só se não houver nenhum específico.
+- Assunto com o nome do próprio tema ou de uma parte dele não é genérico: inclua-o (ex.: "Competência" numa sessão sobre competência, "Princípios do Direito Processual Civil" numa sessão sobre os princípios do CPC). Os subassuntos dele entram junto, não no lugar.
+- Tema com várias partes (ex.: princípios, cooperação e competência) leva assunto de cada parte.
 - Não escolha assuntos de outras partes da matéria. Se nenhum servir, devolva lista vazia.`;
 }
 
@@ -269,16 +272,20 @@ export interface Incidence { assunto: string; total: number }
 export const equalIncidence = (assuntos: string[]): Incidence[] => assuntos.map((assunto) => ({ assunto, total: 1 }));
 
 // Quantas questões a banca tem em cada assunto. Sem nenhuma na banca, vale o total das outras bancas.
+// Assunto sem questão em banca nenhuma sai da lista: buscá-lo gastaria ~1 s por filtro (cargo, escolaridade, banca, dificuldade)
+// e estouraria o tempo do pedido antes dos assuntos bons, mandando a sessão para as questões da IA.
 // Atualidades fica em partes iguais: só contam as provas recentes, e o histórico não diz o que volta a cair.
 export async function measureIncidence(count: (params: Record<string, string>) => Promise<number>, f: SessionFilter, banca: string): Promise<Incidence[]> {
   if (!f.materia || /atualidade/i.test(f.materia)) return equalIncidence(f.assuntos);
-  const measure = async (extra: Record<string, string>) => {
+  const measure = async (assuntos: string[], extra: Record<string, string>) => {
     const out: Incidence[] = [];
-    for (const assunto of f.assuntos) out.push({ assunto, total: await count({ ...extra, materia: f.materia!, assunto }) });
+    for (const assunto of assuntos) out.push({ assunto, total: await count({ ...extra, materia: f.materia!, assunto }) });
     return out;
   };
-  const inBoard = banca ? await measure({ banca }) : [];
-  return inBoard.some((i) => i.total > 0) ? inBoard : measure({});
+  const inBoard = banca ? await measure(f.assuntos, { banca }) : [];
+  if (!inBoard.some((i) => i.total > 0)) return (await measure(f.assuntos, {})).filter((i) => i.total > 0);
+  const elsewhere = new Set((await measure(inBoard.filter((i) => !i.total).map((i) => i.assunto), {})).filter((i) => i.total > 0).map((i) => i.assunto));
+  return inBoard.filter((i) => i.total > 0 || elsewhere.has(i.assunto));
 }
 
 // Quais assuntos recebem as próximas n questões: primeiro todos passam pela sessão, do mais ao menos cobrado;

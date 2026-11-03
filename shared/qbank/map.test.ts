@@ -39,9 +39,16 @@ describe('measureIncidence', () => {
   const filter = { materia: 'Direito Penal', assuntos: ['a', 'b'], how: '' };
   it('mede na banca do edital', async () => {
     const calls: Record<string, string>[] = [];
-    const r = await measureIncidence(async (p) => { calls.push(p); return p.assunto === 'a' ? 10 : 0; }, filter, 'FGV');
+    const r = await measureIncidence(async (p) => { calls.push(p); return p.assunto === 'a' ? 10 : p.banca ? 0 : 4; }, filter, 'FGV');
     expect(r).toEqual([{ assunto: 'a', total: 10 }, { assunto: 'b', total: 0 }]);
-    expect(calls.every((c) => c.banca === 'FGV')).toBe(true);
+    expect(calls.filter((c) => !c.banca).map((c) => c.assunto)).toEqual(['b']);
+  });
+  it('assunto sem questão em banca nenhuma sai da sessão', async () => {
+    const r = await measureIncidence(async (p) => (p.assunto === 'a' ? 10 : 0), filter, 'FGV');
+    expect(r).toEqual([{ assunto: 'a', total: 10 }]);
+  });
+  it('sem questão em lugar nenhum, não sobra assunto', async () => {
+    expect(await measureIncidence(async () => 0, filter, 'FGV')).toEqual([]);
   });
   it('sem nenhuma questão na banca, usa o total das outras', async () => {
     const r = await measureIncidence(async (p) => (p.banca ? 0 : 7), filter, 'FGV');
@@ -241,5 +248,6 @@ describe('tema da sessão como foco (qmap-v4)', () => {
     expect(p).toMatch(/Tema da sessão \(o foco\): Substantivos e Adjetivos/);
     expect(p).toMatch(/só contexto/);
     expect(p).toMatch(/Evite assunto genérico/);
+    expect(p).toMatch(/nome do próprio tema ou de uma parte dele não é genérico/);
   });
 });

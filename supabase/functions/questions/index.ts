@@ -188,12 +188,12 @@ Deno.serve(async (req) => {
     }
     const { data: notice } = await auth.client.from('notices').select('education_level, role_name').eq('id', subject.notice_id).single();
     const format = await ensureBoardFormat(admin, quest, subject.id, sm);
-    const filters = searchFilters(filter, sm.banca, { level: String(notice?.education_level ?? ''), role: roleKeyword(String(notice?.role_name ?? '')), format });
+    const allFilters = searchFilters(filter, sm.banca, { level: String(notice?.education_level ?? ''), role: roleKeyword(String(notice?.role_name ?? '')), format });
     // Sessão sem assunto no banco de questões vai direto para as questões inéditas da IA.
-    if (!filters.length && !task.session_id) { await log('qbank_fetch', 'ok'); return json(200, { questions: [], reason: 'sem-assunto' }); }
+    if (!allFilters.length && !task.session_id) { await log('qbank_fetch', 'ok'); return json(200, { questions: [], reason: 'sem-assunto' }); }
 
     // Peso de cada assunto: medido uma vez por sessão. Se a medição falhar, divide igual e tenta de novo na próxima busca.
-    if (!incidence && filters.length) {
+    if (!incidence && allFilters.length) {
       if (task.session_id) {
         try {
           incidence = await measureIncidence((params) => quest.count(params), filter, sm.banca);
@@ -201,6 +201,9 @@ Deno.serve(async (req) => {
         } catch { incidence = equalIncidence(filter.assuntos); }
       } else incidence = equalIncidence(filter.assuntos);
     }
+    // Assunto sem questão em banca nenhuma ficou fora da medição: nem entra na busca.
+    const measured = new Set((incidence ?? []).map((i) => normalizeText(i.assunto)));
+    const filters = allFilters.filter((f) => measured.has(normalizeText(f.assunto)));
 
     // Pula o que o estudante já respondeu; o que ele respondeu nesta sessão define a vez de cada assunto.
     const { data: done } = await admin.from('question_attempts').select('qid, assunto, session_id').eq('owner_id', auth.user.id).eq('subject_id', subject.id).limit(5000);
