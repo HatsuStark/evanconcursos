@@ -191,3 +191,20 @@ describe('normas fora do registro', () => {
     expect(unlistedNorms('conforme a Lei 1 e a Res. 2')).toEqual([]);
   });
 });
+
+describe('várias listas de artigos da mesma norma', () => {
+  it('capítulos diferentes da mesma norma: todos os artigos', () => {
+    expect(findLawRefs('Disposições Gerais e Fiscalização: Normas Judiciais da CGJ (Tomo I, Cap. I, arts. 1º a 4º; Cap. III, arts. 33, 47 e 49)'))
+      .toEqual([{ law: 'NSCGJ', ranges: [{ from: 1, to: 4 }, { from: 33, to: 33 }, { from: 47, to: 47 }, { from: 49, to: 49 }] }]);
+  });
+  it('os artigos de cada norma param na próxima norma citada, mesmo fora do registro', () => {
+    const item = 'Lei n.º 6.830/1980 (artigos 1º; 2º; 7º); Resolução n.º 354/2020 do Conselho Nacional de Justiça (artigos 1º; 8º a 10); Normas Judiciais da Corregedoria Geral da Justiça Tomo I – Capítulo I: (art. 1º a 4º); Tomo I – Capítulo III – Seção III: (art. 33)';
+    expect(findLawRefs(item)).toEqual([
+      { law: 'L6830', ranges: [{ from: 1, to: 1 }, { from: 2, to: 2 }, { from: 7, to: 7 }] },
+      { law: 'NSCGJ', ranges: [{ from: 1, to: 4 }, { from: 33, to: 33 }] },
+    ]);
+  });
+  it('artigo logo antes da lei seguinte continua sendo dela', () => {
+    expect(findLawRefs('art. 121 do CP e art. 5º da CF')).toEqual([{ law: 'CP', ranges: [{ from: 121, to: 121 }] }, { law: 'CF', ranges: [{ from: 5, to: 5 }] }]);
+  });
+});

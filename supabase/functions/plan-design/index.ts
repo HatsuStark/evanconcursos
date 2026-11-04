@@ -23,12 +23,17 @@ async function lawSize(admin: ReturnType<typeof adminClient>, title: string, top
     // Lei do registro ainda fora do banco é baixada agora (uma vez para todos), para a sessão poder ser medida.
     const normId = await ensureLaw(admin, law);
     if (!normId) return null;
-    const { data: arts } = await admin.from('legal_articles').select('num, suffix, text, revoked').eq('norm_id', normId)
-      .gte('num', Math.min(...ref.ranges.map((x) => x.from))).lte('num', Math.max(...ref.ranges.map((x) => x.to))).limit(400);
+    const { data: arts } = await admin.from('legal_articles').select('label, num, suffix, text, revoked, ord').eq('norm_id', normId)
+      .gte('num', Math.min(...ref.ranges.map((x) => x.from))).lte('num', Math.max(...ref.ranges.map((x) => x.to))).order('ord').limit(400);
     const hit = (arts ?? []).filter((a) => inRanges(ref.ranges, a.num, a.suffix));
     if (!hit.length) return null;
     const live = hit.filter((a) => !a.revoked);
-    out.push({ law: ref.law, short: law.short, ranges: rangesLabel(ref), liveChars: live.reduce((n, a) => n + a.text.length, 0), liveArticles: live.length, revokedArticles: hit.length - live.length });
+    out.push({
+      law: ref.law, short: law.short, ranges: rangesLabel(ref), liveChars: live.reduce((n, a) => n + a.text.length, 0), liveArticles: live.length, revokedArticles: hit.length - live.length,
+      // No título, a lei precisa ser achada de novo: a sigla, se o registro a reconhece; senão o nome.
+      cite: new RegExp(law.match.source, 'i').test(law.short) ? law.short : law.name,
+      articles: hit.map((a) => ({ label: a.label, num: a.num, suffix: a.suffix, chars: a.text.length, revoked: a.revoked })),
+    });
   }
   return out.length ? out : null;
 }
@@ -91,7 +96,7 @@ Deno.serve(async (req) => {
       const own = await ownLaws(admin, auth.user.id);
       const sizes = await Promise.all(r.data.sessions.map((x) => lawSize(admin, x.title, x.topics.map((t) => topics[t - 1] ?? ''), subject.name, own)));
       const short = mergeShortLawSessions(r.data.sessions, sizes);
-      const { sessions, fixes } = repairSessions({ ...r.data, sessions: short.sessions }, n, topics);
+      const { sessions, fixes } = repairSessions({ ...r.data, sessions: short.sessions }, n, topics, { sizes: short.sizes, minutes: int(body.minutes, 15, 960) });
       fixes.unshift(...short.merged.map((m) => `lei curta: ${m}`));
       await logUsage(admin, { ownerId: auth.user.id, operation, model, promptVersion: PLAN_PROMPT_VERSION, usage, latencyMs, status: 'ok' });
       return json(200, { sessions, fixes });

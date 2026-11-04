@@ -1,7 +1,7 @@
 // Encontra referências a leis e artigos em textos livres (títulos de sessão, tópicos do edital):
 // "CP, arts. 327 e 312 a 315", "Código de Processo Penal - artigos 251 a 258; 261 a 267",
 // "Lei n.º 9.099 de 26.09.1995 (artigos 60 a 83; 88 e 89)", "art. 5º da CF".
-import { unlistedNorms } from './norms.ts';
+import { unlistedNorms, unlistedStarts } from './norms.ts';
 import { LAWS, lawForSubject, type LawEntry } from './registry.ts';
 
 export interface ArticleRange { from: number; to: number; fromSuffix?: string; toSuffix?: string }
@@ -9,6 +9,11 @@ export interface LawRef { law: string; ranges: ArticleRange[] } // ranges vazio 
 
 const NUM = String.raw`(\d{1,4}(?:\.\d{3})*)(?:\s*(?:º|°))?(?:\s*-\s*([A-Z]{1,2})\b)?`;
 const num = (s: string) => Number(s.replace(/\./g, ''));
+
+// Quantos artigos o texto cita ("arts. 1º e 8º a 10" → 4), de qualquer norma: estimativa do tamanho quando não há texto.
+export function citedArticleCount(text: string) {
+  return [...text.matchAll(new RegExp(ART_LIST, 'gi'))].flatMap((m) => parseRanges(m[1]!)).reduce((a, r) => a + Math.min(r.to - r.from + 1, 200), 0);
+}
 
 // Intervalos a partir de "293 a 305; 307; 308; 311-A; 312 a 317 e 319".
 export function parseRanges(s: string): ArticleRange[] {
@@ -45,16 +50,19 @@ export function findLawRefs(text: string, subject = '', extra: LawEntry[] = []):
   mentions.sort((a, b) => a.start - b.start);
   // Menções sobrepostas (ex.: "Código de Processo Penal" contém "Código ... Penal"): fica a mais longa.
   const kept = mentions.filter((m, i) => !mentions.some((o, j) => j !== i && o.start <= m.start && o.end >= m.end && (o.end - o.start) > (m.end - m.start)));
+  // Os artigos de uma lei vão até a próxima norma citada, do registro ou não.
+  const others = unlistedStarts(text, extra);
   kept.forEach((m, i) => {
-    const next = kept[i + 1]?.start ?? text.length;
+    const next = Math.min(kept[i + 1]?.start ?? text.length, ...others.filter((o) => o >= m.end));
     const after = text.slice(m.end, next), before = text.slice(Math.max(0, (kept[i - 1]?.end ?? 0)), m.start);
     // "art. 5º da CF": artigos imediatamente antes da menção.
     const tail = new RegExp(`${ART_LIST}\\s*(?:da|do|de)\\s*$`, 'i');
-    let a = new RegExp(ART_LIST, 'i').exec(after);
-    // "art. 121 do CP e art. 5º da CF": o 5º logo depois do CP pertence à CF.
-    if (a && i + 1 < kept.length && tail.exec(after)?.index === a.index) a = null;
+    // Todas as listas do trecho ("Cap. I, arts. 1º a 4º; Cap. III, arts. 33, 47 e 49"), menos a que fecha o trecho
+    // apontando a lei seguinte ("art. 121 do CP e art. 5º da CF": o 5º é da CF).
+    const lastTail = i + 1 < kept.length && next === kept[i + 1]!.start ? tail.exec(after)?.index : undefined;
+    const lists = [...after.matchAll(new RegExp(ART_LIST, 'gi'))].filter((x) => x.index !== lastTail);
     const b = tail.exec(before);
-    add(m.law, [...(b ? parseRanges(b[1]!) : []), ...(a ? parseRanges(a[1]!) : [])]);
+    add(m.law, [...(b ? parseRanges(b[1]!) : []), ...lists.flatMap((x) => parseRanges(x[1]!))]);
   });
   // Sem lei citada: artigos soltos ("arts. 4º a 23") vão para a lei principal da matéria.
   if (!found.size && !citesUnlistedLaw(text, extra)) {

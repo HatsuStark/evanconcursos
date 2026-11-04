@@ -47,6 +47,13 @@ export function unlistedNorms(text: string, extra: LawEntry[] = []): UnlistedNor
   return [...out.values()];
 }
 
+// Onde começam as citações de normas fora do registro: limitam os artigos de cada lei citada antes delas
+// ("Lei 6.830 (artigos 1º; 2º); Resolução 354 (artigos 8º a 10)": o 8 a 10 é da Resolução, não da Lei 6.830).
+export function unlistedStarts(text: string, extra: LawEntry[] = []): number[] {
+  const known = [...LAWS, ...extra];
+  return [...text.matchAll(CITATION)].filter((m) => !known.some((l) => new RegExp(l.match.source, 'i').test(m[0]))).map((m) => m.index!);
+}
+
 // Norma enviada pelo estudante (linha de legal_norms com owner_id) como entrada de registro.
 export interface OwnNormRow { law_key: string; short_name: string; name: string; urn: string; match_pattern: string | null }
 export function ownLawEntry(r: OwnNormRow): LawEntry | null {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { theoryGoal } from '../domain/scheduler.ts';
 import { buildPlanPayload, carryOverSessions, questionsOf, theoryPlan, type PlanBase } from './plan-build.ts';
-import { fallbackSessions, isShortLaw, mergeShortLawSessions, repairSessions, type SubjectSessions } from './plan.ts';
+import { allocateSessions, fallbackSessions, isShortLaw, mergeShortLawSessions, repairSessions, type SubjectSessions } from './plan.ts';
 import { findLawRefs } from '../legal/refs.ts';
 
 function rng(seed: number) { return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32; }; }
@@ -173,5 +173,44 @@ describe('sessão de lei quase vazia', () => {
   });
   it('o título juntado aponta os artigos das duas sessões', () => {
     expect(findLawRefs('Mandados: Normas da CGJ (arts. 994 a 1.091-A); NSCGJ, arts. 105 a 110')).toEqual([{ law: 'NSCGJ', ranges: [{ from: 994, to: 1091, toSuffix: 'A' }, { from: 105, to: 110 }] }]);
+  });
+});
+
+describe('dias distribuídos pelo conteúdo e pela cobrança', () => {
+  const art = (num: number, chars: number, revoked = false) => ({ label: String(num), num, suffix: '', chars, revoked });
+  const law = (from: number, to: number, chars: number, revokedFrom = Infinity) => {
+    const articles = Array.from({ length: to - from + 1 }, (_, i) => art(from + i, chars, from + i >= revokedFrom));
+    const live = articles.filter((a) => !a.revoked);
+    return [{ law: 'NSCGJ', short: 'NSCGJ', cite: 'NSCGJ', ranges: `arts. ${from} a ${to}`, liveChars: live.length * chars, liveArticles: live.length, revokedArticles: articles.length - live.length, articles }];
+  };
+  const s = (title: string, incidence = 2, topics = [0]) => ({ title, keyword: '', topics, incidence });
+  it('lei longa vira partes com o intervalo de artigos no título; a curta não ganha dia', () => {
+    const r = allocateSessions([s('Disposições Gerais: Normas da CGJ (arts. 1º a 4º)'), s('Oficiais de Justiça: Normas da CGJ (arts. 994 a 1.015)', 3)],
+      [law(1, 4, 500), law(994, 1015, 1500)], 4, 75);
+    expect(r.sessions.map((x) => x.title)).toEqual([
+      'Disposições Gerais: Normas da CGJ (arts. 1º a 4º)',
+      'Oficiais de Justiça (parte 1 de 3): NSCGJ, arts. 994 a 1.001',
+      'Oficiais de Justiça (parte 2 de 3): NSCGJ, arts. 1.002 a 1.008',
+      'Oficiais de Justiça (parte 3 de 3): NSCGJ, arts. 1.009 a 1.015',
+    ]);
+    expect(findLawRefs(r.sessions[2]!.title)).toEqual([{ law: 'NSCGJ', ranges: [{ from: 1002, to: 1008 }] }]);
+  });
+  it('artigo revogado não entra nas partes', () => {
+    const r = allocateSessions([s('Despesas: NSCGJ (arts. 1.046 a 1.091)', 3)], [law(1046, 1091, 1500, 1054)], 2, 75);
+    expect(r.sessions.map((x) => x.title)).toEqual(['Despesas (parte 1 de 2): NSCGJ, arts. 1.046 a 1.049', 'Despesas (parte 2 de 2): NSCGJ, arts. 1.050 a 1.053']);
+  });
+  it('sobrando dias, aprofunda a mais cobrada (não a curta), algumas sessões depois', () => {
+    const list = [s('A: Normas da CGJ (arts. 1º a 4º)', 2), s('B: Normas da CGJ (arts. 10 a 12)', 3), s('C', 2), s('D', 2), s('E', 2)];
+    const r = allocateSessions(list, [law(1, 4, 100), law(10, 12, 3000), null, null, null], 7, 75);
+    expect(r.sessions.map((x) => x.title)).toEqual(['A: Normas da CGJ (arts. 1º a 4º)', 'B: Normas da CGJ (arts. 10 a 12)', 'C', 'D', 'E', 'Aprofundamento: B: Normas da CGJ (arts. 10 a 12)', 'Aprofundamento: C']);
+  });
+  it('até 2 aprofundamentos por sessão; o 2º é revisão com questões, mais longe', () => {
+    const r = allocateSessions([s('X', 3), s('Y', 1), s('Z', 1), s('W', 1), s('V', 1), s('U', 1), s('T', 1)], [null, null, null, null, null, null, null], 9, 75);
+    expect(r.sessions.filter((x) => x.title.endsWith('X')).map((x) => x.title)).toEqual(['X', 'Aprofundamento: X', 'Revisão com questões: X']);
+    expect(r.sessions.findIndex((x) => x.title === 'Aprofundamento: X')).toBeGreaterThan(2);
+  });
+  it('faltando dias, junta as vizinhas de menor peso e leva os artigos no título', () => {
+    const r = allocateSessions([s('A: NSCGJ (arts. 1 a 2)', 1), s('B: NSCGJ (arts. 3 a 4)', 1), s('C: NSCGJ (arts. 10 a 30)', 3)], [law(1, 2, 3000), law(3, 4, 3000), law(10, 30, 3000)], 2, 75);
+    expect(r.sessions.map((x) => x.title)).toEqual(['A: NSCGJ (arts. 1 a 2); NSCGJ, arts. 3 a 4', 'C: NSCGJ (arts. 10 a 30)']);
   });
 });
