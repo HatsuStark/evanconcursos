@@ -86,3 +86,20 @@ export function inRanges(ranges: ArticleRange[], n: number, suffix = ''): boolea
     return true;
   });
 }
+
+// Artigos de lei de uma sessão. O título manda; o item do edital (que costuma juntar várias leis de várias sessões) só
+// completa quando bate com ele:
+// - título com artigos de lei conhecida: só eles;
+// - título que cita artigos de uma norma fora do registro, ou lei não listada: nada do item (senão a sessão "Normas da CGJ
+//   (arts. 1º a 4º)" recebia a Lei 6.830, a primeira do item);
+// - título que nomeia a lei sem artigos ("Lei Maria da Penha: medidas protetivas"): os artigos dessa lei no item;
+// - título sem lei: o item só vale se tiver uma lei só.
+export function sessionLawRefs(title: string, topics: string[], subject = ''): LawRef[] {
+  const inTitle = findLawRefs(title, subject);
+  const withArts = inTitle.filter((r) => r.ranges.length);
+  if (withArts.length) return withArts;
+  if (citesUnlistedLaw(title) || new RegExp(ART_LIST, 'i').test(title)) return [];
+  const fromTopics = findLawRefs(topics.join('\n'), subject).filter((r) => r.ranges.length);
+  if (inTitle.length) return fromTopics.filter((r) => inTitle.some((t) => t.law === r.law));
+  return fromTopics.length === 1 ? fromTopics : [];
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseLawHtml, parseNormsText } from './parse.ts';
-import { citesUnlistedLaw, findLawRefs, inRanges, noticeLawKeys, parseRanges } from './refs.ts';
+import { citesUnlistedLaw, findLawRefs, inRanges, noticeLawKeys, parseRanges, sessionLawRefs } from './refs.ts';
 
 // Trecho real do HTML do CPP no normas.leg.br (estrutura preservada).
 const HTML = `<html><body>
@@ -137,5 +137,22 @@ describe('Normas Judiciais da CGJ SP (PDF)', () => {
     expect(findLawRefs('Disposições Gerais e Expediente: Normas da CGJ (arts. 1º a 4º, 33, 47 e 49)')).toEqual([{ law: 'NSCGJ', ranges: [{ from: 1, to: 4 }, { from: 33, to: 33 }, { from: 47, to: 47 }, { from: 49, to: 49 }] }]);
     expect(findLawRefs('Normas Judiciais da Corregedoria Geral da Justiça (Tomo I – Capítulo I: art. 1º a 4º)').map((r) => r.law)).toEqual(['NSCGJ']);
     expect(findLawRefs('Normas Extrajudiciais da Corregedoria Geral da Justiça').map((r) => r.law)).toEqual([]);
+  });
+});
+
+describe('artigos de lei da sessão: o título manda', () => {
+  const item = ['Lei n.º 6.830/1980 (artigos 1º; 2º; 7º; 8º; 11; 37); Resolução n.º 354/2020 do Conselho Nacional de Justiça (artigos 1º; 8º a 10); Lei n.º 11.340/2006 (artigos 5º a 7º)'];
+  it('título com artigos de lei conhecida: só eles, nada do item', () => {
+    expect(sessionLawRefs('Disposições Gerais e Expediente: Normas da CGJ (arts. 1º a 4º, 33, 47 e 49)', item).map((r) => r.law)).toEqual(['NSCGJ']);
+  });
+  it('título que cita artigos de norma fora do registro não recebe a primeira lei do item', () => {
+    expect(sessionLawRefs('Resolução CNJ 354/2020: cumprimento digital de atos (arts. 8º a 10)', item)).toEqual([]);
+  });
+  it('título que nomeia a lei sem artigos: os artigos dela no item', () => {
+    expect(sessionLawRefs('Execução Fiscal: citação e penhora', item)).toEqual([{ law: 'L6830', ranges: [{ from: 1, to: 1 }, { from: 2, to: 2 }, { from: 7, to: 7 }, { from: 8, to: 8 }, { from: 11, to: 11 }, { from: 37, to: 37 }] }]);
+  });
+  it('título sem lei: o item só vale com uma lei só', () => {
+    expect(sessionLawRefs('Custas e despesas processuais', item)).toEqual([]);
+    expect(sessionLawRefs('Prazos processuais', ['Código de Processo Penal: artigos 798 e 798-A'])).toEqual([{ law: 'CPP', ranges: [{ from: 798, to: 798 }, { from: 798, to: 798, fromSuffix: 'A' }] }]);
   });
 });

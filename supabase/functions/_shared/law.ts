@@ -1,15 +1,14 @@
 // Fontes legais de um tema: artigos citados no título da sessão (ou, sem intervalo ali, nos tópicos do edital).
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sourceRef } from '../../../shared/ai/guide.ts';
-import { citesUnlistedLaw, findLawRefs, inRanges } from '../../../shared/legal/refs.ts';
+import { inRanges, sessionLawRefs } from '../../../shared/legal/refs.ts';
 import { lawByKey } from '../../../shared/legal/registry.ts';
 
 export const MAX_ARTICLES = 25;
 
 export async function loadLawSources(admin: SupabaseClient, p: { title: string; topics: string[]; subject: string }) {
-  let refs = findLawRefs(p.title, p.subject).filter((r) => r.ranges.length);
-  // Um tópico do edital pode juntar leis de várias sessões: se o título já aponta outra lei, ele não vale aqui.
-  if (!refs.length && !citesUnlistedLaw(p.title)) refs = findLawRefs(p.topics.join('\n'), p.subject).filter((r) => r.ranges.length);
+  // O título manda; o item do edital (que junta leis de várias sessões) só completa quando bate com ele.
+  const refs = sessionLawRefs(p.title, p.topics, p.subject);
   const provided: { lawKey: string; label: string; num: number; suffix: string; text: string }[] = [];
   for (const r of refs.slice(0, 4)) {
     const law = lawByKey(r.law);
