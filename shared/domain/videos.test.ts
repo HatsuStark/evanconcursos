@@ -28,6 +28,11 @@ describe('videoQuery', () => {
     expect(r.q).toBe('Estatuto SP provimento posse Lei 10.261 aula concurso');
     expect(r.terms).toEqual(['ingresso', 'exercicio', 'estatuto', 'provimento', 'posse']);
     expect(r.law).toBe('10.261');
+    expect(r.alt).toBe('Direito Administrativo Ingresso e Exercício Lei 10.261');
+    expect(r.phrase).toEqual(['estatuto', 'provimento', 'posse']);
+    expect(videoQuery({ subject: 'Direito Penal', title: 'Peculato', topics: [] }).alt).toBe('Direito Penal Peculato videoaula');
+    expect(videoQuery({ subject: 'Português', title: 'Estudo 1 de 3', topics: [] }).alt).toBe('');
+    expect(videoQuery({ subject: 'X', title: 'Citação', topics: [], lawNames: ['CPP', 'Código de Processo Penal'] }).lawNames).toEqual(['cpp', 'codigo de processo penal']);
     expect(videoQuery({ subject: 'Direito Penal', title: 'Peculato', topics: [] }).law).toBe('');
   });
   it('acha o número da lei com ou sem ponto, e sem confundir com outro número', () => {
@@ -56,12 +61,12 @@ describe('rankVideos', () => {
   it('descarta o que não pode ser assistido no app', () => {
     const r = rankVideos([
       video({ id: 'ok' }), video({ id: 'bloqueado', embeddable: false }), video({ id: 'live', live: true }), video({ id: 'brasil', blockedBR: true }),
-      video({ id: 'short', durationSec: 60 }), video({ id: 'longo', durationSec: 30 * 60 + 1 }),
+      video({ id: 'short', durationSec: 60 }), video({ id: 'tag', title: 'Peculato #shorts', durationSec: 150 }),
     ], ['peculato'], NOW);
     expect(ids(r)).toEqual(['ok']);
   });
-  it('aceita vídeo de exatamente 30 minutos', () => {
-    expect(ids(rankVideos([video({ id: 'limite', durationSec: 30 * 60 })], ['peculato'], NOW))).toEqual(['limite']);
+  it('sem limite de duração: aula longa e vídeo curto (fora os Shorts) entram', () => {
+    expect(ids(rankVideos([video({ id: 'longa', durationSec: 3 * 3600 }), video({ id: 'curto', durationSec: 90, channel: 'B' })], ['peculato'], NOW)).sort()).toEqual(['curto', 'longa']);
   });
   it('descarta vídeo fora do tema; aceita tema só na descrição e variação da palavra', () => {
     const r = rankVideos([
@@ -80,17 +85,26 @@ describe('rankVideos', () => {
     ], terms, NOW);
     expect(ids(r).sort()).toEqual(['descricao', 'titulo']);
   });
-  it('prefere tema no título, duração de aula e vídeo recente', () => {
+  it('prefere o mais perto do tema; duração não pesa; recente desempata', () => {
     // Fora do tema, só para a lista ter o tamanho de uma busca real: a posição pesa pouco entre vizinhos.
-    const filler = Array.from({ length: 23 }, (_, i) => video({ id: `f${i}`, title: 'crase' }));
-    const first = (a: VideoCandidate, b: VideoCandidate) => ids(rankVideos([a, b, ...filler], ['peculato'], NOW))[0];
+    const filler = Array.from({ length: 48 }, (_, i) => video({ id: `f${i}`, title: 'crase' }));
+    const first = (a: VideoCandidate, b: VideoCandidate, terms = ['peculato'], opts = {}) => ids(rankVideos([a, b, ...filler], terms, NOW, '', opts))[0];
     expect(first(video({ id: 'descricao', title: 'Crimes', description: 'peculato' }), video({ id: 'titulo' }))).toBe('titulo');
-    expect(first(video({ id: 'curto', durationSec: 5 * 60 }), video({ id: 'ideal' }))).toBe('ideal');
+    expect(first(video({ id: 'parcial', title: 'Peculato' }), video({ id: 'completo', title: 'Peculato e concussão' }), ['peculato', 'concussao'])).toBe('completo');
     expect(first(video({ id: 'antigo', publishedAt: '2018-01-01T00:00:00Z' }), video({ id: 'novo' }))).toBe('novo');
+    expect(first(video({ id: 'curta', durationSec: 5 * 60, title: 'Peculato e concussão' }), video({ id: 'longa', durationSec: 2 * 3600, title: 'Peculato' }), ['peculato', 'concussao'])).toBe('curta');
   });
-  it('no máximo 2 por canal e 3 no total, sem campos internos', () => {
+  it('frase da palavra-chave inteira no título e lei da sessão citada aproximam do tema', () => {
+    const filler = Array.from({ length: 48 }, (_, i) => video({ id: `f${i}`, title: 'crase' }));
+    const terms = ['citacao', 'mandado', 'oficial'];
+    const r = rankVideos([video({ id: 'solto', title: 'Citação no processo' }), video({ id: 'frase', title: 'Citação por mandado e oficial' }), ...filler], terms, NOW, '', { phrase: ['citacao', 'mandado'] });
+    expect(ids(r)[0]).toBe('frase');
+    const byLaw = rankVideos([video({ id: 'outra', title: 'Citação' }), video({ id: 'cpp', title: 'Citação', description: 'Aula sobre o CPP' }), ...filler], ['citacao'], NOW, '', { lawNames: ['cpp'] });
+    expect(ids(byLaw)[0]).toBe('cpp');
+  });
+  it('no máximo 2 por canal e 5 no total, sem campos internos', () => {
     const r = rankVideos(Array.from({ length: 10 }, (_, i) => video({ id: `v${i}`, channel: i < 4 ? 'Mesmo' : `Canal ${i}` })), ['peculato'], NOW);
-    expect(r).toHaveLength(3);
+    expect(r).toHaveLength(5);
     expect(r.filter((v) => v.channel === 'Mesmo')).toHaveLength(2);
     expect(r[0]).not.toHaveProperty('description');
   });
@@ -106,18 +120,19 @@ describe('findVideos', () => {
   ];
   const queue = (...responses: Response[]) => responses.reduce((f, r) => f.mockResolvedValueOnce(r), vi.fn());
   it('com vídeos suficientes, não gasta a segunda busca', async () => {
-    const f = queue(...page({ id: 'a', min: 10, channel: 'A' }, { id: 'b', min: 20, channel: 'B' }));
-    expect((await findVideos('k', 'q', ['peculato'], f as unknown as typeof fetch, NOW)).map((v) => v.id).sort()).toEqual(['a', 'b']);
+    const f = queue(...page({ id: 'a', min: 10, channel: 'A' }, { id: 'b', min: 90, channel: 'B' }, { id: 'c', min: 20, channel: 'C' }));
+    expect((await findVideos('k', 'q', ['peculato'], f as unknown as typeof fetch, NOW, '', { alt: 'outra' })).map((v) => v.id).sort()).toEqual(['a', 'b', 'c']);
     expect(f).toHaveBeenCalledTimes(2);
   });
-  it('faltando vídeos curtos, busca os médios e junta sem repetir', async () => {
+  it('faltando vídeos, busca o tema dito de outro jeito e junta sem repetir', async () => {
     const f = queue(...page({ id: 'a', min: 15, channel: 'A' }, { id: 'longo', min: 90, channel: 'B' }), ...page({ id: 'a', min: 15, channel: 'A' }, { id: 'c', min: 18, channel: 'C' }));
-    expect((await findVideos('k', 'q', ['peculato'], f as unknown as typeof fetch, NOW)).map((v) => v.id).sort()).toEqual(['a', 'c']);
-    expect(String(f.mock.calls[2]![0])).toContain('videoDuration=medium');
+    expect((await findVideos('k', 'q', ['peculato'], f as unknown as typeof fetch, NOW, '', { alt: 'Direito Penal Peculato' })).map((v) => v.id).sort()).toEqual(['a', 'c', 'longo']);
+    expect(String(f.mock.calls[2]![0])).toContain('q=Direito+Penal+Peculato');
   });
-  it('mesmo assim sem o bastante, devolve o que achou', async () => {
-    const f = queue(...page({ id: 'longo', min: 90, channel: 'B' }), new Response(JSON.stringify({ items: [] })));
-    expect(await findVideos('k', 'q', ['peculato'], f as unknown as typeof fetch, NOW)).toEqual([]);
+  it('sem busca alternativa, devolve o que achou', async () => {
+    const f = queue(...page({ id: 'a', min: 90, channel: 'B' }));
+    expect((await findVideos('k', 'q', ['peculato'], f as unknown as typeof fetch, NOW)).map((v) => v.id)).toEqual(['a']);
+    expect(f).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -46,7 +46,7 @@ export function VideosPanel({ taskId, noticeId, query, visible }: { taskId: stri
   if (status !== 'ok' || !list.length) {
     return (
       <div className="glass card">
-        <p className="muted" style={{ marginTop: 0 }}>{status === 'ok' ? 'Nenhum vídeo sobre este tema passou nos filtros (duração, tema e disponibilidade).' : UNAVAILABLE[status]}</p>
+        <p className="muted" style={{ marginTop: 0 }}>{status === 'ok' ? 'Nenhum vídeo sobre este tema passou nos filtros (tema e disponibilidade).' : UNAVAILABLE[status]}</p>
         {searchLink}
       </div>
     );

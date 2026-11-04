@@ -1,5 +1,7 @@
 // Vídeo-aulas da sessão pela YouTube Data API: monta a busca pelo tema, descarta o que não serve e ordena.
-// Sem IA: a ordem sai de uma conta fixa sobre a relevância do YouTube, o título, a duração, as visualizações e a idade.
+// Sem IA: a ordem sai de uma conta fixa que privilegia o quanto o vídeo é sobre o tema (termos no título, frase da
+// palavra-chave, lei da sessão), depois a relevância do YouTube, as visualizações e a idade. A duração não conta: aula
+// longa sobre o tema vale mais que vídeo curto genérico. Só Shorts saem.
 import { normalizeText } from '../ai/notice.ts';
 
 export interface Video { id: string; title: string; channel: string; durationSec: number; publishedAt: string; views: number; thumb: string }
@@ -8,10 +10,10 @@ export interface VideoCandidate extends Video { description: string; embeddable:
 // Os termos da API exigem renovar ou apagar dados guardados em até 30 dias.
 export const CACHE_DAYS = 30;
 // Muda quando as regras mudam: busca guardada com as regras antigas não é reaproveitada.
-export const CACHE_VERSION = 'v3';
-const MIN_RESULTS = 2, MAX_RESULTS = 3, MAX_PER_CHANNEL = 2;
-const MIN_SEC = 4 * 60, MAX_SEC = 30 * 60; // abaixo são Shorts e dicas soltas; acima, passa do tempo de uma sugestão
-const IDEAL_MIN_SEC = 10 * 60, OLD_YEARS = 5;
+export const CACHE_VERSION = 'v4';
+const MIN_RESULTS = 3, MAX_RESULTS = 5, MAX_PER_CHANNEL = 2;
+const SHORT_SEC = 60; // Shorts e cortes soltos
+const OLD_YEARS = 5;
 const YEAR_MS = 365.25 * 864e5;
 
 const STOPWORDS = new Set(['para', 'como', 'sobre', 'entre', 'pela', 'pelo', 'pelas', 'pelos', 'suas', 'seus', 'dos', 'das', 'nos', 'nas', 'com', 'sem', 'que', 'uma', 'art', 'arts', 'lei']);
@@ -29,14 +31,20 @@ function shortTopic(title: string, topics: string[]) {
 // Busca da sessão. `key` identifica a busca no cache; `terms` são as palavras que um vídeo precisa citar.
 // A palavra-chave do plano diz o assunto melhor que o começo do título ("Ingresso e Exercício" é vago; "Estatuto SP
 // provimento posse", não), e já dispensa a matéria na busca.
-export function videoQuery({ subject, title, topics, keyword = '' }: { subject: string; title: string; topics: string[]; keyword?: string }) {
+// `lawNames`: nomes e siglas das leis da sessão ("CPP", "Código de Processo Penal"), que aproximam o vídeo do tema.
+export function videoQuery({ subject, title, topics, keyword = '', lawNames = [] }: { subject: string; title: string; topics: string[]; keyword?: string; lawNames?: string[] }) {
   const topic = shortTopic(title, topics);
   const subjectInTopic = normalizeText(topic).includes(normalizeText(subject));
   const lawDigits = /\bLei\s*(?:Complementar\s*)?(?:Federal\s*|Estadual\s*)?(?:n[º°o.]*\s*)?(\d{1,2}\.?\d{3})/i.exec(title)?.[1]?.replace('.', '');
   const law = lawDigits ? `${lawDigits.slice(0, -3)}.${lawDigits.slice(-3)}` : '';
   const q = (keyword.trim() ? [keyword.trim(), law && `Lei ${law}`, 'aula concurso'] : [subjectInTopic ? '' : subject, topic, law && `Lei ${law}`, 'aula concurso']).filter(Boolean).join(' ');
   const subjectTerms = termsOf(subject), topicTerms = termsOf(`${topic} ${keyword}`).filter((t) => !subjectTerms.includes(t));
-  return { q, key: normalizeText(q), terms: topicTerms.length ? topicTerms : subjectTerms, law };
+  // 2ª busca, só se a 1ª render pouco: o tema dito de outro jeito (título com a matéria em vez da palavra-chave; sem
+  // palavra-chave, "videoaula" em vez de "aula concurso", que estreita demais em temas pouco gravados).
+  const altQ = [subjectInTopic ? '' : subject, topic, law && `Lei ${law}`, keyword.trim() ? '' : 'videoaula'].filter(Boolean).join(' ');
+  const alt = !normalizeText(topic) || normalizeText(altQ) === normalizeText(q) ? '' : altQ;
+  const phrase = termsOf(keyword.trim() || topic);
+  return { q, alt, key: normalizeText(q), terms: topicTerms.length ? topicTerms : subjectTerms, law, phrase, lawNames: [...new Set(lawNames.map(normalizeText).filter(Boolean))] };
 }
 
 // Vídeo que cita a lei da sessão ("10.261" ou "10261"), para vir antes das aulas sobre leis parecidas de outros lugares.
@@ -47,20 +55,28 @@ export function parseDuration(iso: string) {
   return m ? Number(m[1] ?? 0) * 86400 + Number(m[2] ?? 0) * 3600 + Number(m[3] ?? 0) * 60 + Number(m[4] ?? 0) : 0;
 }
 
-// `candidates` vem na ordem de relevância do YouTube.
-export function rankVideos(candidates: VideoCandidate[], terms: string[], now = Date.now(), law = ''): Video[] {
+export interface RankOptions { phrase?: string[]; lawNames?: string[] }
+const isShort = (v: VideoCandidate) => v.durationSec <= SHORT_SEC || /#shorts?\b/i.test(`${v.title} ${v.description}`);
+
+// `candidates` vem na ordem de relevância do YouTube. `phrase`: termos da palavra-chave (todos no título = bem no tema);
+// `lawNames`: nomes e siglas normalizados das leis da sessão.
+export function rankVideos(candidates: VideoCandidate[], terms: string[], now = Date.now(), law = '', { phrase = [], lawNames = [] }: RankOptions = {}): Video[] {
   const scored = candidates.flatMap((v, i) => {
-    if (!v.embeddable || v.live || v.blockedBR || v.durationSec < MIN_SEC || v.durationSec > MAX_SEC) return [];
+    if (!v.embeddable || v.live || v.blockedBR || isShort(v)) return [];
     const titleWords = normalizeText(v.title).split(' '), textWords = [...titleWords, ...normalizeText(v.description).split(' ')];
     // Tema no título basta. Na descrição, que costuma ser longa e genérica, precisa citar pelo menos metade dos termos.
-    if (terms.length && !terms.some((t) => hasTerm(titleWords, t)) && terms.filter((t) => hasTerm(textWords, t)).length < terms.length / 2) return [];
+    const inTitle = terms.filter((t) => hasTerm(titleWords, t)).length, inText = terms.filter((t) => hasTerm(textWords, t)).length;
+    if (terms.length && !inTitle && inText < terms.length / 2) return [];
     const years = (now - new Date(v.publishedAt).getTime()) / YEAR_MS;
-    const score = 3 * (1 - i / candidates.length)
-      + 4 * (terms.length ? terms.filter((t) => hasTerm(titleWords, t)).length / terms.length : 0)
-      + (law && citesLaw(`${v.title} ${v.description}`, law) ? 5 : 0)
-      + (titleWords.some((w) => w === 'aula' || w === 'aulas' || w.startsWith('concurso')) ? 1 : 0)
-      + 1.5 * Math.min(1, Math.log10(v.views + 1) / 6)
-      + (v.durationSec >= IDEAL_MIN_SEC ? 1 : 0)
+    const text = ` ${textWords.join(' ')} `;
+    const score = 6 * (terms.length ? inTitle / terms.length : 0)
+      + 2 * (terms.length ? inText / terms.length : 0)
+      + (phrase.length > 1 && phrase.every((t) => hasTerm(titleWords, t)) ? 2 : 0)
+      + (law && citesLaw(`${v.title} ${v.description}`, law) ? 4 : 0)
+      + (lawNames.some((n) => text.includes(` ${n} `)) ? 1.5 : 0)
+      + 2 * (1 - i / candidates.length)
+      + (titleWords.some((w) => w === 'aula' || w === 'aulas' || w.startsWith('concurso')) ? 0.5 : 0)
+      + Math.min(1, Math.log10(v.views + 1) / 6)
       - (years > OLD_YEARS ? 1 : 0); // a lei pode ter mudado
     return [{ v, score }];
   }).sort((a, b) => b.score - a.score);
@@ -86,8 +102,8 @@ export class YoutubeError extends Error {
   }
 }
 
-// Custo na cota diária (10 mil unidades): 100 da busca + 1 dos detalhes.
-export async function searchYoutube(apiKey: string, q: string, f: typeof fetch = fetch, videoDuration?: 'medium'): Promise<VideoCandidate[]> {
+// Custo na cota diária (10 mil unidades): 100 da busca + 1 dos detalhes, com 25 ou 50 resultados: pede 50.
+export async function searchYoutube(apiKey: string, q: string, f: typeof fetch = fetch): Promise<VideoCandidate[]> {
   async function get(path: string, params: Record<string, string>) {
     const url = new URL(`https://www.googleapis.com/youtube/v3/${path}`);
     for (const [k, v] of Object.entries({ ...params, key: apiKey })) url.searchParams.set(k, v);
@@ -96,7 +112,7 @@ export async function searchYoutube(apiKey: string, q: string, f: typeof fetch =
     if (!res.ok) throw new YoutubeError(res.status, body?.error?.errors?.[0]?.reason ?? '');
     return (body.items ?? []) as any[];
   }
-  const found = await get('search', { part: 'id', q, type: 'video', maxResults: '25', relevanceLanguage: 'pt', regionCode: 'BR', videoEmbeddable: 'true', safeSearch: 'moderate', ...(videoDuration ? { videoDuration } : {}) });
+  const found = await get('search', { part: 'id', q, type: 'video', maxResults: '50', relevanceLanguage: 'pt', regionCode: 'BR', videoEmbeddable: 'true', safeSearch: 'moderate' });
   const ids = found.map((i) => i.id?.videoId as string).filter(Boolean);
   if (!ids.length) return [];
   const details = await get('videos', { part: 'snippet,contentDetails,statistics,status', id: ids.join(','), maxResults: '50' });
@@ -120,12 +136,11 @@ export async function searchYoutube(apiKey: string, q: string, f: typeof fetch =
   });
 }
 
-// Em muitos temas as aulas passam de 30 minutos. Faltando sugestões, busca de novo só os vídeos médios do YouTube
-// (4 a 20 minutos): é o filtro mais próximo que a API oferece, e gasta mais 101 unidades só nesses casos.
-export async function findVideos(apiKey: string, q: string, terms: string[], f: typeof fetch = fetch, now = Date.now(), law = ''): Promise<Video[]> {
+// Faltando sugestões no tema, busca o tema dito de outro jeito (`alt`), que gasta mais 101 unidades só nesses casos.
+export async function findVideos(apiKey: string, q: string, terms: string[], f: typeof fetch = fetch, now = Date.now(), law = '', opts: RankOptions & { alt?: string } = {}): Promise<Video[]> {
   const first = await searchYoutube(apiKey, q, f);
-  const picked = rankVideos(first, terms, now, law);
-  if (picked.length >= MIN_RESULTS) return picked;
+  const picked = rankVideos(first, terms, now, law, opts);
+  if (picked.length >= MIN_RESULTS || !opts.alt) return picked;
   const seen = new Set(first.map((v) => v.id));
-  return rankVideos([...first, ...(await searchYoutube(apiKey, q, f, 'medium')).filter((v) => !seen.has(v.id))], terms, now, law);
+  return rankVideos([...first, ...(await searchYoutube(apiKey, opts.alt, f)).filter((v) => !seen.has(v.id))], terms, now, law, opts);
 }

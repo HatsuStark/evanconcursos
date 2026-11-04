@@ -9,9 +9,9 @@ const env = Object.fromEntries(readFileSync(new URL('../.env', import.meta.url),
 if (!env.YOUTUBE_API_KEY) throw Error('Preencha YOUTUBE_API_KEY no .env');
 const [subject = 'Direito Penal', title = 'Peculato: tipos e penas', keyword = ''] = process.argv.slice(2);
 
-const { q, terms, law } = videoQuery({ subject, title, topics: [], keyword });
-console.log(`Busca: ${q}\nTermos exigidos: ${terms.join(', ')}\n`);
-const picked = await findVideos(env.YOUTUBE_API_KEY, q, terms, fetch, Date.now(), law);
+const { q, alt, terms, law, phrase } = videoQuery({ subject, title, topics: [], keyword });
+console.log(`Busca: ${q}\nBusca alternativa: ${alt || '(nenhuma)'}\nTermos exigidos: ${terms.join(', ')}\n`);
+const picked = await findVideos(env.YOUTUBE_API_KEY, q, terms, fetch, Date.now(), law, { alt, phrase });
 const candidates = await searchYoutube(env.YOUTUBE_API_KEY, q);
 for (const v of picked) console.log(`✓ ${Math.round(v.durationSec / 60)} min · ${v.views} views · ${v.publishedAt.slice(0, 4)} · ${v.channel} · ${v.title}`);
 console.log('');
