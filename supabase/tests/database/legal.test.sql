@@ -42,10 +42,10 @@ select is((select count(*) from public.legal_norms where id = '30000000-0000-400
 select is((select count(*) from public.legal_articles where norm_id = '30000000-0000-4000-8000-000000000002'), 0::bigint, 'B não lê os artigos dela');
 delete from public.legal_norms;
 select pg_temp.as_user('00000000-0000-4000-8000-0000000000a2');
-select is((select count(*) from public.legal_norms), 2::bigint, 'delete de B não apagou nada');
+select is((select count(*) from public.legal_norms where id in ('30000000-0000-4000-8000-000000000001', '30000000-0000-4000-8000-000000000002')), 2::bigint, 'delete de B não apagou nada');
 select is((select count(*) from public.legal_articles where norm_id = '30000000-0000-4000-8000-000000000002'), 1::bigint, 'A lê os artigos da norma que enviou');
 delete from public.legal_norms;
-select is((select count(*) from public.legal_norms), 1::bigint, 'A apaga só a norma que enviou');
+select is((select count(*) from public.legal_norms where id in ('30000000-0000-4000-8000-000000000001', '30000000-0000-4000-8000-000000000002')), 1::bigint, 'A apaga só a norma que enviou');
 
 -- Apostilas: compartilhadas (leitura), gravadas só pelo backend.
 reset role;
