@@ -12,13 +12,13 @@ const num = (s: string) => Number(s.replace(/\./g, ''));
 
 // Quantos artigos o texto cita ("arts. 1º e 8º a 10" → 4), de qualquer norma: estimativa do tamanho quando não há texto.
 export function citedArticleCount(text: string) {
-  return [...text.matchAll(new RegExp(ART_LIST, 'gi'))].flatMap((m) => parseRanges(m[1]!)).reduce((a, r) => a + Math.min(r.to - r.from + 1, 200), 0);
+  return [...text.matchAll(ART_LIST_RE)].flatMap((m) => parseRanges(m[1]!)).reduce((a, r) => a + Math.min(r.to - r.from + 1, 200), 0);
 }
 
 // Intervalos a partir de "293 a 305; 307; 308; 311-A; 312 a 317 e 319".
 export function parseRanges(s: string): ArticleRange[] {
   const out: ArticleRange[] = [];
-  s = s.replace(new RegExp(DEVICE, 'gi'), ' '); // "§ 1º" não é o art. 1º
+  s = s.replace(DEVICE_RE, ' '); // "§ 1º" não é o art. 1º
   const re = new RegExp(`${NUM}(?:\\s*(?:a|até|ao|-)\\s*${NUM})?`, 'g');
   for (const m of s.matchAll(re)) {
     const from = num(m[1]!), to = m[3] ? num(m[3]) : from;
@@ -37,6 +37,8 @@ const SEP = String.raw`\s*(?:,\s*e\b|,|;|e|a|até|ao|-)`;
 const DEVICE = String.raw`(?:§+\s*\d{1,3}\s*(?:º|°)?|par[áa]grafo\s+[úu]nico|p\.\s*[úu]\.|caput|inc(?:iso)?s?\.?\s*[IVXLC]{1,7}\b|(?<![-\w])[IVXLC]{1,7}(?=\s*(?:[,;)]|e\s|$))|al[íi]neas?\s*["“]?[a-z]\b["”]?)`;
 const QUAL = String.raw`(?:\s*,?\s*${DEVICE})*`;
 const ART_LIST = String.raw`\b(?:arts?\.|artigos?)\s*(${NUM}${QUAL}(?:${SEP}\s*${NUM}${QUAL})*(?:${SEP})?)`;
+// Compiladas uma vez: o cronograma mede milhares de títulos (citedArticleCount) ao distribuir os dias.
+const ART_LIST_RE = new RegExp(ART_LIST, 'gi'), DEVICE_RE = new RegExp(DEVICE, 'gi');
 
 // Cita lei fora do registro (ex.: estadual)? Então os artigos do texto são dela, não de outra lei conhecida.
 // `extra`: normas enviadas pelo estudante (PDF), que valem como leis do registro para ele.
@@ -127,3 +129,45 @@ export const rangesLabel = (r: LawRef) => r.ranges.length
   ? (r.ranges.length === 1 && r.ranges[0]!.from === r.ranges[0]!.to && r.ranges[0]!.fromSuffix === r.ranges[0]!.toSuffix ? 'art. ' : 'arts. ')
     + r.ranges.map((x) => x.from === x.to && x.fromSuffix === x.toSuffix ? artLabel(x.from, x.fromSuffix) : `${artLabel(x.from, x.fromSuffix)} a ${artLabel(x.to, x.toSuffix)}`).join(', ')
   : 'lei completa';
+
+// ---------- artigos estruturados da sessão ----------
+// Na montagem do plano, a IA devolve, junto com o título, a lei e a lista de artigos de cada sessão. O app grava isso na
+// sessão (study_sessions.law_refs), e a lei seca, a apostila e as questões buscam os artigos por esse campo, sem reler o
+// título. Sessões de planos antigos (sem o campo) continuam usando sessionLawRefs.
+
+// Junta listas de artigos por lei, sem repetir intervalos.
+export function mergeLawRefs(...lists: (LawRef[] | null | undefined)[]): LawRef[] {
+  const by = new Map<string, ArticleRange[]>();
+  for (const r of lists.flat()) if (r) by.set(r.law, [...(by.get(r.law) ?? []), ...r.ranges]);
+  return [...by].map(([law, ranges]) => ({ law, ranges: dedupe(ranges) }));
+}
+
+// Resposta da IA ({ law: 'NSCGJ', articles: '196, 282, 436-A, 1º a 4º' }) → intervalos. Só leis do registro (ou enviadas
+// pelo estudante) e com artigos: norma que o app não tem, ou lei sem artigo, fica de fora.
+export function aiLawRefs(laws: { law: string; articles: string }[] | undefined, extra: LawEntry[] = []): LawRef[] {
+  const known = [...LAWS, ...extra];
+  return mergeLawRefs((laws ?? []).flatMap((l) => {
+    const key = l.law.trim(), law = known.find((k) => k.key === key) ?? known.find((k) => k.key.toLowerCase() === key.toLowerCase());
+    const ranges = law ? parseRanges(l.articles ?? '') : [];
+    return law && ranges.length ? [{ law: law.key, ranges }] : [];
+  }));
+}
+
+// Valor de study_sessions.law_refs conferido; vazio ou fora do formato → null (vale a leitura do título).
+export function storedLawRefs(v: unknown): LawRef[] | null {
+  if (!Array.isArray(v)) return null;
+  const ok = (n: unknown) => typeof n === 'number' && Number.isInteger(n) && n > 0;
+  const sfx = (s: unknown) => (typeof s === 'string' && /^[A-Z]{1,2}$/.test(s) ? s : undefined);
+  const out = v.flatMap((r) => {
+    if (!r || typeof r.law !== 'string' || !Array.isArray(r.ranges)) return [];
+    const ranges: ArticleRange[] = r.ranges.filter((x: ArticleRange) => x && ok(x.from) && ok(x.to) && x.to >= x.from)
+      .map((x: ArticleRange) => ({ from: x.from, to: x.to, ...(sfx(x.fromSuffix) ? { fromSuffix: sfx(x.fromSuffix) } : {}), ...(sfx(x.toSuffix) ? { toSuffix: sfx(x.toSuffix) } : {}) }));
+    return ranges.length ? [{ law: r.law, ranges }] : [];
+  });
+  return out.length ? out : null;
+}
+
+// Artigos de lei da sessão: os gravados na montagem; sem eles (plano antigo), os lidos do título.
+export function resolveSessionRefs(stored: unknown, title: string, topics: string[], subject = '', extra: LawEntry[] = []): LawRef[] {
+  return storedLawRefs(stored) ?? sessionLawRefs(title, topics, subject, extra);
+}

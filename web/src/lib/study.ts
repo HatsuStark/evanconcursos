@@ -16,7 +16,7 @@ export interface StudyData {
   pacing: Pacing;
   subject: SubjectRow | null;
   subjectIndex: number;
-  session: { id: string; title: string; keyword: string; topic_ids: string[] } | null;
+  session: { id: string; title: string; keyword: string; topic_ids: string[]; law_refs: unknown } | null;
   topics: string[];
   attempts: Attempt[];   // da matéria — as da tarefa têm task_id igual
   subjectGoal: number;   // meta de questões das sessões da matéria no cronograma, como no Edital
@@ -37,7 +37,7 @@ export const useStudy = (taskId: string | undefined) => useQuery({
     const notice = must(await supabase.from('notices').select('cutoff_pct').eq('id', plan.notice_id).single()) as { cutoff_pct: number | null };
     const [subjects, session, attempts, goals] = await Promise.all([
       supabase.from('notice_subjects').select('id, name, position, is_core, questions, weight').eq('notice_id', plan.notice_id).order('position'),
-      task.session_id ? supabase.from('study_sessions').select('id, title, keyword, topic_ids').eq('id', task.session_id).single() : Promise.resolve({ data: null, error: null }),
+      task.session_id ? supabase.from('study_sessions').select('id, title, keyword, topic_ids, law_refs').eq('id', task.session_id).single() : Promise.resolve({ data: null, error: null }),
       task.subject_id ? supabase.from('question_attempts').select('id, task_id, session_id, qid, assunto, correct, created_at').eq('subject_id', task.subject_id).order('created_at', { ascending: false }).limit(2000)
         : supabase.from('question_attempts').select('id, task_id, session_id, qid, assunto, correct, created_at').eq('task_id', task.id),
       task.subject_id ? supabase.from('tasks').select('goal_questions').eq('plan_id', task.plan_id).eq('subject_id', task.subject_id).not('session_id', 'is', null).is('superseded_in_version', null)

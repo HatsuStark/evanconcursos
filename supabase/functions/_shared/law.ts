@@ -1,17 +1,18 @@
-// Fontes legais de um tema: artigos citados no título da sessão (ou, sem intervalo ali, nos tópicos do edital).
+// Fontes legais de um tema: artigos gravados na sessão na montagem do plano (law_refs); sem eles (plano antigo), os
+// citados no título (ou, sem intervalo ali, nos tópicos do edital).
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sourceRef } from '../../../shared/ai/guide.ts';
-import { inRanges, sessionLawRefs } from '../../../shared/legal/refs.ts';
+import { inRanges, resolveSessionRefs } from '../../../shared/legal/refs.ts';
 import { lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
 import { ownLaws } from './legal.ts';
 
 export const MAX_ARTICLES = 25;
 
 // ownerId: inclui as normas que o estudante enviou em PDF (devolvidas em `extra`, para conferir as citações).
-export async function loadLawSources(admin: SupabaseClient, p: { title: string; topics: string[]; subject: string; ownerId?: string }) {
+export async function loadLawSources(admin: SupabaseClient, p: { title: string; topics: string[]; subject: string; ownerId?: string; lawRefs?: unknown }) {
   const extra: LawEntry[] = p.ownerId ? await ownLaws(admin, p.ownerId) : [];
-  // O título manda; o item do edital (que junta leis de várias sessões) só completa quando bate com ele.
-  const refs = sessionLawRefs(p.title, p.topics, p.subject, extra);
+  // Sem artigos gravados, o título manda; o item do edital (que junta leis de várias sessões) só completa quando bate com ele.
+  const refs = resolveSessionRefs(p.lawRefs, p.title, p.topics, p.subject, extra);
   const provided: { lawKey: string; label: string; num: number; suffix: string; text: string }[] = [];
   for (const r of refs.slice(0, 4)) {
     const law = lawByKey(r.law, extra);

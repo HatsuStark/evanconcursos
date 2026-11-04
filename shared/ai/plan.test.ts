@@ -214,3 +214,44 @@ describe('dias distribuídos pelo conteúdo e pela cobrança', () => {
     expect(r.sessions.map((x) => x.title)).toEqual(['A: NSCGJ (arts. 1 a 2); NSCGJ, arts. 3 a 4', 'C: NSCGJ (arts. 10 a 30)']);
   });
 });
+
+describe('artigos gravados na sessão (refs) acompanham junções e partes', () => {
+  const art = (num: number, chars: number) => ({ label: String(num), num, suffix: '', chars, revoked: false });
+  const law = (nums: number[], chars: number) => [{ law: 'NSCGJ', short: 'NSCGJ', cite: 'NSCGJ', ranges: '', liveChars: nums.length * chars, liveArticles: nums.length, revokedArticles: 0, articles: nums.map((n) => art(n, chars)) }];
+  const one = (n: number) => ({ from: n, to: n });
+  it('parte de lei longa leva só os artigos dela, os mesmos do título', () => {
+    const nums = [196, 282, 310, 315, 410, 436, 439, 440];
+    const x = { title: 'Mandados: Tomo I, arts. 196, 282, 310, 315, 410, 436, 439 e 440', keyword: '', topics: [0], incidence: 3, refs: [{ law: 'NSCGJ', ranges: nums.map(one) }] };
+    const r = allocateSessions([x], [law(nums, 3000)], 2, 75);
+    expect(r.sessions.map((s) => s.refs)).toEqual([
+      [{ law: 'NSCGJ', ranges: [one(196), one(282), one(310), one(315)] }],
+      [{ law: 'NSCGJ', ranges: [one(410), one(436), { from: 439, to: 440 }] }],
+    ]);
+    for (const s of r.sessions) expect(findLawRefs(s.title)).toEqual(s.refs);
+  });
+  it('sessões unidas somam os artigos; aprofundamento copia os da original', () => {
+    const s = (title: string, n: number, incidence = 1) => ({ title, keyword: '', topics: [0], incidence, refs: [{ law: 'NSCGJ', ranges: [one(n)] }] });
+    const merged = allocateSessions([s('A', 1), s('B', 2), s('C', 30, 3)], [law([1], 3000), law([2], 3000), law([30], 3000)], 2, 75);
+    expect(merged.sessions[0]!.refs).toEqual([{ law: 'NSCGJ', ranges: [one(1), one(2)] }]);
+    const deep = allocateSessions([s('X', 5, 3), s('Y', 6), s('Z', 7), s('W', 8), s('V', 9)], [null, null, null, null, null], 6, 75);
+    expect(deep.sessions.find((x) => x.title === 'Aprofundamento: X')?.refs).toEqual([{ law: 'NSCGJ', ranges: [one(5)] }]);
+  });
+  it('lei curta juntada à vizinha leva os artigos para ela', () => {
+    const r = mergeShortLawSessions(
+      [{ title: 'A: NSCGJ, arts. 105 a 110', keyword: '', topics: [0], refs: [{ law: 'NSCGJ', ranges: [{ from: 105, to: 110 }] }] }, { title: 'B: NSCGJ, art. 994', keyword: '', topics: [1], refs: [{ law: 'NSCGJ', ranges: [one(994)] }] }],
+      [[{ law: 'NSCGJ', short: 'NSCGJ', ranges: 'arts. 105 a 110', liveChars: 300, liveArticles: 1, revokedArticles: 5 }], [{ law: 'NSCGJ', short: 'NSCGJ', ranges: 'art. 994', liveChars: 9000, liveArticles: 1, revokedArticles: 0 }]]);
+    expect(r.sessions[0]!.refs).toEqual([{ law: 'NSCGJ', ranges: [one(994), { from: 105, to: 110 }] }]);
+  });
+  it('repairSessions mantém os artigos e o payload grava em lawRefs (null sem lei)', () => {
+    const refs = [{ law: 'CPP', ranges: [one(351)] }];
+    const r = repairSessions({ sessions: [{ title: 'Citação: CPP, art. 351', keyword: 'citação', topics: [1], refs }, { title: 'Prazos', keyword: 'prazos', topics: [2] }] }, 2, topicsOf(2));
+    expect(r.sessions.map((s) => s.refs)).toEqual([refs, undefined]);
+    const base: PlanBase = { examDate: '2027-06-01', totalQuestions: 10, weights: {}, inputs: { hours: [2, 2, 2, 2, 2, 0, 0], startDate: '2026-11-02', weeklyReview: false, profile: '', levels: {} },
+      subjects: [{ id: 'a', name: 'Processo Penal', core: true, questions: 5, weight: 3, topics: [{ id: 't0', text: 'x' }, { id: 't1', text: 'y' }] }] };
+    const n = theoryPlan(base).a!.days;
+    const list = Array.from({ length: n }, (_, i) => (i === 0 ? r.sessions[0]! : { title: `Sessão ${i}`, keyword: '', topics: [1] }));
+    const p = buildPlanPayload(base, { a: list });
+    expect(p.sessions[0]!.lawRefs).toEqual(refs);
+    expect(p.sessions[1]!.lawRefs).toBeNull();
+  });
+});

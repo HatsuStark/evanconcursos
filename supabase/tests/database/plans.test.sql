@@ -26,7 +26,8 @@ grant select on ids to authenticated;
 -- Versão 1: uma tarefa no passado e uma no futuro, ligadas a uma sessão.
 select lives_ok(format($$select public.create_plan_version('20000000-0000-4000-8000-000000000001', %L)$$, jsonb_build_object(
   'name', 'Plano TJ', 'inputs', '{"hours":[2,2,2,2,2,3,0]}'::jsonb,
-  'sessions', jsonb_build_array(jsonb_build_object('key', 's1', 'subjectId', (select subject_id from ids), 'position', 0, 'title', 'Dolo e culpa', 'topicIds', (select to_jsonb(topics) from ids))),
+  'sessions', jsonb_build_array(jsonb_build_object('key', 's1', 'subjectId', (select subject_id from ids), 'position', 0, 'title', 'Dolo e culpa', 'topicIds', (select to_jsonb(topics) from ids),
+    'lawRefs', '[{"law":"CP","ranges":[{"from":18,"to":18}]}]'::jsonb)),
   'tasks', jsonb_build_array(
     jsonb_build_object('date', '2020-01-01', 'kind', 'theory', 'minutes', 120, 'subjectId', (select subject_id from ids), 'sessionKey', 's1', 'title', 'Penal: dolo', 'goal', 20),
     jsonb_build_object('date', '2030-01-01', 'kind', 'theory', 'minutes', 120, 'subjectId', (select subject_id from ids), 'sessionKey', 's1', 'title', 'Penal: culpa', 'goal', 20)))),
@@ -34,6 +35,7 @@ select lives_ok(format($$select public.create_plan_version('20000000-0000-4000-8
 select is((select count(*) from public.tasks), 2::bigint, 'v1 grava todas as tarefas');
 select is((select count(*) from public.tasks where session_id is not null), 2::bigint, 'tarefas ligadas à sessão');
 select is((select cardinality(topic_ids) from public.study_sessions), 2, 'sessão aponta para os 2 tópicos');
+select is((select law_refs from public.study_sessions), '[{"law":"CP","ranges":[{"from":18,"to":18}]}]'::jsonb, 'sessão guarda os artigos decididos na montagem');
 select is((select active_version_id from public.study_plans), (select id from public.plan_versions where number = 1), 'v1 ativa');
 
 -- Marca a tarefa passada como feita e refaz o cronograma a partir de 2025-06-01.

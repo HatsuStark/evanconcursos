@@ -1,6 +1,6 @@
 // Lei seca: leis citadas pela sessão, artigos (texto oficial compartilhado) e marcações pessoais.
 import { useQuery } from '@tanstack/react-query';
-import { findLawRefs, inRanges, rangesLabel, sessionLawRefs as lawRefsOfSession, type LawRef } from '../../../shared/legal/refs.ts';
+import { findLawRefs, inRanges, rangesLabel, sessionLawRefs as lawRefsOfSession, storedLawRefs, type LawRef } from '../../../shared/legal/refs.ts';
 import { ownLawEntry, unlistedNorms, type OwnNormRow, type UnlistedNorm } from '../../../shared/legal/norms.ts';
 import { lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
 import { supabase } from './supabase.ts';
@@ -9,9 +9,11 @@ export interface Norm { id: string; law_key: string; name: string; short_name: s
 export interface Article { id: string; ord: number; label: string; num: number; suffix: string; heading: string; text: string; notes: string[]; revoked: boolean }
 export interface Mark { id: string; article_id: string; color: string; note: string }
 
-// Leis da sessão: a mesma regra das questões e da apostila (o título manda; o item do edital só completa quando bate com
-// ele). Sem artigos, a lei citada no título (ou a principal da matéria) inteira.
-export function sessionLawRefs(title: string, topics: string[], subject: string, own: LawEntry[] = []): LawRef[] {
+// Leis da sessão: a mesma regra das questões e da apostila (os artigos gravados na montagem; sem eles, o título manda e o
+// item do edital só completa quando bate com ele). Sem artigos, a lei citada no título (ou a principal da matéria) inteira.
+export function sessionLawRefs(title: string, topics: string[], subject: string, own: LawEntry[] = [], stored?: unknown): LawRef[] {
+  const saved = storedLawRefs(stored);
+  if (saved) return saved;
   const refs = lawRefsOfSession(title, topics, subject, own);
   return refs.length ? refs : findLawRefs(title, subject, own);
 }

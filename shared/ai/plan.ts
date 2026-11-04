@@ -2,11 +2,13 @@
 // matéria) e a correção determinística das sessões, que garante contagem exata e cobertura de todos os tópicos.
 import { z } from 'zod';
 import { topicKeyword } from '../domain/scheduler.ts';
-import { citedArticleCount, rangesLabel, type ArticleRange } from '../legal/refs.ts';
+import { citedArticleCount, mergeLawRefs, rangesLabel, type ArticleRange, type LawRef } from '../legal/refs.ts';
 
 // plan-v4: a IA devolve até n sessões, sem repetir assunto para completar; o app distribui os dias que sobram pelo
 // tamanho do texto e pela cobrança (allocateSessions).
-export const PLAN_PROMPT_VERSION = 'plan-v4';
+// plan-v5: cada sessão traz também a lei e os artigos (campo laws), gravados na sessão para a lei seca, a apostila e as
+// questões não dependerem de reler o título.
+export const PLAN_PROMPT_VERSION = 'plan-v5';
 
 // ---------- questionário ----------
 export const PlanInputs = z.object({
@@ -59,12 +61,16 @@ export const SubjectSessions = z.object({
     keyword: z.string().trim().max(60).describe('1 a 4 palavras para buscar questões do assunto.'),
     topics: z.array(z.number().int()).describe('Números dos tópicos do edital cobertos pela sessão.'),
     incidence: z.number().int().min(1).max(3).optional().describe('Quanto a banca cobra o assunto: 3 muito, 2 médio, 1 pouco.'),
+    laws: z.array(z.object({
+      law: z.string().trim().max(40).describe('Código da lei, exatamente como na lista de leis do prompt.'),
+      articles: z.string().trim().max(600).describe('Todos os artigos da sessão, só números: "196, 282, 436-A, 1º a 4º".'),
+    })).max(6).optional().describe('Leis da lista citadas na sessão, com os artigos. Vazio se não houver.'),
   })),
 });
 export type SubjectSessions = z.infer<typeof SubjectSessions>;
 export const sessionsJsonSchema = () => z.toJSONSchema(SubjectSessions, { target: 'draft-7' });
 
-export function sessionsPrompt(p: { role: string; board: string; profile: string; subject: string; level: number; questions: number; focus: string; n: number; minutesPerSession: number; topics: string[]; duties?: string; otherRoles?: string[] }) {
+export function sessionsPrompt(p: { role: string; board: string; profile: string; subject: string; level: number; questions: number; focus: string; n: number; minutesPerSession: number; topics: string[]; duties?: string; otherRoles?: string[]; laws?: { key: string; name: string }[] }) {
   return `Você é professor de cursinho para concursos públicos brasileiros.
 Concurso: ${p.role || 'não informado'}${p.board ? `, banca ${p.board}` : ''}.
 ${roleContext(p.role, p.duties, p.otherRoles)}
@@ -81,11 +87,15 @@ Regras:
 - Ajuste ao nível: iniciante precisa de mais sessões de base; avançado, de mais tempo nos pontos difíceis e mais cobrados.
 - title: até 160 caracteres, formato "Assunto curto: detalhes". Quando houver lei, cite a lei e TODOS os artigos da sessão (ex.: "Normas da CGJ, arts. 1º a 4º, 33, 47 e 49"), sem abreviar com "etc.". Sem repetir títulos.
 - keyword: o assunto em 1 a 4 palavras, como se busca em sites de questões (ex.: "inquérito policial").
+- laws: para cada lei da lista abaixo que a sessão estuda, o código e TODOS os artigos dela na sessão, os mesmos do título, só os números (sem incisos nem parágrafos: "arts. 196, XX, 282, § 1º" vira "196, 282"; intervalo com "a": "1º a 4º"). Norma fora da lista ou sessão sem artigos de lei: não inclua.
+Leis (código | nome):
+${(p.laws ?? []).map((l) => `${l.key} | ${l.name}`).join('\n') || 'nenhuma'}
 - Não inclua nada fora do conteúdo programático.`;
 }
 
 // ---------- correção determinística ----------
-export interface Session { title: string; keyword: string; topics: number[]; incidence?: number } // topics: índices 0-based; incidence 1–3
+// topics: índices 0-based; incidence 1–3; refs: lei e artigos da sessão (gravados em study_sessions.law_refs).
+export interface Session { title: string; keyword: string; topics: number[]; incidence?: number; refs?: LawRef[] }
 
 // Sessões sem IA: os tópicos em ordem, agrupados ou divididos em partes para dar exatamente n.
 export function fallbackSessions(topics: string[], n: number): Session[] {
@@ -112,10 +122,10 @@ export function fallbackSessions(topics: string[], n: number): Session[] {
 // Ajusta a resposta da IA: tópicos válidos (1-based → 0-based), todo tópico coberto, exatamente n sessões.
 // Devolve também o que foi corrigido, para registro.
 // opts.sizes: tamanho da lei de cada sessão da IA (texto oficial); opts.minutes: duração média da sessão.
-export function repairSessions(raw: SubjectSessions, n: number, topics: string[], opts: { sizes?: (LawSize[] | null)[]; minutes?: number } = {}): { sessions: Session[]; fixes: string[] } {
+export function repairSessions(raw: { sessions: (SubjectSessions['sessions'][number] & { refs?: LawRef[] })[] }, n: number, topics: string[], opts: { sizes?: (LawSize[] | null)[]; minutes?: number } = {}): { sessions: Session[]; fixes: string[] } {
   const T = topics.length, fixes: string[] = [];
   const mapped = raw.sessions
-    .map((x) => ({ title: x.title.trim(), keyword: x.keyword.trim(), incidence: x.incidence && [1, 2, 3].includes(x.incidence) ? x.incidence : 2, topics: [...new Set(x.topics.filter((t) => Number.isInteger(t) && t >= 1 && t <= T).map((t) => t - 1))] }));
+    .map((x) => ({ title: x.title.trim(), keyword: x.keyword.trim(), incidence: x.incidence && [1, 2, 3].includes(x.incidence) ? x.incidence : 2, topics: [...new Set(x.topics.filter((t) => Number.isInteger(t) && t >= 1 && t <= T).map((t) => t - 1))], ...(x.refs?.length ? { refs: x.refs } : {}) }));
   // Os tamanhos acompanham as sessões que ficam.
   const sizes = opts.sizes ? mapped.map((_, i) => opts.sizes![i] ?? null).filter((_, i) => mapped[i]!.title) : null;
   const s: Session[] = mapped.filter((x) => x.title);
@@ -178,7 +188,7 @@ export function allocateSessions<T extends Session>(list: T[], sizes: (LawSize[]
     const a = items[best]!, b = items[best + 1]!;
     const extra = (b.size ?? []).filter((z) => z.liveArticles > 0).map((z) => `${z.cite ?? z.short}, ${z.ranges}`).join('; ');
     items.splice(best, 2, {
-      x: { ...a.x, title: (extra ? `${a.x.title}; ${extra}` : a.x.title).slice(0, 200), keyword: a.x.keyword || b.x.keyword, incidence: Math.max(a.x.incidence ?? 2, b.x.incidence ?? 2), topics: [...new Set([...a.x.topics, ...b.x.topics])].sort((p, q) => p - q) },
+      x: { ...a.x, title: (extra ? `${a.x.title}; ${extra}` : a.x.title).slice(0, 200), keyword: a.x.keyword || b.x.keyword, incidence: Math.max(a.x.incidence ?? 2, b.x.incidence ?? 2), topics: [...new Set([...a.x.topics, ...b.x.topics])].sort((p, q) => p - q), ...withRefs(a.x.refs, b.x.refs) },
       size: a.size || b.size ? [...(a.size ?? []), ...(b.size ?? [])] : null, days: 1, deep: 0,
     });
     fixes.push('sessões unidas');
@@ -236,8 +246,9 @@ function splitSession<T extends Session>(it: Sized<T>, k: number): T[] {
     return groups.map((g, j) => {
       const byLaw = new Map<string, { z: LawSize; list: typeof g }>();
       for (const a of g) byLaw.set(a.z.law, { z: a.z, list: [...(byLaw.get(a.z.law)?.list ?? []), a] });
-      const cites = [...byLaw.values()].map(({ z, list }) => `${z.cite ?? z.short}, ${rangesLabel({ law: z.law, ranges: runs(list) })}`).join('; ');
-      return { ...it.x, title: `${head} (parte ${j + 1} de ${groups.length}): ${cites}`.slice(0, 200) };
+      const refs = [...byLaw.values()].map(({ z, list }) => ({ law: z.law, ranges: runs(list), cite: z.cite ?? z.short }));
+      const cites = refs.map((r) => `${r.cite}, ${rangesLabel(r)}`).join('; ');
+      return { ...it.x, title: `${head} (parte ${j + 1} de ${groups.length}): ${cites}`.slice(0, 200), refs: refs.map(({ law, ranges }) => ({ law, ranges })) };
     });
   }
   if (!it.size && it.x.topics.length >= 2) {
@@ -279,7 +290,7 @@ export function isShortLaw(sizes: LawSize[]) {
   const total = revoked + sizes.reduce((a, s) => a + s.liveArticles, 0);
   return live < SHORT_LAW_CHARS || (revoked * 2 >= total && live < MOSTLY_REVOKED_CHARS);
 }
-export function mergeShortLawSessions<T extends { title: string; keyword: string; topics: number[]; incidence?: number }>(list: T[], sizes: (LawSize[] | null)[]): { sessions: T[]; sizes: (LawSize[] | null)[]; merged: string[] } {
+export function mergeShortLawSessions<T extends { title: string; keyword: string; topics: number[]; incidence?: number; refs?: LawRef[] }>(list: T[], sizes: (LawSize[] | null)[]): { sessions: T[]; sizes: (LawSize[] | null)[]; merged: string[] } {
   const s = list.map((x, i) => ({ x, size: sizes[i] ?? null }));
   const merged: string[] = [];
   for (let i = 0; i < s.length && s.length > 1; i++) {
@@ -294,11 +305,17 @@ export function mergeShortLawSessions<T extends { title: string; keyword: string
     const t = s[target]!;
     // Artigos todos revogados não vão para o título: não há o que ler nem cobrar.
     const extra = cur.size.filter((z) => z.liveArticles > 0).map((z) => `${z.short}, ${z.ranges}`).join('; ');
-    t.x = { ...t.x, title: (extra ? `${t.x.title}; ${extra}` : t.x.title).slice(0, 200), topics: [...new Set([...t.x.topics, ...cur.x.topics])].sort((a, b) => a - b), incidence: Math.max(t.x.incidence ?? 2, cur.x.incidence ?? 2) };
+    t.x = { ...t.x, title: (extra ? `${t.x.title}; ${extra}` : t.x.title).slice(0, 200), topics: [...new Set([...t.x.topics, ...cur.x.topics])].sort((a, b) => a - b), incidence: Math.max(t.x.incidence ?? 2, cur.x.incidence ?? 2), ...withRefs(t.x.refs, cur.x.refs) };
     t.size = [...(t.size ?? []), ...cur.size];
     merged.push(`"${cur.x.title}" juntada a "${t.x.title}"`);
     s.splice(i, 1);
     i--;
   }
   return { sessions: s.map((y) => y.x), sizes: s.map((y) => y.size), merged };
+}
+
+// Sessões juntadas levam os artigos das duas; sem artigos em nenhuma, o campo fica de fora.
+function withRefs(a?: LawRef[], b?: LawRef[]): { refs?: LawRef[] } {
+  const refs = mergeLawRefs(a, b);
+  return refs.length ? { refs } : {};
 }

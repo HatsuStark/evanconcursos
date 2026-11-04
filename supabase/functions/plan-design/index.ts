@@ -4,8 +4,8 @@
 //   {step:'sessions', noticeId, subjectId, n, minutes, level, focus, profile} → n sessões da matéria, cobrindo todos os tópicos
 // O calendário é montado no app pelo scheduler determinístico e gravado por create_plan_version.
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { inRanges, rangesLabel, sessionLawRefs } from '../../../shared/legal/refs.ts';
-import { lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
+import { aiLawRefs, findLawRefs, inRanges, type LawRef, mergeLawRefs, rangesLabel, sessionLawRefs } from '../../../shared/legal/refs.ts';
+import { LAWS, lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
 import { type LawSize, mergeShortLawSessions, PLAN_PROMPT_VERSION, PlanInputs, PlanStrategy, repairSessions, sessionsJsonSchema, sessionsPrompt, strategyJsonSchema, strategyPrompt, SubjectSessions } from '../../../shared/ai/plan.ts';
 import { isOpenEnded } from '../../../shared/domain/rounds.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
@@ -13,11 +13,11 @@ import { ensureLaw, ownLaws } from '../_shared/legal.ts';
 
 const int = (v: unknown, min: number, max: number) => Math.max(min, Math.min(max, Math.round(Number(v) || 0)));
 
-// Tamanho do texto vigente dos artigos citados pela sessão (texto oficial no banco). Sem artigo citado, ou lei fora do
-// banco, null: a sessão fica como a IA montou.
-async function lawSize(admin: ReturnType<typeof adminClient>, title: string, topics: string[], subject: string, own: LawEntry[]): Promise<LawSize[] | null> {
+// Tamanho do texto vigente dos artigos da sessão (texto oficial no banco). Sem artigo, ou lei fora do banco, null: a
+// sessão fica como a IA montou.
+async function lawSize(admin: ReturnType<typeof adminClient>, refs: LawRef[], own: LawEntry[]): Promise<LawSize[] | null> {
   const out: LawSize[] = [];
-  for (const ref of sessionLawRefs(title, topics, subject, own).slice(0, 4)) {
+  for (const ref of refs.slice(0, 4)) {
     const law = lawByKey(ref.law, own);
     if (!law) return null;
     // Lei do registro ainda fora do banco é baixada agora (uma vez para todos), para a sessão poder ser medida.
@@ -36,6 +36,20 @@ async function lawSize(admin: ReturnType<typeof adminClient>, title: string, top
     });
   }
   return out.length ? out : null;
+}
+
+// Artigos da sessão: os que a IA listou no campo laws, mais os que o próprio título cita com número (a lista às vezes
+// esquece um). Sem lista da IA, a leitura do título (e do item do edital) de antes. Lista que não acha nenhum artigo no
+// banco (número trocado) cede lugar à do título, se esta achar.
+async function sessionRefs(admin: ReturnType<typeof adminClient>, x: SubjectSessions['sessions'][number], topics: string[], subject: string, own: LawEntry[]) {
+  const fromTitle = sessionLawRefs(x.title, x.topics.map((t) => topics[t - 1] ?? ''), subject, own);
+  const ai = aiLawRefs(x.laws, own);
+  if (!ai.length) return { refs: fromTitle, size: await lawSize(admin, fromTitle, own) };
+  const refs = mergeLawRefs(ai, findLawRefs(x.title, subject, own).filter((r) => r.ranges.length));
+  const size = await lawSize(admin, refs, own);
+  if (size || !fromTitle.length) return { refs, size };
+  const t = await lawSize(admin, fromTitle, own);
+  return t ? { refs: fromTitle, size: t } : { refs, size };
 }
 
 Deno.serve(async (req) => {
@@ -82,20 +96,22 @@ Deno.serve(async (req) => {
         .eq('id', String(body.subjectId ?? '')).eq('notice_id', notice.id).maybeSingle();
       if (!subject) return json(404, { error: 'Matéria não encontrada.' });
       const topics = ((subject.notice_topics ?? []) as { text: string; position: number }[]).sort((a, b) => a.position - b.position).map((t) => t.text);
+      // Leis que a IA pode citar no campo laws: as do registro e as que o estudante enviou em PDF.
+      const own = await ownLaws(admin, auth.user.id);
       const r = await generateJson({
         apiKey, model, schema: SubjectSessions, jsonSchema: sessionsJsonSchema(), temperature: 0.3,
         parts: [{ text: sessionsPrompt({
           role: notice.role_name, board: notice.board, profile: String(body.profile ?? '').slice(0, 1500), subject: subject.name,
           level: int(body.level, 0, 3), questions: subject.questions, focus: String(body.focus ?? '').slice(0, 300), n,
           minutesPerSession: int(body.minutes, 15, 960), topics, duties: notice.role_duties ?? '', otherRoles: notice.structure?.otherRoles ?? [],
+          laws: [...LAWS, ...own].map((l) => ({ key: l.key, name: l.name })),
         }) }],
       });
       usage = r.usage; latencyMs = r.latencyMs;
       // Sessão de lei quase vazia (artigos revogados ou só remissivos) é juntada à vizinha da mesma lei; repairSessions
       // divide a maior para manter as n sessões.
-      const own = await ownLaws(admin, auth.user.id);
-      const sizes = await Promise.all(r.data.sessions.map((x) => lawSize(admin, x.title, x.topics.map((t) => topics[t - 1] ?? ''), subject.name, own)));
-      const short = mergeShortLawSessions(r.data.sessions, sizes);
+      const sized = await Promise.all(r.data.sessions.map((x) => sessionRefs(admin, x, topics, subject.name, own)));
+      const short = mergeShortLawSessions(r.data.sessions.map((x, i) => ({ ...x, ...(sized[i]!.refs.length ? { refs: sized[i]!.refs } : {}) })), sized.map((z) => z.size));
       const { sessions, fixes } = repairSessions({ ...r.data, sessions: short.sessions }, n, topics, { sizes: short.sizes, minutes: int(body.minutes, 15, 960) });
       fixes.unshift(...short.merged.map((m) => `lei curta: ${m}`));
       await logUsage(admin, { ownerId: auth.user.id, operation, model, promptVersion: PLAN_PROMPT_VERSION, usage, latencyMs, status: 'ok' });

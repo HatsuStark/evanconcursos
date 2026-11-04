@@ -69,7 +69,7 @@ function StudyView({ d }: { d: StudyData }) {
   const [params] = useSearchParams();
   const timer = useTimer(d.task.id, d.task.time_spent_sec);
   const own = useOwnLaws().data?.entries ?? [];
-  const lawRefs = sessionLawRefs(d.task.title, d.topics, d.subject?.name ?? '', own);
+  const lawRefs = sessionLawRefs(d.task.title, d.topics, d.subject?.name ?? '', own, d.session?.law_refs);
   const missing = missingNorms(d.task.title, own);
   const hasSession = !!d.task.session_id;
   const tabs = TABS.filter((t) => (t.key === 'pente' ? d.task.kind === 'pente_fino' : t.key === 'lei' ? lawRefs.length > 0 || missing.length > 0 : t.key === 'apostila' || t.key === 'videos' || t.key === 'material' ? hasSession : true));

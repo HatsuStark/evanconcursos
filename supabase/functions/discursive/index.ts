@@ -33,7 +33,7 @@ async function start(auth: Auth, admin: Admin, model: string, body: Record<strin
     const { data: subs } = await auth.client.from('notice_subjects').select('id, name, is_core').eq('notice_id', notice.id);
     const eligible = (subs ?? []).filter((s) => !rules.specificOnly || s.is_core);
     const ids = (eligible.length ? eligible : subs ?? []).filter((s) => !body.subjectId || s.id === body.subjectId).map((s) => s.id);
-    const { data: sessions } = await auth.client.from('study_sessions').select('id, subject_id, title, topic_ids').eq('plan_version_id', plan.active_version_id).in('subject_id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']);
+    const { data: sessions } = await auth.client.from('study_sessions').select('id, subject_id, title, topic_ids, law_refs').eq('plan_version_id', plan.active_version_id).in('subject_id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']);
     const { data: done } = await auth.client.from('tasks').select('session_id').eq('plan_id', plan.id).not('done_at', 'is', null).not('session_id', 'is', null);
     const { data: past } = await auth.client.from('discursive_answers').select('session_id').eq('notice_id', notice.id).not('session_id', 'is', null);
     const doneSet = new Set((done ?? []).map((t) => t.session_id));
@@ -45,7 +45,7 @@ async function start(auth: Auth, admin: Admin, model: string, body: Record<strin
     subject = (subs ?? []).find((s) => s.id === picked.subject_id) ?? null;
     const { data: tt } = picked.topic_ids.length ? await auth.client.from('notice_topics').select('id, text').in('id', picked.topic_ids) : { data: [] };
     topics = (tt ?? []).map((t) => t.text);
-    ({ law, articles, extra } = await loadLawSources(admin, { title: picked.title, topics, subject: subject?.name ?? '', ownerId: auth.user.id }));
+    ({ law, articles, extra } = await loadLawSources(admin, { title: picked.title, topics, subject: subject?.name ?? '', ownerId: auth.user.id, lawRefs: picked.law_refs }));
   }
 
   const input = { format: rules.format, banca: notice.board ?? '', subject: subject?.name ?? '', topics, law };
@@ -106,9 +106,9 @@ async function grade(auth: Auth, admin: Admin, model: string, answerId: string) 
     const prompt = promptRow!.content as DiscursivePrompt;
     let articles: Awaited<ReturnType<typeof loadLawSources>>['articles'] = [], law: { ref: string; text: string }[] = [], extra: Awaited<ReturnType<typeof loadLawSources>>['extra'] = [];
     if (answer.session_id) {
-      const { data: s } = await auth.client.from('study_sessions').select('title, topic_ids').eq('id', answer.session_id).maybeSingle();
+      const { data: s } = await auth.client.from('study_sessions').select('title, topic_ids, law_refs').eq('id', answer.session_id).maybeSingle();
       const { data: tt } = s?.topic_ids?.length ? await auth.client.from('notice_topics').select('text').in('id', s.topic_ids) : { data: [] };
-      if (s) ({ articles, law, extra } = await loadLawSources(admin, { title: s.title, topics: (tt ?? []).map((t) => t.text), subject: answer.subject_name, ownerId: auth.user.id }));
+      if (s) ({ articles, law, extra } = await loadLawSources(admin, { title: s.title, topics: (tt ?? []).map((t) => t.text), subject: answer.subject_name, ownerId: auth.user.id, lawRefs: s.law_refs }));
     }
     const statement = [answer.statement, ...answer.support_texts].join('\n\n');
     const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: DiscursiveGrade, jsonSchema: discursiveGradeJsonSchema(), temperature: 0.1,

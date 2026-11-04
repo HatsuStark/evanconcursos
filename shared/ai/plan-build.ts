@@ -1,7 +1,7 @@
 // Montagem do cronograma: une as sessões (IA, já corrigidas) ao calendário determinístico do scheduler
 // e produz o payload de create_plan_version. Duas passadas: a 1ª dá quantos blocos de teoria cada matéria
 // recebe (n de sessões pedido à IA); a 2ª encaixa as sessões, uma por bloco, na ordem, e a lei seca nas que citam lei.
-import { findLawRefs } from '../legal/refs.ts';
+import { findLawRefs, type LawRef } from '../legal/refs.ts';
 import { parseYmd, ymd } from '../domain/dates.ts';
 import { generateSchedule, topicKeyword, type BlockKind, type ScheduleConfig, type ScheduleInput } from '../domain/scheduler.ts';
 import type { PlanInputs, Session } from './plan.ts';
@@ -18,7 +18,8 @@ export interface PlanBase {
 }
 
 export type TaskKind = BlockKind | 'weekly_review' | 'simulado' | 'eve' | 'exam';
-export interface SessionRow { key: string; subjectId: string; position: number; title: string; keyword: string; topicIds: string[]; incidence: number }
+// lawRefs: lei e artigos da sessão, decididos na montagem (null: a lei seca, a apostila e as questões leem o título).
+export interface SessionRow { key: string; subjectId: string; position: number; title: string; keyword: string; topicIds: string[]; incidence: number; lawRefs: LawRef[] | null }
 export interface TaskRow { date: string; position: number; minutes: number; kind: TaskKind; subjectId: string | null; sessionKey: string | null; title: string; keyword: string; goal: number }
 
 const TITLES: Partial<Record<TaskKind, string>> = {
@@ -63,7 +64,7 @@ function scheduleArgs(b: PlanBase, sessions?: Record<string, Session[]>): [Sched
         return [s.id, {
           weight: b.weights[s.id] ?? s.weight, level: b.inputs.levels[s.id] ?? 1, topics: list.map((x) => x.title),
           topicCount: s.topics.length, questions: questions[s.id], stake: s.weight, minPct: s.minPct,
-          lawItems: list.map((x) => findLawRefs(x.title, s.name).some((r) => r.ranges.length)), incidence: list.map((x) => x.incidence ?? 2),
+          lawItems: list.map((x) => !!x.refs?.length || findLawRefs(x.title, s.name).some((r) => r.ranges.length)), incidence: list.map((x) => x.incidence ?? 2),
         }];
       })),
     },
@@ -105,6 +106,7 @@ export function buildPlanPayload(b: PlanBase, sessions: Record<string, Session[]
   const sessionRows: SessionRow[] = b.subjects.flatMap((s) => sessions[s.id]!.map((x, i) => ({
     key: `${s.id}:${i}`, subjectId: s.id, position: i, title: x.title, keyword: x.keyword || topicKeyword(x.title), incidence: x.incidence ?? 2,
     topicIds: x.topics.map((t) => s.topics[t]?.id).filter((id): id is string => !!id),
+    lawRefs: x.refs?.length ? x.refs : null,
   })));
   const monday = parseYmd(sched.startDate)!;
   const tasks: TaskRow[] = [];

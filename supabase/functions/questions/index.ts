@@ -12,7 +12,7 @@ import { DEEP_PREFIX, PRACTICE_PREFIX } from '../../../shared/ai/plan.ts';
 import { ownLaws } from '../_shared/legal.ts';
 import { prunedAssuntos, rejectedIds, RELEVANCE_PROMPT_VERSION, RelevanceVerdicts, relevanceJsonSchema, relevancePrompt } from '../../../shared/qbank/relevance.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
-import { findLawRefs, inRanges, type LawRef } from '../../../shared/legal/refs.ts';
+import { findLawRefs, inRanges, storedLawRefs, type LawRef } from '../../../shared/legal/refs.ts';
 import { lawByKey } from '../../../shared/legal/registry.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import {
@@ -226,7 +226,7 @@ Deno.serve(async (req) => {
     const { data: done } = await admin.from('question_attempts').select('qid, assunto, session_id').eq('owner_id', auth.user.id).eq('subject_id', subject.id).limit(5000);
     // Triagem de relevância da sessão: o que já foi julgado não é julgado de novo, e o que ficou fora do tema nunca volta.
     const judged = new Set<string>(), rejected = new Set<string>(), verdicts: { assunto: string; relevant: boolean }[] = [];
-    const { data: sess } = sid ? await auth.client.from('study_sessions').select('title, keyword').eq('id', sid).maybeSingle() : { data: null };
+    const { data: sess } = sid ? await auth.client.from('study_sessions').select('title, keyword, law_refs').eq('id', sid).maybeSingle() : { data: null };
     if (sess) {
       const { data: rel } = await admin.from('qbank_relevance').select('qid, assunto, relevant').eq('session_id', sid);
       for (const r of rel ?? []) { judged.add(r.qid); verdicts.push({ assunto: r.assunto, relevant: r.relevant }); if (!r.relevant) rejected.add(r.qid); }
@@ -259,7 +259,7 @@ Deno.serve(async (req) => {
       const theme = generatedTheme(filter.materia ?? subject.name, sess!.title);
       // Só as da versão atual do prompt: as antigas saíam genéricas demais. Tema que cita artigos de lei conhecida só
       // reaproveita as feitas com o texto oficial (antes de a norma entrar na base, a IA escrevia de memória).
-      const grounded = findLawRefs(sess!.title, subject.name, await ownLaws(admin, auth.user.id)).some((r) => r.ranges.length);
+      const grounded = !!storedLawRefs(sess!.law_refs) || findLawRefs(sess!.title, subject.name, await ownLaws(admin, auth.user.id)).some((r) => r.ranges.length);
       let madeQuery = admin.from('qbank_questions').select('payload').eq('payload->>ia_tema', theme).eq('payload->>ia_versao', GENERATED_PROMPT_VERSION);
       if (grounded) madeQuery = madeQuery.gt('payload->ia_fontes', 0);
       const { data: made } = await madeQuery.limit(200);
@@ -270,7 +270,7 @@ Deno.serve(async (req) => {
       try {
         const { data: ss } = await auth.client.from('study_sessions').select('topic_ids').eq('id', sid).single();
         const { data: tt } = ss?.topic_ids?.length ? await auth.client.from('notice_topics').select('text').in('id', ss.topic_ids) : { data: [] };
-        const { law } = await loadLawSources(admin, { title: sess!.title, topics: (tt ?? []).map((t) => t.text as string), subject: subject.name, ownerId: auth.user.id });
+        const { law } = await loadLawSources(admin, { title: sess!.title, topics: (tt ?? []).map((t) => t.text as string), subject: subject.name, ownerId: auth.user.id, lawRefs: sess!.law_refs });
         const { data: nt } = await auth.client.from('notices').select('board, role_name').eq('id', subject.notice_id).single();
         // Modelos de estilo e nível: as questões reais que a triagem aprovou nesta sessão; sem elas, as do cache nos assuntos dela.
         const { data: ok } = await admin.from('qbank_relevance').select('qid').eq('session_id', sid).eq('relevant', true).limit(10);

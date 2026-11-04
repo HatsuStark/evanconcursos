@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseLawHtml, parseNormsText } from './parse.ts';
 import { ownLawEntry, shortCitation, unlistedNorms, uploadUrn } from './norms.ts';
-import { citesUnlistedLaw, findLawRefs, inRanges, noticeLawKeys, parseRanges, rangesLabel, sessionLawRefs } from './refs.ts';
+import { aiLawRefs, citesUnlistedLaw, findLawRefs, inRanges, mergeLawRefs, noticeLawKeys, parseRanges, rangesLabel, resolveSessionRefs, sessionLawRefs, storedLawRefs } from './refs.ts';
 
 // Trecho real do HTML do CPP no normas.leg.br (estrutura preservada).
 const HTML = `<html><body>
@@ -214,5 +214,32 @@ describe('várias listas de artigos da mesma norma', () => {
   });
   it('artigo logo antes da lei seguinte continua sendo dela', () => {
     expect(findLawRefs('art. 121 do CP e art. 5º da CF')).toEqual([{ law: 'CP', ranges: [{ from: 121, to: 121 }] }, { law: 'CF', ranges: [{ from: 5, to: 5 }] }]);
+  });
+});
+
+describe('artigos estruturados da sessão', () => {
+  const one = (n: number, s?: string) => ({ from: n, to: n, ...(s ? { fromSuffix: s } : {}) });
+  it('resposta da IA: só leis conhecidas e com artigos, por lei', () => {
+    expect(aiLawRefs([{ law: 'NSCGJ', articles: '196, 282, 436-A, 1º a 4º' }, { law: 'nscgj', articles: '440' }, { law: 'RES354', articles: '8 a 10' }, { law: 'CPP', articles: '' }]))
+      .toEqual([{ law: 'NSCGJ', ranges: [one(196), one(282), one(436, 'A'), { from: 1, to: 4 }, one(440)] }]);
+    expect(aiLawRefs(undefined)).toEqual([]);
+  });
+  it('lei enviada pelo estudante vale como conhecida', () => {
+    const own = [{ key: 'res-354-2020', short: 'Res. 354/2020', name: 'Resolução 354/2020', urn: 'upload:u:res', match: /Resolu[çc][ãa]o[^\d]{0,40}354/i }];
+    expect(aiLawRefs([{ law: 'res-354-2020', articles: '8 a 10' }], own)).toEqual([{ law: 'res-354-2020', ranges: [{ from: 8, to: 10 }] }]);
+  });
+  it('valor gravado: conferido; vazio ou estranho → null', () => {
+    expect(storedLawRefs([{ law: 'NSCGJ', ranges: [{ from: 196, to: 196 }, { from: 436, to: 436, fromSuffix: 'A', toSuffix: 'A' }, { from: 'x', to: 2 }, { from: 9, to: 3 }] }]))
+      .toEqual([{ law: 'NSCGJ', ranges: [one(196), { from: 436, to: 436, fromSuffix: 'A', toSuffix: 'A' }] }]);
+    for (const v of [null, undefined, [], 'x', [{ law: 'CPP', ranges: [] }], [{ ranges: [{ from: 1, to: 1 }] }]]) expect(storedLawRefs(v)).toBeNull();
+  });
+  it('gravado manda; sem ele, o título', () => {
+    const stored = [{ law: 'CPP', ranges: [one(351)] }];
+    expect(resolveSessionRefs(stored, 'Mandados: NSCGJ, art. 196', [])).toEqual(stored);
+    expect(resolveSessionRefs(null, 'Mandados: NSCGJ, art. 196', [])).toEqual([{ law: 'NSCGJ', ranges: [one(196)] }]);
+  });
+  it('junta por lei sem repetir', () => {
+    expect(mergeLawRefs([{ law: 'CPP', ranges: [one(1)] }], null, [{ law: 'CPP', ranges: [one(1), one(2)] }, { law: 'CF', ranges: [one(5)] }]))
+      .toEqual([{ law: 'CPP', ranges: [one(1), one(2)] }, { law: 'CF', ranges: [one(5)] }]);
   });
 });

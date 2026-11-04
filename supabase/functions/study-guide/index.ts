@@ -29,13 +29,13 @@ type Admin = ReturnType<typeof adminClient>;
 async function resolve(auth: Auth, admin: Admin, task: { subject_id: string | null; session_id: string | null }, depth: GuideDepth) {
   if (!task.session_id || !task.subject_id) return null;
   const [{ data: session }, { data: subject }] = await Promise.all([
-    auth.client.from('study_sessions').select('title, keyword, topic_ids').eq('id', task.session_id).single(),
+    auth.client.from('study_sessions').select('title, keyword, topic_ids, law_refs').eq('id', task.session_id).single(),
     auth.client.from('notice_subjects').select('name, notice_id').eq('id', task.subject_id).single(),
   ]);
   const { data: notice } = await auth.client.from('notices').select('board, role_name, organization, role_duties, structure').eq('id', subject!.notice_id).single();
   const { data: tt } = session?.topic_ids?.length ? await auth.client.from('notice_topics').select('id, text').in('id', session.topic_ids) : { data: [] };
   const topics = (tt ?? []).sort((a, b) => session!.topic_ids.indexOf(a.id) - session!.topic_ids.indexOf(b.id)).map((t) => t.text);
-  const { articles, law, extra } = await loadLawSources(admin, { title: session!.title, topics, subject: subject!.name, ownerId: auth.user.id });
+  const { articles, law, extra } = await loadLawSources(admin, { title: session!.title, topics, subject: subject!.name, ownerId: auth.user.id, lawRefs: session!.law_refs });
   const input = { depth, banca: notice?.board ?? '', subject: subject!.name, title: session!.title, topics, law };
   return {
     extra, input, key: guideCacheKey({ ...input, cargo: String(notice?.role_name ?? '') }), articles, noticeId: subject!.notice_id as string, cargo: (notice?.role_name ?? '') as string,
