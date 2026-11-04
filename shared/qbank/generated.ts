@@ -57,7 +57,7 @@ Como chegar à dificuldade média a difícil:
 }
 
 // Questão no formato público das questões reais, mais a marca do tema para reaproveitar.
-export function toPublic(q: z.infer<typeof GeneratedQuestions>['questoes'][number], p: { qid: string; format: string; materia: string; assunto: string; theme: string; year: number }) {
+export function toPublic(q: z.infer<typeof GeneratedQuestions>['questoes'][number], p: { qid: string; format: string; materia: string; assunto: string; theme: string; year: number; sources?: number }) {
   const ce = /certo/i.test(p.format) || !q.alternativas.length;
   const alternativas = ce ? [{ letra: 'C', texto: 'Certo', imagens: [] as string[] }, { letra: 'E', texto: 'Errado', imagens: [] as string[] }]
     : q.alternativas.slice(0, 5).map((t, i) => ({ letra: String.fromCharCode(65 + i), texto: t.replace(/^\s*[A-Ea-e]\s*[).:-]\s*/, ''), imagens: [] as string[] }));
@@ -69,6 +69,8 @@ export function toPublic(q: z.infer<typeof GeneratedQuestions>['questoes'][numbe
       qid: p.qid, enunciado: q.enunciado.trim(), tipo: ce ? 'certo e errado' : 'multipla escolha', dificuldade: '4', alternativas,
       textos: [] as string[], anexos: [] as string[], prova: { banca: GENERATED_BANCA, ano: p.year, orgao: '', cargo: '' },
       materia: p.materia, assunto: p.assunto, ia_tema: p.theme, ia_versao: GENERATED_PROMPT_VERSION,
+      // Quantos artigos oficiais a IA recebeu: tema que cita artigos só reaproveita questões feitas com o texto da lei.
+      ia_fontes: p.sources ?? 0,
     },
     gabarito,
   };

@@ -243,8 +243,12 @@ Deno.serve(async (req) => {
     };
     const generated = async (n: number): Promise<PublicQuestion[]> => {
       const theme = generatedTheme(filter.materia ?? subject.name, sess!.title);
-      // Só as da versão atual do prompt: as antigas saíam genéricas demais.
-      const { data: made } = await admin.from('qbank_questions').select('payload').eq('payload->>ia_tema', theme).eq('payload->>ia_versao', GENERATED_PROMPT_VERSION).limit(200);
+      // Só as da versão atual do prompt: as antigas saíam genéricas demais. Tema que cita artigos de lei conhecida só
+      // reaproveita as feitas com o texto oficial (antes de a norma entrar na base, a IA escrevia de memória).
+      const grounded = findLawRefs(sess!.title, subject.name).some((r) => r.ranges.length);
+      let madeQuery = admin.from('qbank_questions').select('payload').eq('payload->>ia_tema', theme).eq('payload->>ia_versao', GENERATED_PROMPT_VERSION);
+      if (grounded) madeQuery = madeQuery.gt('payload->ia_fontes', 0);
+      const { data: made } = await madeQuery.limit(200);
       const all = (made ?? []).map((r) => r.payload as PublicQuestion);
       const reuse = all.filter((q) => !seen.has(q.qid)).slice(0, n);
       for (const q of reuse) seen.add(q.qid);
@@ -272,7 +276,7 @@ Deno.serve(async (req) => {
             law, format, n: k, avoid: all.map((q) => plain(q.enunciado)).slice(-15), examples }) }] });
         usage.inputTokens += r.usage.inputTokens; usage.outputTokens += r.usage.outputTokens; usage.thinkingTokens += r.usage.thinkingTokens;
         const rows = r.data.questoes.map((q) => toPublic(q, {
-          qid: `ia-${crypto.randomUUID()}`, format, materia: filter.materia ?? subject.name, assunto: filter.assuntos[0] ?? sess!.title, theme, year: new Date().getFullYear(),
+          qid: `ia-${crypto.randomUUID()}`, format, materia: filter.materia ?? subject.name, assunto: filter.assuntos[0] ?? sess!.title, theme, year: new Date().getFullYear(), sources: law.length,
         })).filter((x) => x !== null);
         if (rows.length) await admin.from('qbank_questions').insert(rows.map((x) => ({ qid: x.payload.qid, materia: x.payload.materia, assunto: x.payload.assunto, payload: x.payload, gabarito: x.gabarito })));
         const fresh = rows.map((x) => x.payload as unknown as PublicQuestion).slice(0, n - reuse.length);

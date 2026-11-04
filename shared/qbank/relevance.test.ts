@@ -51,6 +51,8 @@ describe('questões inéditas da IA', () => {
   it('marca a versão do prompt para não reaproveitar questões antigas', () => {
     const r = toPublic({ enunciado: 'Sobre a contagem dos prazos no processo penal, é correto afirmar:', alternativas: ['um', 'dois', 'três', 'quatro', 'cinco'], gabarito: 'A', fundamento: 'CPP, art. 798' }, { ...base, format: 'multipla escolha' })!;
     expect(r.payload.ia_versao).toBe(GENERATED_PROMPT_VERSION);
+    expect(r.payload.ia_fontes).toBe(0);
+    expect(toPublic({ enunciado: 'Sobre a contagem dos prazos no processo penal, é correto afirmar:', alternativas: ['um', 'dois', 'três', 'quatro', 'cinco'], gabarito: 'A', fundamento: '' }, { ...base, format: 'multipla escolha', sources: 7 })!.payload.ia_fontes).toBe(7);
   });
 });
 
