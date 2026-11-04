@@ -4,6 +4,7 @@
 // erros, explicação e comentários funcionam igual, e são reaproveitadas entre estudantes com o mesmo tema.
 import { z } from 'zod';
 import { normalizeText } from '../ai/notice.ts';
+import { roleContext } from '../ai/plan.ts';
 
 // qgen-v2: média a difícil de verdade. A v1 saía genérica ("assinale a correta" sobre o tema inteiro, só caput, distratores
 // absurdos como "a arbitragem é vedada"). Agora o prompt traz questões reais da banca no tema como modelo de estilo e nível,
@@ -29,12 +30,17 @@ export interface GenExample { enunciado: string; alternativas: string[]; gabarit
 const plain = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 export const GENERATED_EXAMPLES = 3;
 // Chave do tema: a mesma sessão (matéria + título) reaproveita as questões já criadas, de qualquer estudante.
-export const generatedTheme = (materia: string, title: string) => normalizeText(`${materia} | ${title}`);
+// `cargo`: em conhecimentos específicos e em tema sobre o cargo, a questão depende das atribuições dele (Agente Escolar ×
+// Agente de Segurança Escolar no mesmo tema "O espaço escolar"), então o cargo entra na chave.
+export const generatedTheme = (materia: string, title: string, cargo = '') => normalizeText(`${materia} | ${title}${cargo ? ` | ${cargo}` : ''}`);
 
-export function generatedPrompt(p: { banca: string; cargo: string; subject: string; title: string; keyword: string; law: GenSource[]; format: string; n: number; avoid: string[]; examples?: GenExample[] }) {
+// duties/otherRoles: atribuições do cargo no edital e os outros cargos dele. Sem elas, a IA deduzia pelo nome e, no edital
+// de Suzano, pôs o Agente Escolar na recepção e no controle de acesso, que são do Agente de Segurança Escolar.
+export function generatedPrompt(p: { banca: string; cargo: string; subject: string; title: string; keyword: string; law: GenSource[]; format: string; n: number; avoid: string[]; examples?: GenExample[]; duties?: string; otherRoles?: string[] }) {
   const ce = /certo/i.test(p.format);
   const examples = (p.examples ?? []).slice(0, GENERATED_EXAMPLES);
   return `Você é professor especialista em concursos e elabora questões inéditas no estilo da banca ${p.banca || 'do concurso'}${p.cargo ? `, para o cargo ${p.cargo}` : ''}.
+${roleContext(p.cargo, p.duties, p.otherRoles)}
 Disciplina: ${p.subject}
 Tema da sessão (cobre SOMENTE este tema): ${p.title}
 Palavra-chave: ${p.keyword || '—'}
@@ -44,6 +50,7 @@ ${p.avoid.length ? `Questões já criadas para este tema (não repita o que elas
 Regras:
 - Crie ${p.n} questões ${ce ? 'de certo ou errado (alternativas vazias; gabarito "C" ou "E")' : 'de múltipla escolha com 5 alternativas (gabarito A a E)'}, de dificuldade média a difícil: o candidato que só leu o caput dos artigos erra.
 - Cada questão cobra o tema da sessão: nada de outros assuntos da matéria, mesmo parecidos.
+- Caso concreto com servidor do cargo${p.cargo ? ` (${p.cargo})` : ''}: só situações e tarefas que as atribuições dele incluem. Nunca o ponha fazendo o trabalho de outro cargo do edital (ex.: quem cuida da limpeza e conservação não faz controle de acesso nem vigilância).
 - Fundamente nos trechos fornecidos: não invente prazos, números ou regras. Não cite jurisprudência, súmulas ou doutrina.
 Como chegar à dificuldade média a difícil:
 - Pelo menos metade das questões é um caso concreto (personagens, fatos e um pedido ao candidato) que exige aplicar a regra, não só reconhecê-la.

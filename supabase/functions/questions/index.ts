@@ -7,6 +7,7 @@
 // A chave da Quest API e o gabarito ficam só no servidor. taskId é opcional fora do cronograma.
 import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { GENERATED_EXAMPLES, GENERATED_MAX, GENERATED_PROMPT_VERSION, GeneratedQuestions, generatedJsonSchema, generatedPrompt, generatedTheme, toPublic } from '../../../shared/qbank/generated.ts';
+import { roleSpecific } from '../../../shared/ai/guide.ts';
 import { loadLawSources } from '../_shared/law.ts';
 import { DEEP_PREFIX, PRACTICE_PREFIX } from '../../../shared/ai/plan.ts';
 import { ownLaws } from '../_shared/legal.ts';
@@ -60,7 +61,7 @@ Deno.serve(async (req) => {
       : { data: null };
     if (body.taskId && !task) return json(404, { error: 'Tarefa não encontrada.' });
     const { data: subject } = task?.subject_id
-      ? await auth.client.from('notice_subjects').select('id, name, notice_id, notice_topics(text, position)').eq('id', task.subject_id).maybeSingle()
+      ? await auth.client.from('notice_subjects').select('id, name, notice_id, is_core, notice_topics(text, position)').eq('id', task.subject_id).maybeSingle()
       : { data: null };
 
     if (body.action === 'answer') {
@@ -262,7 +263,10 @@ Deno.serve(async (req) => {
       }
     };
     const generated = async (n: number): Promise<PublicQuestion[]> => {
-      const theme = generatedTheme(filter.materia ?? subject.name, sess!.title);
+      const { data: nt } = await auth.client.from('notices').select('board, role_name, role_duties, structure').eq('id', subject.notice_id).single();
+      const cargo = String(nt?.role_name ?? '');
+      // Específicas e tema sobre o cargo: as questões de um cargo não servem a outro.
+      const theme = generatedTheme(filter.materia ?? subject.name, sess!.title, (subject as { is_core?: boolean }).is_core || roleSpecific({ title: sess!.title, topics: [] }) ? cargo : '');
       // Só as da versão atual do prompt: as antigas saíam genéricas demais. Tema que cita artigos de lei conhecida só
       // reaproveita as feitas com o texto oficial (antes de a norma entrar na base, a IA escrevia de memória).
       const grounded = !!storedLawRefs(sess!.law_refs) || findLawRefs(sess!.title, subject.name, await ownLaws(admin, auth.user.id)).some((r) => r.ranges.length);
@@ -277,7 +281,6 @@ Deno.serve(async (req) => {
         const { data: ss } = await auth.client.from('study_sessions').select('topic_ids').eq('id', sid).single();
         const { data: tt } = ss?.topic_ids?.length ? await auth.client.from('notice_topics').select('text').in('id', ss.topic_ids) : { data: [] };
         const { law } = await loadLawSources(admin, { title: sess!.title, topics: (tt ?? []).map((t) => t.text as string), subject: subject.name, ownerId: auth.user.id, lawRefs: sess!.law_refs });
-        const { data: nt } = await auth.client.from('notices').select('board, role_name').eq('id', subject.notice_id).single();
         // Modelos de estilo e nível: as questões reais que a triagem aprovou nesta sessão; sem elas, as do cache nos assuntos dela.
         const { data: ok } = await admin.from('qbank_relevance').select('qid').eq('session_id', sid).eq('relevant', true).limit(10);
         const okIds = (ok ?? []).map((r) => r.qid as string).filter((id) => !id.startsWith('ia-'));
@@ -292,8 +295,9 @@ Deno.serve(async (req) => {
         // Pelo menos 3 por vez: as que sobram servem ao próximo lote e a outros estudantes.
         const k = Math.min(GENERATED_MAX, Math.max(3, n - reuse.length));
         const r = await generateJson({ apiKey, model, schema: GeneratedQuestions, jsonSchema: generatedJsonSchema(), temperature: 0.5, timeoutMs: GENERATE_TIMEOUT_MS,
-          parts: [{ text: generatedPrompt({ banca: String(nt?.board ?? ''), cargo: String(nt?.role_name ?? ''), subject: subject.name, title: sess!.title, keyword: sess!.keyword ?? '',
-            law, format, n: k, avoid: all.map((q) => plain(q.enunciado)).slice(-15), examples }) }] });
+          parts: [{ text: generatedPrompt({ banca: String(nt?.board ?? ''), cargo, subject: subject.name, title: sess!.title, keyword: sess!.keyword ?? '',
+            law, format, n: k, avoid: all.map((q) => plain(q.enunciado)).slice(-15), examples,
+            duties: String(nt?.role_duties ?? ''), otherRoles: ((nt?.structure as { otherRoles?: string[] } | null)?.otherRoles ?? []).map(String) }) }] });
         usage.inputTokens += r.usage.inputTokens; usage.outputTokens += r.usage.outputTokens; usage.thinkingTokens += r.usage.thinkingTokens;
         const rows = r.data.questoes.map((q) => toPublic(q, {
           qid: `ia-${crypto.randomUUID()}`, format, materia: filter.materia ?? subject.name, assunto: filter.assuntos[0] ?? sess!.title, theme, year: new Date().getFullYear(), sources: law.length,

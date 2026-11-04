@@ -70,3 +70,17 @@ describe('corte de assunto ruim', () => {
     expect(prunedAssuntos([v('A', false), v('A', false), v('A', true), v('A', true), v('A', true)]).size).toBe(0);
   });
 });
+
+describe('questões da IA presas ao cargo', () => {
+  it('recebem as atribuições e os outros cargos, e não põem o cargo no trabalho de outro', () => {
+    const p = generatedPrompt({ banca: 'NOSSO RUMO', cargo: 'AGENTE ESCOLAR', subject: 'Conhecimentos Específicos', title: 'Acesso ao espaço escolar', keyword: '', law: [], format: 'multipla escolha', n: 3, avoid: [],
+      duties: 'Executar atividades de limpeza, conservação e guarda das instalações', otherRoles: ['AGENTE DE SEGURANÇA ESCOLAR'] });
+    expect(p).toContain('Atribuições do cargo (edital): Executar atividades de limpeza');
+    expect(p).toContain('AGENTE DE SEGURANÇA ESCOLAR');
+    expect(p).toContain('Nunca o ponha fazendo o trabalho de outro cargo');
+  });
+  it('cargo na chave só quando passado', () => {
+    expect(generatedTheme('Específicos', 'O espaço escolar', 'Agente Escolar')).not.toBe(generatedTheme('Específicos', 'O espaço escolar', 'Agente de Segurança Escolar'));
+    expect(generatedTheme('Português', 'Crase')).toBe('portugues crase');
+  });
+});
