@@ -2,7 +2,7 @@
 // Usado pela Edge Function notice-extract e pela avaliação (evals/run.ts).
 import { z } from 'zod';
 
-export const NOTICE_PROMPT_VERSION = 'notice-v4';
+export const NOTICE_PROMPT_VERSION = 'notice-v5';
 
 // Mesmos valores do filtro nivel_escolaridade da Quest API; vazio se o edital não informar.
 export const EDUCATION_LEVELS = ['Fundamental', 'Médio', 'Superior'] as const;
@@ -73,12 +73,52 @@ const friendlyRecitation = (err: unknown) => (err as { finishReason?: string }).
   ? new Error('A IA recusou transcrever este edital (filtro de texto reproduzido). Tente de novo; se repetir, avise o suporte.', { cause: err })
   : err;
 
-export function noticePrompt(roleHint: string, retry = false): string {
+// ---------- lista de cargos (antes da leitura completa) ----------
+// O candidato escolhe o cargo numa lista tirada do edital, em vez de digitar: com texto livre e "o mais próximo",
+// a IA trocava "Agente Escolar" por "Agente de Segurança Escolar" no edital de Suzano.
+export const ROLES_PROMPT_VERSION = 'roles-v1';
+
+export const NoticeRole = z.object({
+  name: text(160).min(1).describe('Nome do cargo como no edital, com área/especialidade, sem o código.'),
+  code: text(20).describe('Código do cargo no edital (ex.: "102"); vazio se não houver.'),
+  educationLevel: z.enum(['', ...EDUCATION_LEVELS]).describe('Escolaridade exigida; vazio se o edital não informar.'),
+});
+export type NoticeRole = z.infer<typeof NoticeRole>;
+// Sem limite de itens no schema: o Gemini recusa `maxItems` (400). uniqueRoles corta a lista.
+export const NoticeRoles = z.object({ roles: z.array(NoticeRole) });
+export const noticeRolesJsonSchema = () => z.toJSONSchema(NoticeRoles, { target: 'draft-7' });
+
+export const rolesPrompt = () => `Você é especialista em editais de concursos públicos brasileiros. Liste todos os cargos/empregos/funções com vagas neste edital, um por entrada, na ordem do edital (normalmente no quadro de cargos e vagas).
+- Cada área ou especialidade com prova própria é um cargo separado (ex.: "Técnico Judiciário – Área Administrativa").
+- Copie o nome exatamente como no edital; nunca junte nem resuma cargos de nome parecido (ex.: "Agente Escolar" e "Agente de Segurança Escolar" são dois cargos).
+- Não repita cargos que aparecem em vários quadros (vagas, provas, atribuições).
+- Não invente: se o edital não listar cargos, devolva a lista vazia.`;
+
+// Nomes iguais sem acento/caixa/pontuação contam como o mesmo cargo; o primeiro fica.
+export function uniqueRoles(roles: NoticeRole[]): NoticeRole[] {
+  const seen = new Set<string>();
+  return roles.filter((r) => {
+    const k = normalizeText(`${r.code} ${r.name}`);
+    if (!normalizeText(r.name) || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  }).slice(0, 300);
+}
+
+// exact: cargo escolhido na lista do edital (nome literal), com os demais cargos para a IA não misturar.
+export function noticePrompt(roleHint: string, retry = false, exact?: { code?: string; otherRoles?: string[] }): string {
   const role = roleHint.trim().slice(0, 160);
+  const others = (exact?.otherRoles ?? []).filter((r) => normalizeText(r) !== normalizeText(role)).slice(0, 60);
+  const cargo = !role
+    ? 'se houver um só cargo, use-o; se houver vários, use o primeiro e liste os demais em otherRoles'
+    : exact
+      ? `use exatamente o cargo "${role}"${exact.code ? ` (código ${exact.code})` : ''}, escolhido pelo candidato na lista de cargos do edital. Nunca troque por outro cargo de nome parecido ou que contenha estas palavras${others.length ? `; os outros cargos do edital são: ${others.map((o) => `"${o}"`).join(', ')}. Não use a prova, o conteúdo nem as atribuições deles` : ''}`
+      : `use o cargo "${role}" (ou o mais próximo dele)`;
   return `Você é especialista em editais de concursos públicos brasileiros. Leia o edital em anexo e extraia os dados estruturados.
-Cargo: ${role ? `use o cargo "${role}" (ou o mais próximo dele)` : 'se houver um só cargo, use-o; se houver vários, use o primeiro e liste os demais em otherRoles'}.
+Cargo: ${cargo}.
 Regras:
-- Considere somente a prova e o conteúdo programático do cargo escolhido.
+- Considere somente a prova e o conteúdo programático do cargo escolhido.${exact && role ? `
+- Em quadros e anexos com vários cargos (provas, conteúdo programático, atribuições), use só o trecho cujo título traz este cargo${exact.code ? ` (código ${exact.code})` : ''}; o trecho do cargo vizinho, mesmo logo acima ou abaixo, é de outro cargo. Em role, copie "${role}".` : ''}
 - roleDuties: as atribuições do cargo escolhido, fiéis ao edital (normalmente num anexo "Atribuições dos cargos"), em frases curtas separadas por ponto e vírgula. Nunca misture com as de outro cargo, mesmo de nome parecido (ex.: "Agente Escolar" × "Agente de Segurança Escolar"). Vazio se o edital não trouxer.
 - educationLevel: escolaridade exigida para o cargo escolhido. Ensino técnico conta como "Médio"; graduação ou pós-graduação, como "Superior".
 - examDate: data prevista da prova objetiva. Se o texto remeter ao cronograma, procure a data no cronograma/anexo. Vazio se não houver.

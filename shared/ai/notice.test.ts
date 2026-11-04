@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { checkNotice, comparableText, extractWithRetry, NOTICE_DEADLINE_MS, noticePrompt, NoticeExtraction, noticeJsonSchema, subjectWeights, topicInText } from './notice.ts';
+import { checkNotice, comparableText, extractWithRetry, NOTICE_DEADLINE_MS, noticePrompt, NoticeExtraction, noticeJsonSchema, subjectWeights, topicInText, uniqueRoles } from './notice.ts';
 
 describe('extractWithRetry', () => {
   const recitation = Object.assign(new Error('O Gemini não devolveu conteúdo (RECITATION).'), { finishReason: 'RECITATION' });
@@ -104,5 +104,24 @@ describe('schema', () => {
     const js = noticeJsonSchema() as { properties: Record<string, unknown>; required: string[] };
     expect(Object.keys(js.properties)).toEqual(expect.arrayContaining(['subjects', 'blocks', 'examDate']));
     expect(js.required).toContain('subjects');
+  });
+});
+
+describe('escolha do cargo na lista do edital', () => {
+  it('cargo exato: nome literal, código e demais cargos proibidos, sem "o mais próximo"', () => {
+    const p = noticePrompt('AGENTE ESCOLAR', false, { code: '102', otherRoles: ['AGENTE DE SEGURANÇA ESCOLAR', 'AGENTE ESCOLAR', 'COZINHEIRO ESCOLAR'] });
+    expect(p).toContain('use exatamente o cargo "AGENTE ESCOLAR" (código 102)');
+    expect(p).toContain('"AGENTE DE SEGURANÇA ESCOLAR"');
+    expect(p).not.toContain('mais próximo');
+    expect(p).not.toContain('"AGENTE ESCOLAR", "AGENTE DE');
+    expect(p).toContain('o trecho do cargo vizinho');
+  });
+  it('cargo digitado mantém a busca pelo mais próximo', () => {
+    expect(noticePrompt('Escrevente')).toContain('(ou o mais próximo dele)');
+  });
+  it('lista sem repetidos nem nomes vazios', () => {
+    const r = (name: string, code = '') => ({ name, code, educationLevel: '' as const });
+    expect(uniqueRoles([r('Agente Escolar', '102'), r('AGENTE ESCOLAR', '102'), r('Agente de Segurança Escolar', '101'), r(' - ')]).map((x) => x.name))
+      .toEqual(['Agente Escolar', 'Agente de Segurança Escolar']);
   });
 });

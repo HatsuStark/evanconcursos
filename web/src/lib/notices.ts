@@ -1,6 +1,6 @@
 // Editais: envio do PDF, leitura pela IA (job), conferência e aprovação.
 import { useQuery } from '@tanstack/react-query';
-import { NoticeExtraction, subjectWeights, type NoticeWarning } from '../../../shared/ai/notice.ts';
+import { NoticeExtraction, subjectWeights, type NoticeRole, type NoticeWarning } from '../../../shared/ai/notice.ts';
 import { diffNotices, studiedTopics, subjectEquivalence, type DiffNotice } from '../../../shared/domain/notice-diff.ts';
 import { noticeLawKeys } from '../../../shared/legal/refs.ts';
 import { lawByKey } from '../../../shared/legal/registry.ts';
@@ -53,8 +53,8 @@ async function sha256Hex(bytes: ArrayBuffer) {
 
 export const MAX_PDF_BYTES = 20 * 1024 * 1024;
 
-// Cria o edital, envia o PDF ao bucket privado e dispara a leitura. Devolve o edital e o job.
-export async function uploadNotice(file: File, roleHint: string): Promise<{ noticeId: string; jobId: string }> {
+// Cria o edital e envia o PDF ao bucket privado. A leitura começa depois que o candidato escolhe o cargo.
+export async function uploadNoticeFile(file: File): Promise<{ noticeId: string; fileId: string }> {
   if (file.type && file.type !== 'application/pdf') throw new Error('O arquivo precisa ser um PDF.');
   if (file.size > MAX_PDF_BYTES) throw new Error('O PDF passa de 20 MB.');
   const { data: userData } = await supabase.auth.getUser();
@@ -66,14 +66,26 @@ export async function uploadNotice(file: File, roleHint: string): Promise<{ noti
   const up = await supabase.storage.from('editais').upload(path, bytes, { contentType: 'application/pdf', upsert: false });
   if (up.error) throw new Error(`Falha no envio do PDF: ${up.error.message}`);
   const row = must(await supabase.from('notice_files').insert({ notice_id: notice.id, storage_path: path, sha256: sha, size_bytes: file.size }).select('id').single()) as { id: string };
-  const { data, error } = await supabase.functions.invoke('notice-extract', { body: { noticeId: notice.id, fileId: row.id, roleHint } });
+  return { noticeId: notice.id, fileId: row.id };
+}
+
+async function invokeExtract<T>(body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke('notice-extract', { body });
   if (error) {
     let msg = error.message;
     try { msg = (await (error as { context?: Response }).context?.json())?.error ?? msg; } catch { /* resposta sem JSON */ }
     throw new Error(msg);
   }
-  return { noticeId: notice.id, jobId: (data as { jobId: string }).jobId };
+  return data as T;
 }
+
+// Cargos do edital (quadro de cargos e vagas), para o candidato escolher o dele.
+export const listNoticeRoles = (noticeId: string, fileId: string) =>
+  invokeExtract<{ roles: NoticeRole[] }>({ noticeId, fileId, action: 'roles' }).then((r) => r.roles);
+
+// Dispara a leitura completa. Com `chosen`, o cargo veio da lista: nome literal, código e os demais cargos.
+export const startNoticeReading = (noticeId: string, fileId: string, role: string, chosen?: { code: string; otherRoles: string[] }) =>
+  invokeExtract<{ jobId: string }>({ noticeId, fileId, roleHint: role, ...(chosen ? { exact: true, roleCode: chosen.code, otherRoles: chosen.otherRoles } : {}) }).then((r) => r.jobId);
 
 // Acompanha o job até terminar (a leitura leva de 30 s a 2 min).
 export const useJob = (jobId: string | undefined) => useQuery({

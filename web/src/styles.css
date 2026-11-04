@@ -660,3 +660,9 @@ details.card summary { cursor: pointer; font-weight: 600; }
   .main { position: relative; }
   .page-head { padding-right: 44px; }
 }
+
+/* Escolha do cargo na lista do edital (Novo concurso). */
+.role-pick { display: grid; gap: 6px; max-height: 420px; overflow-y: auto; padding-right: 4px; }
+.role-pick label { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); cursor: pointer; }
+.role-pick label > span:nth-of-type(1) { flex: 1; }
+.role-pick label.on, .role-pick label:hover { border-color: var(--cyan); }
