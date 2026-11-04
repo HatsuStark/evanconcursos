@@ -301,30 +301,39 @@ Deno.serve(async (req) => {
         if (elapsed > HARD_LIMIT_MS || ((out.length || result.length) && elapsed > SOFT_LIMIT_MS)) { timedOut = true; return; }
         out.push(...await takeNewest(admin, quest, auth.user.id, scope, f.key, f.params, limit - out.length, (q) => !seen.has(q.id) && !out.some((o) => o.id === q.id)));
       };
-      // Cada assunto busca a sua parte (banca e, se faltar, outras bancas); o que sobrar vem de qualquer assunto com questões.
-      // Primeiro as já compradas e não vistas, sem créditos; a API só completa o que faltar.
+      // Cada assunto busca a sua parte em duas passadas: primeiro só a banca do edital (as já compradas, sem créditos, e
+      // depois a API), em todos os assuntos; só o que faltar vem das outras bancas (cache, depois API). O que ainda faltar
+      // vem de qualquer assunto com questões.
       const wanted = new Map<string, number>();
       for (const a of planPicks(liveIncidence, served, need)) wanted.set(a, (wanted.get(a) ?? 0) + 1);
       const cached: PublicQuestion[] = [];
-      for (const [assunto, n] of wanted) {
-        const got = await fromCache(admin, { materia: filter.materia!, assunto, dificuldades: SESSION_DIFFICULTIES, tipo: format, preferBanca: sm.banca }, n, (id) => !seen.has(id) && !cached.some((c) => c.qid === id));
-        cached.push(...got);
-        wanted.set(assunto, n - got.length);
-      }
-      const wantedTotal = need - cached.length;
+      const isNewCached = (id: string) => !seen.has(id) && !cached.some((c) => c.qid === id);
       // A dificuldade alterna a cada questão e continua de onde parou na sessão.
       let turn = [...served.values()].reduce((a, b) => a + b, 0);
-      for (const [assunto, n] of wanted) {
-        for (let i = 0; i < n && wantedTotal > 0; i++) {
-          const limit = out.length + 1;
-          for (const f of inTurn(live.filter((x) => x.assunto === assunto), turn)) await take(f, limit);
-          turn++;
+      for (const board of [true, false]) {
+        for (const [assunto, n] of wanted) {
+          if (n <= 0 || timedOut) continue;
+          const got = await fromCache(admin, { materia: filter.materia!, assunto, dificuldades: SESSION_DIFFICULTIES, tipo: format, ...(board ? { banca: sm.banca } : { preferBanca: sm.banca }) }, n, isNewCached);
+          cached.push(...got);
+          let left = n - got.length;
+          const fs = live.filter((x) => x.assunto === assunto && x.board === board);
+          for (; left > 0 && fs.length && !timedOut; left--, turn++) {
+            const before = out.length;
+            for (const f of inTurn(fs, turn)) await take(f, before + 1);
+            if (out.length === before) break;
+          }
+          wanted.set(assunto, left);
         }
       }
-      if (wantedTotal > 0) for (const f of inTurn(live, turn)) await take(f, wantedTotal);
-      // Dentro do lote, primeiro as questões que caíram em mais provas.
+      const short = [...wanted.values()].reduce((a, b) => a + b, 0);
+      if (short > 0) for (const f of inTurn(live, turn)) await take(f, out.length + short);
+      // No lote, primeiro as questões da banca do edital; entre elas, as que caíram em mais provas.
+      const board = normalizeText(sm.banca);
+      // A questão pode ter caído em várias provas: conta qualquer uma da banca (no cache só fica a primeira).
+      const boardIds = new Set(out.filter((q) => q.provas?.some((p) => normalizeText(p.banca) === board)).map((q) => q.id));
+      const ofBoard = (q: PublicQuestion) => Number(!!board && (boardIds.has(q.qid) || normalizeText(q.prova?.banca ?? '') === board));
       out.sort((a, b) => (b.provas?.length ?? 0) - (a.provas?.length ?? 0));
-      const found = [...cached, ...out.slice(0, wantedTotal).map(publicQuestion)];
+      const found = [...cached, ...out.slice(0, Math.max(0, need - cached.length)).map(publicQuestion)].sort((a, b) => ofBoard(b) - ofBoard(a));
       if (!found.length) break;
       for (const q of found) { seen.add(q.qid); served.set(normalizeText(q.assunto), (served.get(normalizeText(q.assunto)) ?? 0) + 1); }
       result.push(...await screen(found));

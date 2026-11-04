@@ -220,7 +220,8 @@ export function interleave<T>(lists: T[][]): T[] {
   return out;
 }
 
-export interface SearchFilter { key: string; assunto: string; tier: number; turn: number; params: Record<string, string> }
+// board: busca só na banca do edital (as outras completam o que faltar).
+export interface SearchFilter { key: string; assunto: string; tier: number; turn: number; board: boolean; params: Record<string, string> }
 
 // Formato predominante da banca, para treinar igual ao que ela cobra mesmo em questões de outras bancas.
 export const QUESTION_FORMATS = ['multipla escolha', 'certo e errado'];
@@ -242,17 +243,17 @@ export function roleKeyword(role: string) {
 export function searchFilters(f: SessionFilter, banca: string, o: { level?: string; role?: string; format?: string } = {}, now = new Date()): SearchFilter[] {
   if (!f.materia || !f.assuntos.length) return [];
   const m = f.materia, format: Record<string, string> = o.format ? { tipo: o.format } : {};
-  const places: { tag: string; params: Record<string, string> }[] = /atualidade/i.test(m)
-    ? [now.getFullYear(), now.getFullYear() - 1].map((ano) => ({ tag: String(ano), params: { ano: String(ano), ...format } }))
-    : [{ tag: 'b', params: { banca } }, { tag: '*', params: format }];
-  const narrowed = (tag: string, extra: Record<string, string>) => places.map((p) => ({ tag: `${tag}|${p.tag}`, params: { ...p.params, ...extra } }));
+  const places: { tag: string; board: boolean; params: Record<string, string> }[] = /atualidade/i.test(m)
+    ? [now.getFullYear(), now.getFullYear() - 1].map((ano) => ({ tag: String(ano), board: false, params: { ano: String(ano), ...format } }))
+    : [{ tag: 'b', board: !!banca, params: { banca } }, { tag: '*', board: false, params: format }];
+  const narrowed = (tag: string, extra: Record<string, string>) => places.map((p) => ({ tag: `${tag}|${p.tag}`, board: p.board, params: { ...p.params, ...extra } }));
   const tiers = [
     ...(o.role ? narrowed(`c:${o.role}`, { cargo: o.role }) : []),
     ...(o.level ? narrowed(o.level, { nivel_escolaridade: o.level }) : []),
     ...places,
   ];
   return tiers.flatMap((t, tier) => f.assuntos.flatMap((assunto) => SESSION_DIFFICULTIES.map((dificuldade, turn) => ({
-    key: `${t.tag}:${assunto}:d${dificuldade}`, assunto, tier, turn, params: { ...t.params, materia: m, assunto, dificuldade },
+    key: `${t.tag}:${assunto}:d${dificuldade}`, assunto, tier, turn, board: t.board, params: { ...t.params, materia: m, assunto, dificuldade },
   }))));
 }
 

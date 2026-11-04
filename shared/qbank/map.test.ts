@@ -35,6 +35,17 @@ describe('planPicks', () => {
   });
 });
 
+describe('busca da banca primeiro', () => {
+  it('marca os filtros da banca do edital; sem banca, nenhum', () => {
+    const f = { materia: 'Direito Processual Civil - CPC 2015', assuntos: ['Competência'], how: '' };
+    const withBoard = searchFilters(f, 'VUNESP');
+    expect(withBoard.filter((x) => x.board).every((x) => x.params.banca === 'VUNESP')).toBe(true);
+    expect(withBoard.filter((x) => !x.board).every((x) => !x.params.banca)).toBe(true);
+    expect(withBoard.some((x) => x.board) && withBoard.some((x) => !x.board)).toBe(true);
+    expect(searchFilters(f, '').some((x) => x.board)).toBe(false);
+  });
+});
+
 describe('measureIncidence', () => {
   const filter = { materia: 'Direito Penal', assuntos: ['a', 'b'], how: '' };
   it('mede na banca do edital', async () => {
