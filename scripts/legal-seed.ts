@@ -1,9 +1,11 @@
-// Carrega no banco as leis do registro (texto compilado do normas.leg.br), pela conexão direta ao Postgres.
+// Carrega no banco as leis do registro (texto compilado do normas.leg.br, ou o PDF oficial das normas com `pdf`, como as
+// Normas Judiciais da CGJ SP), pela conexão direta ao Postgres.
 // Uso: node --experimental-strip-types scripts/legal-seed.ts [CP CPP ...]   (sem argumentos: todas)
 // Mesmo separador da Edge Function legal-text; marcações dos usuários são preservadas (upsert por rótulo).
 import { readFileSync } from 'node:fs';
 import pg from 'pg';
-import { parseLawHtml } from '../shared/legal/parse.ts';
+import { extractText } from 'unpdf';
+import { parseLawHtml, parseNormsText } from '../shared/legal/parse.ts';
 import { LAWS } from '../shared/legal/registry.ts';
 
 const root = new URL('..', import.meta.url);
@@ -14,23 +16,35 @@ url.password = encodeURIComponent(env.SUPABASE_DB_PASSWORD!);
 const db = new pg.Client({ connectionString: url.href, ssl: { rejectUnauthorized: false } });
 await db.connect();
 
+async function fromNormas(urn: string) {
+  const meta = await (await fetch(`https://normas.leg.br/api/public/normas?urn=${encodeURIComponent(urn)}&tipo_documento=maior-detalhe`)).json() as { encoding?: { version?: string; contentUrl?: string; encodingFormat?: string }[] };
+  const html = (meta.encoding ?? []).filter((e) => e.contentUrl && /html/.test(e.encodingFormat ?? 'html'));
+  const enc = html.find((e) => e.version === 'Current') ?? html[0];
+  if (!enc?.contentUrl) throw Error('sem texto no normas.leg.br');
+  const contentUrl = enc.contentUrl.replace('/api/binario/', '/api/public/binario/');
+  return { articles: parseLawHtml(await (await fetch(contentUrl)).text()), contentUrl, version: enc.version === 'Current' ? 'Current' : 'Original', sourceUrl: `https://normas.leg.br/?urn=${urn}` };
+}
+
+// PDF oficial: texto página a página, no formato que parseNormsText espera.
+async function fromPdf(url: string, page: string) {
+  const res = await fetch(url);
+  if (!res.ok) throw Error(`falha ao baixar o PDF (${res.status})`);
+  const { text } = await extractText(new Uint8Array(await res.arrayBuffer()), { mergePages: false });
+  return { articles: parseNormsText(text.map((t, i) => `\n=== PÁGINA ${i + 1} ===\n${t}`).join('')), contentUrl: url, version: 'Current', sourceUrl: page };
+}
+
 const wanted = process.argv.slice(2);
 for (const law of LAWS.filter((l) => !wanted.length || wanted.includes(l.key))) {
   try {
-    const meta = await (await fetch(`https://normas.leg.br/api/public/normas?urn=${encodeURIComponent(law.urn)}&tipo_documento=maior-detalhe`)).json() as { encoding?: { version?: string; contentUrl?: string; encodingFormat?: string }[] };
-    const html = (meta.encoding ?? []).filter((e) => e.contentUrl && /html/.test(e.encodingFormat ?? 'html'));
-    const enc = html.find((e) => e.version === 'Current') ?? html[0];
-    if (!enc?.contentUrl) throw Error('sem texto no normas.leg.br');
-    const contentUrl = enc.contentUrl.replace('/api/binario/', '/api/public/binario/');
-    const articles = parseLawHtml(await (await fetch(contentUrl)).text());
+    const { articles, contentUrl, version, sourceUrl } = law.pdf ? await fromPdf(law.pdf, law.page ?? law.pdf) : await fromNormas(law.urn);
     if (articles.length < 3) throw Error('sem artigos reconhecíveis');
     await db.query('begin');
     const { rows: [norm] } = await db.query(
       `insert into public.legal_norms (urn, law_key, name, short_name, source_url, content_url, version, articles_count, fetched_at)
        values ($1,$2,$3,$4,$5,$6,$7,$8,now())
-       on conflict (urn) do update set law_key=excluded.law_key, name=excluded.name, short_name=excluded.short_name, content_url=excluded.content_url,
-         version=excluded.version, articles_count=excluded.articles_count, fetched_at=now() returning id`,
-      [law.urn, law.key, law.name, law.short, `https://normas.leg.br/?urn=${law.urn}`, contentUrl, enc.version === 'Current' ? 'Current' : 'Original', articles.length]);
+       on conflict (urn) do update set law_key=excluded.law_key, name=excluded.name, short_name=excluded.short_name, source_url=excluded.source_url,
+         content_url=excluded.content_url, version=excluded.version, articles_count=excluded.articles_count, fetched_at=now() returning id`,
+      [law.urn, law.key, law.name, law.short, sourceUrl, contentUrl, version, articles.length]);
     // Em lotes de 500 (uma ida ao banco por lote).
     for (let i = 0; i < articles.length; i += 500) {
       await db.query(
@@ -43,7 +57,7 @@ for (const law of LAWS.filter((l) => !wanted.length || wanted.includes(l.key))) 
     }
     const { rowCount } = await db.query('delete from public.legal_articles where norm_id = $1 and not (label = any($2))', [norm.id, articles.map((a) => a.label)]);
     await db.query('commit');
-    console.log(`${law.short.padEnd(14)} ${String(articles.length).padStart(5)} artigos · ${enc.version}${rowCount ? ` · ${rowCount} removidos` : ''}`);
+    console.log(`${law.short.padEnd(14)} ${String(articles.length).padStart(5)} artigos · ${version}${rowCount ? ` · ${rowCount} removidos` : ''}`);
   } catch (e) {
     await db.query('rollback').catch(() => {});
     console.log(`${law.short.padEnd(14)} ERRO: ${(e as Error).message}`);

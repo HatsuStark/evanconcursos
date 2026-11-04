@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseLawHtml } from './parse.ts';
+import { parseLawHtml, parseNormsText } from './parse.ts';
 import { citesUnlistedLaw, findLawRefs, inRanges, noticeLawKeys, parseRanges } from './refs.ts';
 
 // Trecho real do HTML do CPP no normas.leg.br (estrutura preservada).
@@ -107,5 +107,35 @@ describe('referências a leis', () => {
     expect(inRanges(rg, 311, 'A')).toBe(true);
     expect(inRanges(rg, 311)).toBe(false);
     expect(inRanges([], 999)).toBe(true);
+  });
+});
+
+describe('Normas Judiciais da CGJ SP (PDF)', () => {
+  const pdf = [
+    '=== PÁGINA 1 ===', 'CAPÍTULO I - DA MISSÃO ........ 1º a 4º', 'Art. 1º Dar nova redação aos Capítulos I a X.', 'Art. 2º Revogar os Capítulos XI e XII.',
+    '=== PÁGINA 2 ===', 'CAPÍTULO I', 'DA MISSÃO, VISÃO E PRINCÍPIOS', 'Art. 1º A Corregedoria Geral da Justiça alinha-se às diretrizes', 'do Conselho Nacional de Justiça.',
+    'Art. 2º São princípios institucionais:', 'I - a eticidade;', 'II - a satisfação do usuário, sem preconceitos; 1', 'Parágrafo único. Os princípios regem a atuação.',
+    '1 Prov. CG 15/2020.',
+    '=== PÁGINA 3 ===', 'CAPÍTULO III', 'DOS OFÍCIOS DE JUSTIÇA EM GERAL', 'Seção V', 'Do Sistema Informatizado Oficial 2',
+    'Art. 49. Os níveis de acesso serão estabelecidos pela Corregedoria, com a STI.3', '§ 1º É vedado ceder a senha.', 'Art. 1 do CPC, citado numa linha quebrada.',
+    'Art.. 50. O CEVAT rege-se por estas normas.', 'Artigo 51. Sempre que o sistema permitir.', 'Art. 51-A. (Revogado).',
+    '2 Prov. CG 1/2024.', '3 Provs. CG 2/2024 e 3/2024.',
+  ].join('\n');
+  const arts = parseNormsText(pdf);
+  it('começa no corpo, não no provimento de abertura, com capítulo e seção', () => {
+    expect(arts.map((a) => a.label)).toEqual(['1', '2', '49', '50', '51', '51-A']);
+    expect(arts[0]!.heading).toBe('CAPÍTULO I – DA MISSÃO, VISÃO E PRINCÍPIOS');
+    expect(arts[2]!.heading).toBe('CAPÍTULO III – DOS OFÍCIOS DE JUSTIÇA EM GERAL › Seção V – Do Sistema Informatizado Oficial');
+  });
+  it('junta as linhas quebradas, separa incisos e parágrafos e tira as notas de rodapé', () => {
+    expect(arts[0]!.text).toBe('Art. 1º A Corregedoria Geral da Justiça alinha-se às diretrizes do Conselho Nacional de Justiça.');
+    expect(arts[1]!.text).toBe('Art. 2º São princípios institucionais:\nI - a eticidade;\nII - a satisfação do usuário, sem preconceitos;\nParágrafo único. Os princípios regem a atuação.');
+    expect(arts[2]!.text).toBe('Art. 49. Os níveis de acesso serão estabelecidos pela Corregedoria, com a STI.\n§ 1º É vedado ceder a senha.\nArt. 1 do CPC, citado numa linha quebrada.');
+    expect(arts[5]!.revoked).toBe(true);
+  });
+  it('o título da sessão e o item do edital apontam os artigos das Normas', () => {
+    expect(findLawRefs('Disposições Gerais e Expediente: Normas da CGJ (arts. 1º a 4º, 33, 47 e 49)')).toEqual([{ law: 'NSCGJ', ranges: [{ from: 1, to: 4 }, { from: 33, to: 33 }, { from: 47, to: 47 }, { from: 49, to: 49 }] }]);
+    expect(findLawRefs('Normas Judiciais da Corregedoria Geral da Justiça (Tomo I – Capítulo I: art. 1º a 4º)').map((r) => r.law)).toEqual(['NSCGJ']);
+    expect(findLawRefs('Normas Extrajudiciais da Corregedoria Geral da Justiça').map((r) => r.law)).toEqual([]);
   });
 });

@@ -1,6 +1,7 @@
 // Leis federais conhecidas: identificador oficial (URN LexML) no normas.leg.br, nomes e como aparecem nos textos.
-// URNs conferidas na API do normas.leg.br (out/2026).
-export interface LawEntry { key: string; short: string; name: string; urn: string; match: RegExp }
+// URNs conferidas na API do normas.leg.br (out/2026). Normas fora do normas.leg.br (ex.: Normas Judiciais da CGJ SP) têm
+// `pdf`, o texto oficial, e `page`, onde ele é publicado: carregadas pelo scripts/legal-seed.ts, não pela função legal-text.
+export interface LawEntry { key: string; short: string; name: string; urn: string; match: RegExp; pdf?: string; page?: string }
 
 export const LAWS: LawEntry[] = [
   { key: 'CF', short: 'CF', name: 'Constituição Federal', urn: 'urn:lex:br:federal:constituicao:1988-10-05;1988', match: /\bCF\b|\bCF\/88\b|Constitui[çc][ãa]o( Federal| da Rep[úu]blica)/i },
@@ -22,6 +23,10 @@ export const LAWS: LawEntry[] = [
   { key: 'L6830', short: 'Lei 6.830/80', name: 'Lei de Execução Fiscal', urn: 'urn:lex:br:federal:lei:1980-09-22;6830', match: /Lei (n[º°o.]*\s*)?6\.?830|Execu[çc][ãa]o Fiscal/i },
   { key: 'L12527', short: 'LAI', name: 'Lei de Acesso à Informação', urn: 'urn:lex:br:federal:lei:2011-11-18;12527', match: /Lei (n[º°o.]*\s*)?12\.?527|Acesso [àa] Informa[çc][ãa]o/i },
   { key: 'L11419', short: 'Lei 11.419/06', name: 'Lei do Processo Eletrônico', urn: 'urn:lex:br:federal:lei:2006-12-19;11419', match: /Lei (n[º°o.]*\s*)?11\.?419/i },
+  // Tomo I (serviços judiciais). O Tomo II (extrajudiciais: notas, registros, protesto) é outra norma e não casa aqui.
+  { key: 'NSCGJ', short: 'NSCGJ', name: 'Normas Judiciais da Corregedoria Geral da Justiça de São Paulo (Tomo I)', urn: 'tjsp:cgj:normas-judiciais:tomo-i',
+    match: /\bNSCGJ\b|Normas (?:Judiciais )?da (?:CGJ\b|Corregedoria[- ]Geral d[ae] Justi[çc]a)/i,
+    pdf: 'https://api.tjsp.jus.br/Handlers/Handler/FileFetch.ashx?codigo=203718', page: 'https://www.tjsp.jus.br/Corregedoria/Comunicados/NormasJudiciais' },
   { key: 'L13146', short: 'Lei 13.146/15', name: 'Estatuto da Pessoa com Deficiência', urn: 'urn:lex:br:federal:lei:2015-07-06;13146', match: /Lei (n[º°o.]*\s*)?13\.?146|Estatuto da Pessoa com Defici[êe]ncia/i },
 ];
 

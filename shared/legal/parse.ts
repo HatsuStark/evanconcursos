@@ -94,3 +94,72 @@ export function parseLawHtml(html: string): LegalArticle[] {
   }
   return out;
 }
+
+// ---------- normas em texto corrido (PDF), ex.: Normas Judiciais da Corregedoria Geral da Justiça de SP ----------
+// Entrada: o texto do PDF com as páginas marcadas por "=== PÁGINA n ===" (evals/pdf-text.mjs, unpdf). O corpo é o trecho
+// mais longo a partir de um "Art. 1º" (antes dele ficam o sumário e os provimentos de abertura). Em cada página, as notas
+// de rodapé ("1 Prov. CG 15/2020.") ficam no fim e saem, assim como a chamada delas no texto ("única).1", "SAJ 6").
+// Artigo só abre em ordem crescente: "Art. 166 do CPC" no começo de uma linha quebrada não vira artigo novo. Aceita os
+// erros de digitação do texto oficial ("Art.. 370", "Artigo 981", "Art. 1235").
+const FOOTNOTE_RE = /^(\d{1,3})\s+(Provs?\.?s?|Provimento|Res\.|Resolução|L\.|Lei|D\.|Decreto|Port\.|Portaria|Assento|Incluíd[oa]|Vide|Comunicado|Com\.|Redação|Acrescid[oa]|Revogad[oa])\b/;
+const NEW_PARAGRAPH = /^(Art\.\s|§|Parágrafo único|[IVXLC]+\s*[-–]|[a-z]\)\s)/;
+const NORM_HEADING_RE = /^(CAP[ÍI]TULO|SE[ÇC][ÃA]O|Se[çc][ãa]o|SUBSE[ÇC][ÃA]O|Subse[çc][ãa]o)\s+[IVXLC]+\b/;
+const NORM_ART_RE = /^(?:Art\.{1,2}|Artigo)\s*(\d{1,3}(?:\.\d{3})+|\d{1,4})\s*(?:º|°|o(?=\s))?\s*(?:-\s*([A-Z]{1,2})\b)?\s*\.?\s*-?\s*/;
+const UPPER_RE = /^[A-ZÁÉÍÓÚÂÊÔÃÕÇ0-9 ,;:–\-]+$/;
+// 1235 → "1.235", como no resto do texto.
+const normLabel = (n: number) => n.toLocaleString('pt-BR').replace(/\s/g, '.');
+
+export function parseNormsText(raw: string): LegalArticle[] {
+  const lines: string[] = [];
+  for (const page of raw.split(/^=== PÁGINA \d+ ===$/m)) {
+    const ls = page.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const cut = ls.findIndex((l) => FOOTNOTE_RE.test(l));
+    const marks = new Set((cut >= 0 ? ls.slice(cut) : []).map((l) => FOOTNOTE_RE.exec(l)?.[1]).filter((n): n is string => !!n));
+    for (let l of cut >= 0 ? ls.slice(0, cut) : ls) {
+      l = l.replace(/([.;:)”"])\s*(\d{1,3})$/, (m, p, n) => (marks.has(n) ? p : m));
+      // Títulos e nomes de seção (linhas curtas) também levam chamada de nota: "Seção IV 6", "Do Sistema Informatizado Oficial 2".
+      if (NORM_HEADING_RE.test(l) || UPPER_RE.test(l) || l.length < 70) l = l.replace(/([A-Za-zÀ-ú])\s(\d{1,3})$/, (m, w, n) => (marks.has(n) ? w : m));
+      lines.push(l);
+    }
+  }
+  const firsts = lines.map((l, i) => (/^Art\.\s*1\s*º/.test(l) ? i : -1)).filter((i) => i >= 0);
+  let start = firsts.map((i, k) => ({ i, len: (firsts[k + 1] ?? lines.length) - i })).sort((x, y) => y.len - x.len)[0]?.i ?? 0;
+  // O título do capítulo fica nas linhas logo antes do Art. 1º.
+  while (start > 0 && (NORM_HEADING_RE.test(lines[start - 1]!) || UPPER_RE.test(lines[start - 1]!))) start--;
+
+  const out: LegalArticle[] = [];
+  const headings: { level: number; text: string }[] = [];
+  let pending: { level: number; text: string } | null = null;
+  let current: LegalArticle | null = null;
+  let last = 0;
+  for (const line of lines.slice(start)) {
+    if (NORM_HEADING_RE.test(line)) {
+      const level = levelOf(line);
+      while (headings.length && headings[headings.length - 1]!.level >= level) headings.pop();
+      pending = { level, text: line };
+      headings.push(pending);
+      continue;
+    }
+    const a = NORM_ART_RE.exec(line);
+    const num = a ? Number(a[1]!.replace(/\./g, '')) : 0, suffix = a?.[2] ?? '';
+    const key = num * 100 + (suffix ? suffix.charCodeAt(0) - 64 : 0);
+    if (a && key > last && key - last < 50_000) {
+      pending = null;
+      last = key;
+      const label = `${normLabel(num)}${suffix ? '-' + suffix : ''}`;
+      const rest = line.slice(a[0].length).trim();
+      current = { ord: out.length, label, num, suffix, heading: headings.map((h) => h.text).join(' › '),
+        text: `Art. ${label}${num < 10 && !suffix ? 'º' : '.'} ${rest}`.trim(), notes: [], revoked: /^\(?Revogad[oa]\)?\.?$/i.test(rest) };
+      out.push(current);
+      continue;
+    }
+    // Nome do capítulo ou seção nas linhas seguintes ("CAPÍTULO I" + "DA MISSÃO, VISÃO ..."; "Seção V" + "Do Sistema ...").
+    if (pending && /^[A-ZÁÉÍÓÚÂÊÔÃÕÇ]/.test(line) && (UPPER_RE.test(line) || !pending.text.includes('–'))) {
+      pending.text = pending.text.includes('–') ? `${pending.text} ${line}` : `${pending.text} – ${line}`;
+      continue;
+    }
+    pending = null;
+    if (current) current.text += (NEW_PARAGRAPH.test(line) ? '\n' : ' ') + line;
+  }
+  return out;
+}

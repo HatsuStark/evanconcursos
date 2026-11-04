@@ -55,6 +55,8 @@ Deno.serve(async (req) => {
   for (const law of laws) {
     try {
       const { data: cur } = await admin.from('legal_norms').select('id, version, fetched_at').eq('urn', law.urn).maybeSingle();
+      // Norma fora do normas.leg.br (PDF oficial): carregada e atualizada pelo scripts/legal-seed.ts.
+      if (law.pdf) { norms.push(cur ? { key: law.key, id: cur.id, version: cur.version, fetchedAt: cur.fetched_at } : { key: law.key, error: `${law.short}: texto ainda não carregado.` }); continue; }
       if (cur && Date.now() - new Date(cur.fetched_at).getTime() < MAX_AGE_MS) { norms.push({ key: law.key, id: cur.id, version: cur.version, fetchedAt: cur.fetched_at }); continue; }
       const id = await ingest(admin, law);
       norms.push({ key: law.key, id, version: 'Current', fetchedAt: new Date().toISOString() });
