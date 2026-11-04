@@ -1,5 +1,5 @@
 // Edge Function "study-guide": apostila da sessão gerada pela IA, baseada só no conteúdo do edital e nos
-// artigos oficiais da lei seca, sempre em segundo plano (leva cerca de 35 s e não depende da tela aberta). POST:
+// artigos oficiais da lei seca, sempre em segundo plano (o texto aparece em cerca de 30 s; não depende da tela aberta). POST:
 //   {taskId, depth:'completa'|'revisao'|'aprofundamento'} → 200 {guide} se já existe; senão começa a gerar e responde 202 {pending}.
 //   {taskId, depth, poll:true} → como acima, mas não começa nada: 502 se a geração falhou.
 //   {action:'prepare', planId} → 202; prepara as apostilas completas das próximas sessões (ver PREPARE_*).
@@ -7,7 +7,7 @@
 // Reaproveita apostilas idênticas (mesmo tema, fontes e profundidade) entre sessões e estudantes.
 // Não há "gerar de novo" pelo estudante (economia de créditos): uma apostila existente é sempre reaproveitada.
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide, guideCacheKey, guideVersion, guideJsonSchema, guidePrompt, lawKeys, pickSimilarGuide, topicKeys, trimReview, unlistedLaws, verifyGuide, type BoardQuestion, type GuideDepth } from '../../../shared/ai/guide.ts';
+import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide, guideCacheKey, guidePracticeJsonSchema, GuidePractice, GuideText, guideTextJsonSchema, guideVersion, guideJsonSchema, guidePrompt, mergeGuide, partialGuide, lawKeys, pickSimilarGuide, topicKeys, trimReview, unlistedLaws, verifyGuide, type BoardQuestion, type GuideDepth } from '../../../shared/ai/guide.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient } from '../../../shared/qbank/client.ts';
 import { measureIncidence, QMAP_PROMPT_VERSION } from '../../../shared/qbank/map.ts';
@@ -18,6 +18,9 @@ import { cacheQuestions, ensureSessionMap, ensureSubjectMap, mapDeps, plain, pub
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
 const STUCK_MS = 3 * 60 * 1000; // geração interrompida: libera nova tentativa
+// Raciocínio baixo na completa e no aprofundamento: o tempo é quase todo de escrita, e o raciocínio padrão chegava a
+// 3.700 tokens sem ganho visível no texto (evals/guide-run.ts, 2026-11-04).
+const GUIDE_THINKING = 'low' as const;
 // Por chamada, cabe no limite de tempo da função (150 s). Horizonte curto: a sessão quase certamente será estudada.
 const PREPARE_DAYS = 3, PREPARE_MAX = 2;
 const PREPARE_RETRY_MS = 24 * 3600 * 1000; // apostila que falhou não gasta de novo sem o estudante pedir
@@ -122,27 +125,55 @@ async function boardEvidence(admin: Admin, ownerId: string, ctx: GuideContext): 
 async function generate(admin: Admin, ownerId: string, jobId: string, ctx: GuideContext) {
   const { input, key, articles, cargo, duties, otherRoles } = ctx;
   const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash', started = Date.now();
-  let usage: GeminiUsage | null = null;
-  try {
-    // A revisão não tem seções, então não tem "como a banca cobra": não compra questões da banca.
-    const boardQuestions = input.depth === 'revisao' ? [] : await boardEvidence(admin, ownerId, ctx);
-    // Formato predominante da banca na matéria: as questões de fixação seguem ele.
-    const { data: sm } = await admin.from('qbank_subject_maps').select('banca_tipo').eq('subject_id', ctx.subjectId).maybeSingle();
-    const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: Guide, jsonSchema: guideJsonSchema(), temperature: 0.3,
-      parts: [{ text: guidePrompt({ ...input, cargo, boardQuestions, format: String(sm?.banca_tipo ?? ''), duties, otherRoles }) }] });
-    usage = r.usage;
-    const data = input.depth === 'revisao' ? trimReview(r.data) : r.data;
-    const v = verifyGuide(applyBoardEvidence(data, input.banca, boardQuestions.length), articles, input.subject, ctx.extra);
+  let usage: GeminiUsage | null = null, text: GuideText | null = null;
+  const apiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
+  const add = (u: GeminiUsage) => { usage = usage ? { inputTokens: usage.inputTokens + u.inputTokens, outputTokens: usage.outputTokens + u.outputTokens, thinkingTokens: usage.thinkingTokens + u.thinkingTokens } : u; };
+  const save = async (content: Guide | (Guide & { parcial: true }), board: number) => {
+    const v = verifyGuide(applyBoardEvidence(content, input.banca, board), articles, input.subject, ctx.extra);
     const { error } = await admin.from('study_guides').upsert({
       cache_key: key, depth: input.depth, subject_name: input.subject, subject_key: normalizeText(input.subject), banca: normalizeText(input.banca), topic_keys: topicKeys(input.topics),
       title: input.title, content: v.guide, sources: input.law.map((l) => l.ref), unlisted_sources: unlistedLaws([input.title, ...input.topics].join('\n')), unverified: v.unverified,
       model, prompt_version: guideVersion(input.depth), created_at: new Date().toISOString(),
     }, { onConflict: 'cache_key' });
     if (error) throw new Error(error.message);
+  };
+  // Formato predominante da banca na matéria: as questões de fixação seguem ele.
+  const format = async () => String((await admin.from('qbank_subject_maps').select('banca_tipo').eq('subject_id', ctx.subjectId).maybeSingle()).data?.banca_tipo ?? '');
+  try {
+    if (input.depth === 'revisao') {
+      // A revisão não tem seções, então não tem "como a banca cobra": não compra questões da banca. Sai numa etapa só.
+      const r = await generateJson({ apiKey, model, schema: Guide, jsonSchema: guideJsonSchema(), temperature: 0.3,
+        parts: [{ text: guidePrompt({ ...input, cargo, boardQuestions: [], format: await format(), duties, otherRoles }) }] });
+      add(r.usage);
+      await save(trimReview(r.data), 0);
+    } else {
+      // Duas chamadas em paralelo, com raciocínio baixo (o tempo é de escrita): o texto começa na hora; a prática, quando
+      // as questões da banca chegam. O texto pronto é gravado e aparece na tela enquanto a prática termina.
+      let practiceDone = false;
+      const practice = boardEvidence(admin, ownerId, ctx).then(async (boardQuestions) => {
+        const p = await generateJson({ apiKey, model, schema: GuidePractice, jsonSchema: guidePracticeJsonSchema(), temperature: 0.3, thinkingLevel: GUIDE_THINKING,
+          parts: [{ text: guidePrompt({ ...input, cargo, boardQuestions, format: await format(), duties, otherRoles, part: 'pratica' }) }] });
+        add(p.usage);
+        return { data: p.data, board: boardQuestions.length };
+      }).finally(() => { practiceDone = true; });
+      practice.catch(() => {}); // a falha é tratada no await abaixo
+      const t = await generateJson({ apiKey, model, schema: GuideText, jsonSchema: guideTextJsonSchema(), temperature: 0.3, thinkingLevel: GUIDE_THINKING,
+        parts: [{ text: guidePrompt({ ...input, cargo, duties, otherRoles, part: 'texto' }) }] });
+      add(t.usage);
+      text = t.data;
+      if (!practiceDone) await save(partialGuide(text), 0);
+      const p = await practice;
+      await save(mergeGuide(text, p.data), p.board);
+    }
     await admin.from('ai_jobs').update({ status: 'succeeded', finished_at: new Date().toISOString() }).eq('id', jobId);
     await logUsage(admin, { ownerId, jobId, operation: 'study_guide', model, promptVersion: guideVersion(input.depth), usage, latencyMs: Date.now() - started, status: 'ok' });
   } catch (err) {
-    if (err instanceof GeminiError) usage = err.usage;
+    if (err instanceof GeminiError && err.usage) add(err.usage);
+    // Prática falhou com o texto já gravado: a apostila fica só com o texto, sem esperar mais.
+    if (text) {
+      const { parcial: _, ...done } = partialGuide(text);
+      await save(done, 0).catch(() => {});
+    }
     const message = err instanceof Error ? err.message : String(err);
     await admin.from('ai_jobs').update({ status: 'failed', finished_at: new Date().toISOString(), error: message.slice(0, 1000) }).eq('id', jobId);
     await logUsage(admin, { ownerId, jobId, operation: 'study_guide', model, promptVersion: guideVersion(input.depth), usage, latencyMs: Date.now() - started, status: 'error', error: message }).catch(() => {});
@@ -217,6 +248,8 @@ Deno.serve(async (req) => {
     if (!ctx) return json(400, { error: 'A apostila é gerada para tarefas de teoria (com sessão de conteúdo).' });
     const guide = await findGuide(admin, ctx);
     // Revisões gravadas antes dos tetos também saem curtas.
+    // Apostila só com o texto: a prática ainda está sendo escrita (`parcial`); geração parada não deixa a tela esperando.
+    if (guide?.content?.parcial && !isRunning(await lastJob(admin, ctx.key))) guide.content = { ...guide.content, parcial: undefined };
     if (guide) return json(200, { guide: depth === 'revisao' ? { ...guide, content: trimReview(guide.content) } : guide });
     if (body.poll) {
       const job = await lastJob(admin, ctx.key);

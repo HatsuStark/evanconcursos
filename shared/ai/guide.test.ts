@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyBoardEvidence, boardSample, guideCacheKey, guidePrompt, lawKeys, pickSimilarGuide, roleSpecific, topicKeys, trimReview, clipText, cuePista, guideVersion, REVIEW_LIMITS, unlistedLaws, verifyGuide, type BoardQuestion, type Guide } from './guide.ts';
+import { applyBoardEvidence, boardSample, guideCacheKey, guidePrompt, lawKeys, pickSimilarGuide, roleSpecific, topicKeys, trimReview, clipText, cuePista, guideVersion, REVIEW_LIMITS, unlistedLaws, verifyGuide, type BoardQuestion, Guide, mergeGuide, partialGuide } from './guide.ts';
 
 const law = [{ ref: 'CP, art. 312', text: 'x'.repeat(100) }, { ref: 'CP, art. 313', text: 'y'.repeat(80) }];
 const base = { depth: 'completa' as const, subject: 'Direito Penal', banca: 'VUNESP', topics: ['Peculato', 'Concussão'], law };
@@ -29,10 +29,12 @@ describe('como a banca cobra', () => {
     expect(r.perfil_banca).toEqual({ banca: 'VUNESP', questoes: 8 });
   });
   it('o prompt só pede o perfil quando recebe questões', () => {
-    expect(guidePrompt(promptBase)).toContain('deixe vazio em todas as seções');
-    const p = guidePrompt({ ...promptBase, boardQuestions: [question('Peculato', 'Sobre o peculato')] });
+    expect(guidePrompt({ ...promptBase, part: 'pratica' })).toContain('cobranca: deixe vazio');
+    const p = guidePrompt({ ...promptBase, part: 'pratica', boardQuestions: [question('Peculato', 'Sobre o peculato')] });
     expect(p).toContain('Sobre o peculato');
-    expect(p).not.toContain('deixe vazio em todas as seções');
+    expect(p).not.toContain('cobranca: deixe vazio');
+    // O texto não usa as questões da banca: ele sai antes delas.
+    expect(guidePrompt({ ...promptBase, part: 'texto', boardQuestions: [question('Peculato', 'Sobre o peculato')] })).not.toContain('Sobre o peculato');
   });
   it('artigo citado no perfil também passa pela conferência', () => {
     expect(verifyGuide(guide, []).unverified).toContain('CP, art. 999');
@@ -137,12 +139,37 @@ describe('revisão curta', () => {
     expect(p).toMatch(/gatilhos: 4 a 6/);
     expect(p).toMatch(/mapa mental/);
     expect(p).not.toMatch(/questoes: inéditas/);
-    const full = guidePrompt(promptBase);
+    const full = guidePrompt({ ...promptBase, part: 'pratica' });
     expect(full).toMatch(/questoes: inéditas/);
-    expect(full).toMatch(/mnemonicos e gatilhos: vazios/);
+    expect(full).not.toMatch(/mnemonicos/);
+    expect(guidePrompt({ ...promptBase, part: 'texto' })).not.toMatch(/questoes: inéditas/);
   });
   it('revisão tem versão própria na chave: mudar a revisão não refaz a completa', () => {
     expect(guideCacheKey({ ...base, depth: 'revisao' })).not.toBe(guideCacheKey(base));
     expect(guideVersion('revisao')).not.toBe(guideVersion('completa'));
+  });
+});
+
+describe('apostila em duas partes', () => {
+  const text = {
+    titulo: 'Citação', introducao: 'i', objetivos: [], esquema: [], quadros: [], legislacao: [],
+    secoes: [
+      { titulo: 'Citação pessoal', prioridade: 'alta' as const, texto: 'O oficial entrega o mandado ao réu.', exemplos: [] },
+      { titulo: 'Citação por hora certa', prioridade: 'media' as const, texto: 'Quando o réu se oculta, o oficial marca hora.', exemplos: [] },
+    ],
+  };
+  const practice = { memorizar: ['m'], pontos_banca: [], pegadinhas: ['p'], resumo: [], questoes: [], perguntas: [], depende_legislacao: false,
+    cobranca: [{ assunto: 'hora certa e ocultação do réu', como: 'Caso prático.' }, { assunto: 'Recursos', como: 'Letra da lei.' }] };
+  it('junta texto e prática; "como a banca cobra" vai para a seção do assunto', () => {
+    const g = mergeGuide(text, practice);
+    expect(g.secoes.map((s) => s.como_banca_cobra)).toEqual(['', 'Caso prático.']);
+    expect(g.pegadinhas).toEqual(['p']);
+    expect(g.mnemonicos).toEqual([]);
+  });
+  it('texto pronto antes da prática fica marcado como parcial', () => {
+    const g = partialGuide(text);
+    expect(g.parcial).toBe(true);
+    expect(g.questoes).toEqual([]);
+    expect(Guide.safeParse(g).success).toBe(true);
   });
 });

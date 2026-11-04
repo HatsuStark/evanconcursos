@@ -18,6 +18,7 @@ interface GuideContent {
   perguntas: { pergunta: string; resposta: string }[];
   depende_legislacao: boolean;
   perfil_banca?: { banca: string; questoes: number } | null;
+  parcial?: boolean; // só o texto: a prática (questões, revisão, pegadinhas) ainda está sendo escrita
 }
 interface GuideRow { content: GuideContent; sources: string[]; unlisted_sources: string[]; unverified: string[]; model: string; created_at: string; depth: string }
 
@@ -25,7 +26,8 @@ const POLL_MS = 4000, GIVE_UP_MS = 3 * 60 * 1000; // igual ao da função: depoi
 
 // Sem "gerar de novo" (economia de créditos): a apostila existente é sempre reaproveitada.
 // A geração roda em segundo plano no servidor; aqui só espera. null se a espera foi cancelada.
-async function fetchGuide(taskId: string, depth: string, cancelled: () => boolean) {
+// O texto chega antes da prática: `onPartial` mostra a apostila enquanto a espera continua.
+async function fetchGuide(taskId: string, depth: string, cancelled: () => boolean, onPartial: (g: GuideRow) => void) {
   const giveUp = Date.now() + GIVE_UP_MS;
   for (let poll = false; !cancelled(); poll = true) {
     const { data, error } = await supabase.functions.invoke('study-guide', { body: { taskId, depth, poll } });
@@ -35,7 +37,8 @@ async function fetchGuide(taskId: string, depth: string, cancelled: () => boolea
       throw new Error(msg);
     }
     const guide = (data as { guide?: GuideRow }).guide;
-    if (guide) return guide;
+    if (guide && !guide.content.parcial) return guide;
+    if (guide) onPartial(guide);
     if (Date.now() > giveUp) throw new Error('A apostila está demorando mais que o normal. Tente de novo em instantes.');
     await new Promise((r) => setTimeout(r, POLL_MS));
   }
@@ -60,7 +63,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
     const id = ++loadId.current, cancelled = () => id !== loadId.current;
     setLoading(true); setError('');
     try {
-      const g = await fetchGuide(taskId, depth, cancelled);
+      const g = await fetchGuide(taskId, depth, cancelled, (partial) => { if (!cancelled()) { setGuide(partial); setLoading(false); } });
       if (!cancelled()) setGuide(g);
     } catch (e) {
       if (!cancelled()) setError((e as Error).message);
@@ -100,7 +103,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
           </div>
         )}
       </div>
-      {loading && <div className="glass card" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> Montando a apostila com base no edital e na lei seca… (até 1 minuto na primeira vez; pode sair desta tela, ela continua sendo feita)</div>}
+      {loading && <div className="glass card" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> Montando a apostila com base no edital e na lei seca… (cerca de 30 segundos na primeira vez; pode sair desta tela, ela continua sendo feita)</div>}
       {error && <div className="glass card"><p className="error" style={{ margin: 0 }}>{error}</p><button className="btn sm" style={{ marginTop: 10 }} onClick={() => load()}>Tentar de novo</button></div>}
       {g && !loading && (
         <article ref={article} className="glass guide printable">
@@ -168,6 +171,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
               <ul>{g.legislacao.map((l, i) => <li key={i}><b>{l.ref}:</b> {l.comentario}</li>)}</ul>
             </section>
           )}
+          {g.parcial && <div className="glass card no-print" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> Escrevendo o que memorizar, pegadinhas, resumo e questões de fixação… Pode ir lendo; eles aparecem aqui em instantes.</div>}
           {!!g.memorizar?.length && <section {...reading('memorizar')} className={'guide-memo' + (voice.activeKey === 'memorizar' ? ' speaking' : '')}><h3>Para memorizar</h3><ul>{g.memorizar.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
           {!!g.pontos_banca.length && <section {...reading('banca')}><h3>O que mais cai</h3><ul>{g.pontos_banca.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
           {!!g.pegadinhas.length && <section data-voice="pegadinhas" className={'guide-traps' + (voice.activeKey === 'pegadinhas' ? ' speaking' : '')}><h3>Pegadinhas</h3><ul>{g.pegadinhas.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}

@@ -59,6 +59,41 @@ export const Guide = z.object({
 export type Guide = z.infer<typeof Guide>;
 export const guideJsonSchema = () => z.toJSONSchema(Guide, { target: 'draft-7' });
 
+// Completa e aprofundamento saem em duas chamadas em paralelo, cada uma com metade da escrita: o texto (começa na hora e
+// aparece na tela assim que fica pronto) e a prática (questões, revisão e "como a banca cobra"), que começa quando as
+// questões da banca chegam. As duas partem das mesmas fontes (edital e lei), então a prática cobra o que o texto ensina.
+// O tempo é quase todo de escrita: numa chamada só, ~4.500 tokens de saída, 45 a 85 s (guide-v4, 2026-11-04).
+const Secao = Guide.shape.secoes.element;
+export const GuideText = Guide.pick({ titulo: true, introducao: true, objetivos: true, esquema: true, quadros: true, legislacao: true })
+  .extend({ secoes: z.array(Secao.omit({ como_banca_cobra: true })) });
+export type GuideText = z.infer<typeof GuideText>;
+export const GuidePractice = Guide.pick({ memorizar: true, pontos_banca: true, pegadinhas: true, resumo: true, questoes: true, perguntas: true, depende_legislacao: true })
+  .extend({ cobranca: z.array(z.object({ assunto: z.string().describe('Assunto do tema, em poucas palavras (ex.: "citação por hora certa").'), como: z.string() }))
+    .describe('Como a banca cobra cada assunto do tema, pelo que se vê nas questões fornecidas, em até 2 frases por assunto. Só assuntos que alguma questão trata; vazio sem questões.') });
+export type GuidePractice = z.infer<typeof GuidePractice>;
+export const guideTextJsonSchema = () => z.toJSONSchema(GuideText, { target: 'draft-7' });
+export const guidePracticeJsonSchema = () => z.toJSONSchema(GuidePractice, { target: 'draft-7' });
+
+// Prática ainda chegando: os campos dela vazios, e `parcial` avisa a tela para continuar esperando.
+export function partialGuide(t: GuideText): Guide & { parcial: true } {
+  return { ...t, secoes: t.secoes.map((x) => ({ ...x, como_banca_cobra: '' })), memorizar: [], mnemonicos: [], gatilhos: [], pontos_banca: [], pegadinhas: [], resumo: [],
+    questoes: [], perguntas: [], depende_legislacao: false, parcial: true };
+}
+// Cada "como a banca cobra" vai para a seção que mais compartilha palavras com o assunto (título pesa em dobro); sem
+// palavra em comum, fica de fora. Uma seção recebe no máximo um.
+const words = (t: string) => new Set(t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4));
+export function mergeGuide(t: GuideText, p: GuidePractice): Guide {
+  const { cobranca, ...rest } = p;
+  const como: string[] = t.secoes.map(() => '');
+  for (const c of cobranca) {
+    const w = words(c.assunto);
+    const score = t.secoes.map((x, i) => (como[i] ? -1 : 2 * [...words(x.titulo)].filter((y) => w.has(y)).length + [...words(x.texto)].filter((y) => w.has(y)).length));
+    const best = score.indexOf(Math.max(...score));
+    if (best >= 0 && score[best]! > 0) como[best] = c.como.trim();
+  }
+  return { ...t, ...rest, mnemonicos: [], gatilhos: [], secoes: t.secoes.map((x, i) => ({ ...x, como_banca_cobra: como[i]! })) };
+}
+
 export interface GuideSource { ref: string; text: string }
 
 // ---------- perfil da banca: questões reais que embasam "como a banca cobra" ----------
@@ -117,16 +152,17 @@ export function trimReview<G extends Partial<Guide>>(g: G): G {
   };
 }
 
-const FULL_RULES = `- Ordem didática: do conceito e da regra geral para as exceções e os detalhes; cada seção explica, dá exemplo prático e destaca o que a prova costuma perguntar. Priorize o que mais cai: seção de prioridade alta ganha mais texto, a de baixa só o essencial.
-- secoes: 3 a 6 seções; quadros: 1 ou 2; questoes: 4 ou 5; perguntas: 4 a 6.
-- objetivos e esquema: curtos; o esquema é o mapa mental do tema, na ordem das seções.
-- mnemonicos e gatilhos: vazios (ficam na revisão curta).`;
-const DEEP_RULES = `- Aprofundamento: o aluno já estudou o tema e resolveu questões. Não repita definições nem a regra geral: no máximo uma frase de lembrete por seção.
+const FULL_TEXT = `- Ordem didática: do conceito e da regra geral para as exceções e os detalhes; cada seção explica, dá exemplo prático e destaca o que a prova costuma perguntar. Priorize o que mais cai: seção de prioridade alta ganha mais texto, a de baixa só o essencial.
+- secoes: 3 a 6 seções; quadros: 1 ou 2.
+- objetivos e esquema: curtos; o esquema é o mapa mental do tema, na ordem das seções.`;
+const FULL_PRACTICE = `- questoes: 4 ou 5; perguntas: 4 a 6.`;
+const DEEP_TEXT = `- Aprofundamento: o aluno já estudou o tema e resolveu questões. Não repita definições nem a regra geral: no máximo uma frase de lembrete por seção.
 - secoes: 3 a 5, sobre o que separa quem acerta de quem erra: exceções e ressalvas, distinções finas entre institutos parecidos, prazos e sujeitos que a banca troca, casos práticos em que a regra geral não se aplica, combinação de artigos. Cada seção traz pelo menos um exemplo de caso difícil resolvido.
-- quadros: 1 ou 2, comparando o que a banca costuma confundir. pegadinhas: 5 a 8, cada uma com a troca exata que a banca faz.
+- quadros: 1 ou 2, comparando o que a banca costuma confundir.
+- objetivos e esquema: curtos.`;
+const DEEP_PRACTICE = `- Aprofundamento: o aluno já estudou o tema e resolveu questões. pegadinhas: 5 a 8, cada uma com a troca exata que a banca faz.
 - questoes: 5, de dificuldade difícil, cada uma cobrando uma exceção, distinção ou caso prático diferente; distratores que trocam um único detalhe do texto da lei.
-- perguntas: 4 a 6, de recordação ativa sobre as exceções e distinções.
-- objetivos e esquema: curtos. mnemonicos e gatilhos: vazios.`;
+- perguntas: 4 a 6, de recordação ativa sobre as exceções e distinções.`;
 // Tom de professor explicando em aula, para quem nunca estudou o assunto. O termo técnico fica (a prova usa), mas
 // sempre traduzido. Na revisão curta, os itens continuam de uma linha.
 const VOICE_RULES = `Linguagem (obrigatório):
@@ -150,31 +186,37 @@ const REVIEW_RULES = `- Revisão curta: nada de texto corrido nem questões de f
 
 // format: formato predominante da banca na matéria ('certo e errado' ou múltipla escolha), para as questões de fixação.
 // duties/otherRoles: atribuições do cargo no edital e os outros cargos dele, para a apostila não descrever outro cargo.
-export function guidePrompt(p: { depth: GuideDepth; banca: string; cargo: string; subject: string; title: string; topics: string[]; law: GuideSource[]; boardQuestions?: BoardQuestion[]; format?: string; duties?: string; otherRoles?: string[] }) {
+// part: na completa e no aprofundamento, 'texto' (sem as questões da banca) ou 'pratica'; a revisão curta sai numa
+// chamada só.
+export function guidePrompt(p: { depth: GuideDepth; banca: string; cargo: string; subject: string; title: string; topics: string[]; law: GuideSource[]; boardQuestions?: BoardQuestion[]; format?: string; duties?: string; otherRoles?: string[]; part?: 'texto' | 'pratica' }) {
   const full = p.depth !== 'revisao', deep = p.depth === 'aprofundamento', board = p.boardQuestions ?? [], ce = /certo/i.test(p.format ?? '');
-  return `Você é professor especialista em concursos públicos brasileiros, autor de material de cursinho que aprova. ${deep ? 'Escreva o aprofundamento do tema para quem já estudou a base e quer subir o acerto (cerca de 20 minutos de leitura antes de questões difíceis).' : full ? 'Escreva uma apostila completa, para quem está começando o tema (cerca de 20 minutos de leitura antes de resolver questões).' : 'Monte a revisão curta do tema: uma folha de memorização para quem já estudou (cerca de 5 minutos), sem texto corrido.'}
+  const texto = !full || p.part !== 'pratica', pratica = !full || p.part !== 'texto';
+  const step = !full ? '' : p.part === 'texto'
+    ? 'Nesta parte, escreva só o texto da apostila (título, introdução, objetivos, mapa, seções, quadros e lei comentada). Questões de fixação, perguntas, pegadinhas e o resto são feitos em separado.'
+    : p.part === 'pratica' ? 'Nesta parte, o texto explicativo é feito em separado: monte só a prática e a revisão do tema (o que memorizar, o que mais cai, pegadinhas, resumo, questões de fixação, perguntas e como a banca cobra cada assunto), cobrindo os pontos principais do tema e dos trechos de lei.' : '';
+  return `Você é professor especialista em concursos públicos brasileiros, autor de material de cursinho que aprova. ${deep ? 'Escreva o aprofundamento do tema para quem já estudou a base e quer subir o acerto (cerca de 20 minutos de leitura antes de questões difíceis).' : full ? 'Escreva uma apostila completa, para quem está começando o tema (cerca de 20 minutos de leitura antes de resolver questões).' : 'Monte a revisão curta do tema: uma folha de memorização para quem já estudou (cerca de 5 minutos), sem texto corrido.'}${step ? ` ${step}` : ''}
 Concurso: ${p.cargo || 'não informado'}${p.banca ? `, banca ${p.banca}` : ''}.
 ${roleContext(p.cargo, p.duties, p.otherRoles)}
 Matéria: ${p.subject}
 Tema da sessão: ${p.title}
 Item do edital de onde o tema saiu (só contexto; pode citar assuntos de outras sessões): ${p.topics.join(' | ') || '—'}
 ${p.law.length ? `Trechos oficiais da lei (lei seca, única fonte legal permitida):\n${p.law.map((l) => `[${l.ref}] ${l.text}`).join('\n\n')}` : 'Nenhum trecho de lei foi fornecido para este tema.'}
-${board.length ? `Questões reais da banca ${p.banca} sobre o tema (amostra, não o total):\n${board.map((q, i) => `Q${i + 1} (${[q.assunto, q.ano].filter(Boolean).join(', ')}): ${q.enunciado.slice(0, BOARD_TEXT_MAX)}${q.alternativas.length ? `\n${q.alternativas.map((a) => a.slice(0, BOARD_OPTION_MAX)).join(' | ')}` : ''}`).join('\n\n')}` : 'Nenhuma questão real da banca foi fornecida.'}
+${p.part === 'texto' ? '' : board.length ? `Questões reais da banca ${p.banca} sobre o tema (amostra, não o total):\n${board.map((q, i) => `Q${i + 1} (${[q.assunto, q.ano].filter(Boolean).join(', ')}): ${q.enunciado.slice(0, BOARD_TEXT_MAX)}${q.alternativas.length ? `\n${q.alternativas.map((a) => a.slice(0, BOARD_OPTION_MAX)).join(' | ')}` : ''}`).join('\n\n')}` : 'Nenhuma questão real da banca foi fornecida.'}
 Regras obrigatórias:
 - Quando o tema tratar do cargo (atribuições, rotina, conduta), use as atribuições do edital acima como base e não descreva funções de outros cargos. Sem atribuições informadas, fique no que o nome do cargo e o conteúdo do edital indicam, sem inventar funções.
 - Escreva só sobre o "Tema da sessão", e dê à apostila um título sobre ele. O item do edital costuma ser maior que o tema (ex.: tema "Substantivos e adjetivos" num item que cita todas as classes de palavras) e pode listar assuntos e leis de outras sessões: ignore o que não pertence ao tema. Trecho de lei que não trate do tema também fica de fora.
 - Cite artigos SOMENTE dos trechos fornecidos, no formato do colchete (ex.: "CP, art. 312"). Se não houver trecho, não cite números de artigos.
 - Não cite jurisprudência, súmulas, autores ou posições doutrinárias. Não invente leis, prazos ou números.
 - Siga o texto da lei fornecido; ele é a versão vigente.
-${deep ? DEEP_RULES : full ? FULL_RULES : REVIEW_RULES}
+${!full ? REVIEW_RULES : [texto && (deep ? DEEP_TEXT : FULL_TEXT), pratica && (deep ? DEEP_PRACTICE : FULL_PRACTICE)].filter(Boolean).join('\n')}
 ${full ? VOICE_RULES : REVIEW_VOICE}
-- quadros: compare só o que a banca costuma confundir (espécies, prazos, requisitos, diferenças entre institutos). Sem quadro se o tema não tiver o que comparar.
-- memorizar: só números, prazos, quóruns e listas que estejam nos trechos de lei ou no conteúdo do edital, nunca de memória. Vazio se não houver.
-${full ? `- questoes: inéditas, ${ce ? 'no formato certo ou errado (alternativas vazias; gabarito "C" ou "E")' : 'de múltipla escolha com 5 alternativas (gabarito A a E)'}, no estilo ${board.length ? 'das questões reais fornecidas' : `da ${p.banca || 'banca'}`}, cobrando o que a apostila ensinou. Uma única resposta correta, sem ambiguidade; o comentário explica o gabarito pela apostila ou pelo artigo fornecido.` : ''}
-- legislacao: comente os artigos fornecidos mais importantes para a prova (ref exatamente como no colchete).
-- pontos_banca e pegadinhas: o que costuma cair e as confusões comuns${p.banca ? ` da ${p.banca}` : ''}.
-- ${!full ? 'secoes: vazio.' : board.length ? 'secoes[].como_banca_cobra: diga como as questões fornecidas abordam o assunto da seção (letra da lei, caso prático, conceito, exceção, tipo de distrator). Só o que se observa nelas: sem percentuais, sem "sempre" ou "nunca", sem copiar enunciados. Deixe vazio na seção que nenhuma questão trata. As questões são só amostra de estilo, nunca fonte do conteúdo.' : 'secoes[].como_banca_cobra: deixe vazio em todas as seções.'}
-- Sem markdown.`;
+${texto ? '- quadros: compare só o que a banca costuma confundir (espécies, prazos, requisitos, diferenças entre institutos). Sem quadro se o tema não tiver o que comparar.' : ''}
+${pratica ? '- memorizar: só números, prazos, quóruns e listas que estejam nos trechos de lei ou no conteúdo do edital, nunca de memória. Vazio se não houver.' : ''}
+${full && pratica ? `- questoes: inéditas, ${ce ? 'no formato certo ou errado (alternativas vazias; gabarito "C" ou "E")' : 'de múltipla escolha com 5 alternativas (gabarito A a E)'}, no estilo ${board.length ? 'das questões reais fornecidas' : `da ${p.banca || 'banca'}`}, cobrando os pontos principais do tema. Uma única resposta correta, sem ambiguidade; o comentário explica o gabarito pela apostila ou pelo artigo fornecido.` : ''}
+${texto ? '- legislacao: comente os artigos fornecidos mais importantes para a prova (ref exatamente como no colchete).' : ''}
+${pratica ? `- pontos_banca e pegadinhas: o que costuma cair e as confusões comuns${p.banca ? ` da ${p.banca}` : ''}.` : ''}
+- ${!full ? 'secoes: vazio.' : p.part === 'texto' ? 'secoes: só título, prioridade, texto e exemplos (o "como a banca cobra" vem na etapa seguinte).' : board.length ? `${p.part === 'pratica' ? 'cobranca' : 'secoes[].como_banca_cobra'}: diga como as questões fornecidas abordam ${p.part === 'pratica' ? 'cada assunto' : 'o assunto da seção'} (letra da lei, caso prático, conceito, exceção, tipo de distrator). Só o que se observa nelas: sem percentuais, sem "sempre" ou "nunca", sem copiar enunciados. Deixe de fora o que nenhuma questão trata. As questões são só amostra de estilo, nunca fonte do conteúdo.` : `${p.part === 'pratica' ? 'cobranca' : 'secoes[].como_banca_cobra'}: deixe vazio.`}
+- Sem markdown.`.replace(/\n{2,}/g, '\n');
 }
 
 // Fontes legais da sessão: as leis citadas (com artigos) e os trechos carregados do banco.

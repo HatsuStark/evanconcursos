@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import pg from 'pg';
 import { costUsd, generateJson } from '../shared/ai/gemini.ts';
-import { Guide, guideJsonSchema, guidePrompt, sourceRef, trimReview, verifyGuide, type GuideDepth } from '../shared/ai/guide.ts';
+import { Guide, guideJsonSchema, guidePracticeJsonSchema, GuidePractice, guidePrompt, GuideText, guideTextJsonSchema, mergeGuide, sourceRef, trimReview, verifyGuide, type GuideDepth } from '../shared/ai/guide.ts';
 import { findLawRefs, inRanges } from '../shared/legal/refs.ts';
 import { lawByKey } from '../shared/legal/registry.ts';
 
@@ -20,7 +20,7 @@ const { rows: [notice] } = await db.query(`select id, board, role_name from publ
 const { rows: sessions } = await db.query(
   `select ss.title, s.name subject, array(select t.text from public.notice_topics t where t.id = any(ss.topic_ids)) topics
    from public.study_sessions ss join public.notice_subjects s on s.id = ss.subject_id join public.study_plans p on p.active_version_id = ss.plan_version_id
-   where p.notice_id = $1 order by (ss.title ~ 'arts?\\.') desc, random() limit $2`, [notice.id, n]);
+   where p.notice_id = $1 and ($3::text is null or ss.title ilike $3) order by (ss.title ~ 'arts?\\.') desc, random() limit $2`, [notice.id, n, process.env.SESSION_LIKE ?? null]);
 
 for (const s of sessions) {
   const refs = findLawRefs(s.title, s.subject).filter((r) => r.ranges.length);
@@ -33,11 +33,24 @@ for (const s of sessions) {
   }
   const law = provided.map((p) => ({ ref: sourceRef(p.lawKey, p.label), text: p.text.slice(0, 1500) }));
   const t0 = Date.now();
-  const r = await generateJson({ apiKey: env.GEMINI_API_KEY!, model: env.GEMINI_MODEL || 'gemini-3.8-flash', schema: Guide, jsonSchema: guideJsonSchema(), temperature: 0.3,
-    parts: [{ text: guidePrompt({ depth, banca: notice.board, cargo: notice.role_name, subject: s.subject, title: s.title, topics: s.topics, law }) }] });
+  const gen = { apiKey: env.GEMINI_API_KEY!, model: env.GEMINI_MODEL || 'gemini-3.8-flash', temperature: 0.3, ...(process.env.THINK ? { thinkingLevel: process.env.THINK as 'low' | 'medium' | 'high' } : {}) };
+  const base = { depth, banca: notice.board, cargo: notice.role_name, subject: s.subject, title: s.title, topics: s.topics, law };
+  // Como no servidor: revisão numa etapa; completa e aprofundamento em texto (aparece na tela) e prática.
+  let r: { data: Guide; usage: { inputTokens: number; outputTokens: number; thinkingTokens: number } }, firstAt = 0;
+  if (depth === 'revisao') r = await generateJson({ ...gen, schema: Guide, jsonSchema: guideJsonSchema(), parts: [{ text: guidePrompt(base) }] });
+  else {
+    // Em paralelo, como no servidor (aqui sem questões da banca).
+    let practiceAt = 0;
+    const pp = generateJson({ ...gen, schema: GuidePractice, jsonSchema: guidePracticeJsonSchema(), parts: [{ text: guidePrompt({ ...base, part: 'pratica' }) }] }).then((x) => { practiceAt = Date.now() - t0; return x; });
+    const t = await generateJson({ ...gen, schema: GuideText, jsonSchema: guideTextJsonSchema(), parts: [{ text: guidePrompt({ ...base, part: 'texto' }) }] });
+    firstAt = Date.now() - t0;
+    const p = await pp;
+    r = { data: mergeGuide(t.data, p.data), usage: { inputTokens: t.usage.inputTokens + p.usage.inputTokens, outputTokens: t.usage.outputTokens + p.usage.outputTokens, thinkingTokens: t.usage.thinkingTokens + p.usage.thinkingTokens } };
+    console.log(`  texto na tela em ${Math.round(firstAt / 1000)}s (saída ${t.usage.outputTokens}); prática em ${Math.round(practiceAt / 1000)}s (saída ${p.usage.outputTokens}); ${p.data.questoes.length} questões, ${p.data.pegadinhas.length} pegadinhas`);
+  }
   const v = verifyGuide(depth === 'revisao' ? trimReview(r.data) : r.data, provided, s.subject);
   const words = JSON.stringify(r.data).split(/\s+/).length;
-  console.log(`\n■ ${s.subject} · ${s.title}\n  ${law.length} artigos fornecidos · ${Math.round((Date.now() - t0) / 1000)}s · US$ ${costUsd(r.usage, PRICE).toFixed(4)} · ~${words} palavras · ${r.data.secoes.length} seções · ${r.data.perguntas.length} perguntas`);
+  console.log(`\n■ ${s.subject} · ${s.title}\n  ${law.length} artigos fornecidos · ${Math.round((Date.now() - t0) / 1000)}s · US$ ${costUsd(r.usage, PRICE).toFixed(4)} · raciocínio ${r.usage.thinkingTokens} tokens, saída ${r.usage.outputTokens} · ~${words} palavras · ${r.data.secoes.length} seções · ${r.data.perguntas.length} perguntas`);
   console.log(`  legislação comentada: ${v.guide.legislacao.map((l) => l.ref).join('; ') || '—'}${v.droppedRefs ? ` · ${v.droppedRefs} ref(s) removida(s) por não estarem nas fontes` : ''}`);
   console.log(`  citações não verificáveis no texto: ${v.unverified.join('; ') || 'nenhuma'}`);
   console.log(`  introdução: ${r.data.introducao.slice(0, 260)}`);
