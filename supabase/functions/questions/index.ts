@@ -12,6 +12,7 @@ import { DEEP_PREFIX, PRACTICE_PREFIX } from '../../../shared/ai/plan.ts';
 import { ownLaws } from '../_shared/legal.ts';
 import { prunedAssuntos, rejectedIds, RELEVANCE_PROMPT_VERSION, RelevanceVerdicts, relevanceJsonSchema, relevancePrompt } from '../../../shared/qbank/relevance.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
+import { isNextPart, partOf } from '../../../shared/domain/parts.ts';
 import { findLawRefs, inRanges, rangesOrFilter, storedLawRefs, type LawRef } from '../../../shared/legal/refs.ts';
 import { lawByKey } from '../../../shared/legal/registry.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
@@ -32,6 +33,8 @@ const RELEVANCE_ROUNDS = 3;
 const GENERATE_BEFORE_MS = 60_000, GENERATE_TIMEOUT_MS = 75_000;
 // Aquecimento: questões da sessão anterior no começo de uma sessão nova.
 const WARMUP_QUESTIONS = 3;
+// Parte seguinte de um tema: até 5 da parte anterior, nunca mais da metade das questões do dia.
+const PART_WARMUP_QUESTIONS = 5;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -324,15 +327,26 @@ Deno.serve(async (req) => {
     if (fresh && task.kind === 'theory' && sid) {
       if (deep && own?.source_session_id) result.push(...await replay(sid, Math.ceil(count / 2), false));
       else if (!deep && own && count >= 4) {
-        // A sessão concluída mais recente da matéria, antes desta na ordem do plano.
-        const { data: doneTasks } = await auth.client.from('tasks').select('session_id').eq('plan_id', task.plan_id).eq('subject_id', subject.id)
-          .eq('kind', 'theory').not('done_at', 'is', null).not('session_id', 'is', null).limit(500);
-        const doneIds = [...new Set((doneTasks ?? []).map((t) => t.session_id as string))];
-        const { data: prev } = doneIds.length
-          ? await auth.client.from('study_sessions').select('id').in('id', doneIds).lt('position', own.position).order('position', { ascending: false }).limit(1)
-          : { data: [] };
-        const prevId = (prev?.[0] as { id?: string } | undefined)?.id;
-        if (prevId) result.push(...await replay(prevId, WARMUP_QUESTIONS, true));
+        // Parte 2 em diante de um tema: recorda a parte anterior (a base do conteúdo de hoje), com mais questões.
+        const part = partOf(own.title);
+        let prevId: string | undefined;
+        if (part && part.part > 1) {
+          const { data: siblings } = await auth.client.from('study_sessions').select('id, title').eq('plan_version_id', own.plan_version_id)
+            .eq('subject_id', subject.id).lt('position', own.position).order('position', { ascending: false }).limit(20);
+          prevId = (siblings ?? []).find((s) => isNextPart(s.title as string, own.title))?.id as string | undefined;
+        }
+        if (!prevId) {
+          // A sessão concluída mais recente da matéria, antes desta na ordem do plano.
+          const { data: doneTasks } = await auth.client.from('tasks').select('session_id').eq('plan_id', task.plan_id).eq('subject_id', subject.id)
+            .eq('kind', 'theory').not('done_at', 'is', null).not('session_id', 'is', null).limit(500);
+          const doneIds = [...new Set((doneTasks ?? []).map((t) => t.session_id as string))];
+          const { data: prev } = doneIds.length
+            ? await auth.client.from('study_sessions').select('id').in('id', doneIds).lt('position', own.position).order('position', { ascending: false }).limit(1)
+            : { data: [] };
+          prevId = (prev?.[0] as { id?: string } | undefined)?.id;
+        }
+        const warm = part && part.part > 1 ? Math.min(PART_WARMUP_QUESTIONS, Math.floor(count / 2)) : WARMUP_QUESTIONS;
+        if (prevId) result.push(...await replay(prevId, warm, true));
       }
       for (const q of result) seen.add(q.qid);
     }

@@ -2,6 +2,7 @@
 // matéria) e a correção determinística das sessões, que garante contagem exata e cobertura de todos os tópicos.
 import { z } from 'zod';
 import { topicKeyword } from '../domain/scheduler.ts';
+import { isNextPart } from '../domain/parts.ts';
 import { citedArticleCount, mergeLawRefs, rangesLabel, type ArticleRange, type LawRef } from '../legal/refs.ts';
 
 // plan-v4: a IA devolve até n sessões, sem repetir assunto para completar; o app distribui os dias que sobram pelo
@@ -223,7 +224,12 @@ export function allocateSessions<T extends Session>(list: T[], sizes: (LawSize[]
     for (let d = 0; d < deep; d++) later.push({ at: out.length + DEEP_GAP * (d + 1) * (d + 1), x: { ...it.x, title: `${d ? PRACTICE_PREFIX : DEEP_PREFIX}${it.x.title}`.slice(0, 200), incidence: 3 } });
     if (deep) fixes.push(`aprofundamento de "${it.x.title}"`);
   }
-  for (const l of later.sort((a, b) => b.at - a.at)) out.splice(Math.min(l.at, out.length), 0, l.x);
+  // Aprofundamento nunca entra entre duas partes do mesmo tema: vai para depois da sequência.
+  for (const l of later.sort((a, b) => b.at - a.at)) {
+    let at = Math.min(l.at, out.length);
+    while (at > 0 && at < out.length && isNextPart(out[at - 1]!.title, out[at]!.title)) at++;
+    out.splice(at, 0, l.x);
+  }
   return { sessions: out, fixes };
 }
 

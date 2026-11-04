@@ -1,7 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { RotateCcw } from 'lucide-react';
 import { useState } from 'react';
-import { answerTheoryReview, useTaskTheoryReview, type ReviewResult } from '../lib/theoryReviews.ts';
+import { Link } from 'react-router-dom';
+import { answerTheoryReview, useTaskTheoryReview, useThemeParts, type ReviewResult } from '../lib/theoryReviews.ts';
 import { fmtDate } from './ui.tsx';
 
 const ANSWERS: { result: ReviewResult; label: string }[] = [
@@ -10,10 +11,12 @@ const ANSWERS: { result: ReviewResult; label: string }[] = [
   { result: 'esqueci', label: 'Esqueci' },
 ];
 
-// Modo estudo: aparece quando o tema da tarefa está na data de revisão.
-export function TheoryReviewCard({ taskId }: { taskId: string }) {
+// Modo estudo: aparece quando o tema da tarefa está na data de revisão. Tema em partes: a revisão é do tema inteiro,
+// com as outras partes à mão para reler.
+export function TheoryReviewCard({ taskId, sessionId }: { taskId: string; sessionId?: string | null }) {
   const qc = useQueryClient();
   const review = useTaskTheoryReview(taskId);
+  const parts = useThemeParts(sessionId, !!review.data);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [answered, setAnswered] = useState<{ next: string | null } | null>(null);
@@ -40,8 +43,13 @@ export function TheoryReviewCard({ taskId }: { taskId: string }) {
     <div className="glass card review-today">
       <RotateCcw size={20} style={{ color: 'var(--orange)' }} />
       <div style={{ flex: 1, minWidth: 220 }}>
-        <strong>Revisão {stage} de 3 deste tema</strong>
+        <strong>Revisão {stage} de 3 deste tema{parts.data?.length ? ' (todas as partes)' : ''}</strong>
         <div className="muted small">Tente lembrar antes de reler. Depois, veja a revisão curta, faça algumas questões e diga como foi.</div>
+        {!!parts.data?.length && (
+          <div className="muted small" style={{ marginTop: 4 }}>
+            Releia também: {parts.data.map((p, i) => <span key={p.taskId}>{i ? ', ' : ''}<Link to={`/estudo/${p.taskId}`}>parte {p.part}</Link></span>)}
+          </div>
+        )}
         {error && <p className="error" style={{ margin: '6px 0 0' }}>{error}</p>}
       </div>
       {ANSWERS.map((a) => <button key={a.result} className="btn ghost sm" disabled={busy} onClick={() => answer(id, a.result)}>{a.label}</button>)}

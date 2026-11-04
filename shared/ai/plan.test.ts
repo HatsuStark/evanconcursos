@@ -204,6 +204,15 @@ describe('dias distribuídos pelo conteúdo e pela cobrança', () => {
     const r = allocateSessions(list, [law(1, 4, 100), law(10, 12, 3000), null, null, null], 7, 75);
     expect(r.sessions.map((x) => x.title)).toEqual(['A: Normas da CGJ (arts. 1º a 4º)', 'B: Normas da CGJ (arts. 10 a 12)', 'C', 'D', 'E', 'Aprofundamento: B: Normas da CGJ (arts. 10 a 12)', 'Aprofundamento: C']);
   });
+  it('aprofundamento nunca fica entre duas partes do mesmo tema', () => {
+    const list = [s('A', 3), s('B'), s('C'), s('D: Normas da CGJ (arts. 10 a 13)', 1)];
+    const r = allocateSessions(list, [null, null, null, law(10, 13, 3000)], 7, 75);
+    const titles = r.sessions.map((x) => x.title);
+    const parts = titles.flatMap((t, i) => (t.startsWith('D (parte') ? [i] : []));
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts.at(-1)! - parts[0]!).toBe(parts.length - 1);
+    expect(titles.some((t) => t.startsWith('Aprofundamento: A'))).toBe(true);
+  });
   it('até 2 aprofundamentos por sessão; o 2º é revisão com questões, mais longe', () => {
     const r = allocateSessions([s('X', 3), s('Y', 1), s('Z', 1), s('W', 1), s('V', 1), s('U', 1), s('T', 1)], [null, null, null, null, null, null, null], 9, 75);
     expect(r.sessions.filter((x) => x.title.endsWith('X')).map((x) => x.title)).toEqual(['X', 'Aprofundamento: X', 'Revisão com questões: X']);

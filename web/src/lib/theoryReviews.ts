@@ -1,6 +1,7 @@
 // Revisão de teoria: temas estudados que voltam em 1, 7 e 30 dias. As regras ficam no banco (theory_review_answer).
 import { useQuery } from '@tanstack/react-query';
 import { ymd } from '../../../shared/domain/dates.ts';
+import { partOf } from '../../../shared/domain/parts.ts';
 import { supabase } from './supabase.ts';
 
 export type ReviewResult = 'lembrei' | 'parcial' | 'esqueci';
@@ -37,3 +38,26 @@ export async function answerTheoryReview(id: string, result: ReviewResult) {
   if (error) throw new Error(error.message);
   return data as string | null;
 }
+
+// Tema em partes: na revisão da última parte (que conta o tema inteiro), as outras partes, para reler também. Nas outras
+// partes (revisão adiada de quem não chegou à última), nada.
+export const useThemeParts = (sessionId: string | null | undefined, enabled: boolean) => useQuery({
+  queryKey: ['theme-parts', sessionId],
+  enabled: enabled && !!sessionId,
+  staleTime: 5 * 60_000,
+  queryFn: async () => {
+    const { data: own, error } = await supabase.from('study_sessions').select('plan_version_id, subject_id, title').eq('id', sessionId!).maybeSingle();
+    if (error) throw new Error(error.message);
+    const me = own ? partOf(own.title as string) : null;
+    if (!own || !me || me.part !== me.parts) return [];
+    const { data: list } = await supabase.from('study_sessions').select('id, title').eq('plan_version_id', own.plan_version_id).eq('subject_id', own.subject_id).limit(1000);
+    const parts = (list ?? []).map((s) => ({ id: s.id as string, title: s.title as string, p: partOf(s.title as string) }))
+      .filter((s) => s.id !== sessionId && s.p && s.p.head === me.head && s.p.parts === me.parts);
+    if (!parts.length) return [];
+    const { data: tasks } = await supabase.from('tasks').select('id, session_id').eq('kind', 'theory').is('superseded_in_version', null).in('session_id', parts.map((s) => s.id));
+    return parts.flatMap((s) => {
+      const t = (tasks ?? []).find((x) => x.session_id === s.id);
+      return t ? [{ taskId: t.id as string, title: s.title, part: s.p!.part }] : [];
+    }).sort((a, b) => a.part - b.part);
+  },
+});

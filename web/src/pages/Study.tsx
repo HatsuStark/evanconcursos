@@ -181,7 +181,7 @@ function StudyView({ d }: { d: StudyData }) {
 
       {d.task.kind === 'simulado' ? <SimuladoStarter planId={d.task.plan_id} taskId={d.task.id} /> : (
         <>
-          <TheoryReviewCard taskId={d.task.id} />
+          <TheoryReviewCard taskId={d.task.id} sessionId={d.task.session_id} />
           {!focus && tabBar}
           {videosOpened && (
             <div hidden={tab !== 'videos'}>

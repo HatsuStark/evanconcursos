@@ -9,7 +9,9 @@
 // - Lei seca diária em concurso de legislação: releitura dos artigos das sessões estudadas (no dia seguinte e uma semana depois).
 // - Semana leve a cada 5 e dia curto (menos de 1 h) só com questões e revisão.
 // - Revisão semanal num bloco de até 1h30 no último dia de estudo da semana; simulado no maior dia.
+// - Partes de um mesmo tema perto uma da outra (até 2 ou 3 dias de estudo), nunca no mesmo dia.
 import { parseYmd, ymd } from './dates.ts';
+import { isNextPart } from './parts.ts';
 
 export const LEVELS = ['Iniciante', 'Básico', 'Intermediário', 'Avançado'] as const;
 export const DEFAULT_HOURS = [2, 2, 2, 2, 2, 3, 2];
@@ -160,6 +162,50 @@ export function interleave(counts: number[]): number[] {
   return seq;
 }
 
+// Partes de um tema: a seguinte entra até PART_GAP dias de estudo depois da anterior (sem vaga, até PART_MAX_GAP), nunca
+// no mesmo dia. Espaçar ajuda a revisar, não a aprender: a parte 2 continua o raciocínio da 1. O bloco da parte troca de
+// lugar com o de outra matéria nesses dias; a ordem das sessões de cada matéria e o total de blocos não mudam, e a outra
+// matéria só cede bloco que não seja de outra sequência de partes.
+// day: dia de estudo de cada bloco de teoria; groups: blocos de cada dia; assign: matéria de cada bloco; texts: sessões
+// de cada matéria, na ordem.
+export const PART_GAP = 2, PART_MAX_GAP = 3;
+// A parte i continua aceitável depois da troca: em dia diferente da anterior e até PART_MAX_GAP dias (ou não mais longe
+// do que já estava).
+const linkOk = (day: number[], before: number[], after: number[], i: number) => {
+  const gap = (l: number[]) => day[l[i]!]! - day[l[i - 1]!]!;
+  return gap(after) >= 1 && gap(after) <= Math.max(PART_MAX_GAP, gap(before));
+};
+export function keepPartsClose(day: number[], groups: number[][], assign: number[], texts: string[][]) {
+  const follows = texts.map((q) => q.map((t, j) => j > 0 && isNextPart(q[j - 1]!, t)));
+  if (!follows.some((f) => f.some(Boolean))) return;
+  const groupOf: number[] = [];
+  groups.forEach((g, gi) => { for (const k of g) groupOf[k] = gi; });
+  const blocksOf = (si: number) => assign.flatMap((s, k) => (s === si ? [k] : []));
+  follows.forEach((f, si) => f.forEach((isPart, j) => {
+    if (!isPart) return;
+    const ks = blocksOf(si), prev = ks[j - 1], cur = ks[j];
+    if (prev === undefined || cur === undefined) return;
+    const d0 = day[prev]!, gap = day[cur]! - d0;
+    if (gap >= 1 && gap <= PART_GAP) return;
+    for (const limit of [PART_GAP, PART_MAX_GAP]) {
+      if (gap >= 1 && gap <= limit) return;
+      for (let y = prev + 1; y < cur; y++) {
+        const sj = assign[y]!, dy = day[y]!;
+        if (dy <= d0 || dy > d0 + limit || sj === si) continue;
+        // O dia que recebe a parte não pode ter a matéria; o dia que recebe o bloco da outra, também não.
+        if (groups[groupOf[y]!]!.some((k) => k !== y && assign[k] === si)) continue;
+        if (groups[groupOf[cur]!]!.some((k) => k !== cur && assign[k] === sj)) continue;
+        // As sessões da outra matéria entre y e cur andam um bloco: nenhuma parte dela pode ficar longe da anterior.
+        const before = blocksOf(sj);
+        [assign[y], assign[cur]] = [si, sj];
+        const after = blocksOf(sj);
+        if (follows[sj]!.every((p, i) => !p || linkOk(day, before, after, i))) return;
+        [assign[y], assign[cur]] = [sj, si];
+      }
+    }
+  }));
+}
+
 interface TaskText { text: string; keyword: string; item: number }
 
 // Transforma n blocos de uma matéria em tarefas a partir dos tópicos (agrupa ou divide em partes).
@@ -300,6 +346,7 @@ export function generateSchedule(input: ScheduleInput, rawConfig: unknown): Sche
     for (const x of g) if (subjectsOf(g).filter((si) => si === assign[x]).length > 1) swapAhead(gi, x, (m, t) => distinct(m) && distinct(t));
     if (!mixed(subjectsOf(g))) for (const x of g) if (swapAhead(gi, x, (m, t, before) => distinct(m) && distinct(t) && mixed(m) && (mixed(t) || !mixed(before)))) break;
   });
+  keepPartsClose(theoryBlocks.map((b) => b.day), groups, assign, queues.map((q) => q.map((t) => t.text)));
   // Fase do bloco para a meta de questões: posição entre os dias de estudo antes da reta final.
   const theoryDays = Math.max(1, study.filter((s) => !s.final).length);
   const out = new Map<Pending, Block>(), usedIn = new Map<Slot, number[]>(), phaseOf = new Map<Block, number>();

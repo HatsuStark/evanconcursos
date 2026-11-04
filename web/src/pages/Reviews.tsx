@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { wholeThemeTitle } from '../../../shared/domain/parts.ts';
 import { groupReviews } from '../../../shared/domain/theory-reviews.ts';
 import { Shell } from '../components/Shell.tsx';
 import { fmtDate } from '../components/ui.tsx';
@@ -18,7 +19,7 @@ function Group({ title, rows, nameOf, line, action }: {
         {rows.map((r) => (
           <div key={r.id} className="material-row">
             <div style={{ flex: 1, minWidth: 200 }}>
-              <div>{r.task.title}</div>
+              <div>{wholeThemeTitle(r.task.title)}</div>
               <div className="muted small">{[nameOf(r.task.subject_id), line(r)].filter(Boolean).join(' · ')}</div>
             </div>
             {action && <Link className="btn ghost sm" to={`/estudo/${r.task_id}${action === 'Revisar' ? '?revisao=1' : ''}`}>{action}</Link>}
