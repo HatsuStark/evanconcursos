@@ -5,12 +5,13 @@ import { roleContext } from './plan.ts';
 import { findLawRefs, inRanges, type LawRef } from '../legal/refs.ts';
 import { lawByKey, type LawEntry } from '../legal/registry.ts';
 
-export const GUIDE_PROMPT_VERSION = 'guide-v4';
+// v5 (e review-v2, deep-v2): linguagem de professor explicando em aula, com todo termo técnico traduzido.
+export const GUIDE_PROMPT_VERSION = 'guide-v5';
 // Revisão curta com versão própria: folha de memorização (mapa mental, mnemônicos, gatilhos), sem texto corrido nem
 // questões. Mudar só a revisão não refaz as apostilas completas.
-export const REVIEW_PROMPT_VERSION = 'review-v1';
+export const REVIEW_PROMPT_VERSION = 'review-v2';
 // Aprofundamento: para quem já estudou o tema; mesmo formato da completa, sem repetir o básico.
-export const DEEP_PROMPT_VERSION = 'deep-v1';
+export const DEEP_PROMPT_VERSION = 'deep-v2';
 export const guideVersion = (depth: GuideDepth) => (depth === 'revisao' ? REVIEW_PROMPT_VERSION : depth === 'aprofundamento' ? DEEP_PROMPT_VERSION : GUIDE_PROMPT_VERSION);
 export type GuideDepth = 'completa' | 'revisao' | 'aprofundamento';
 
@@ -126,6 +127,17 @@ const DEEP_RULES = `- Aprofundamento: o aluno já estudou o tema e resolveu ques
 - questoes: 5, de dificuldade difícil, cada uma cobrando uma exceção, distinção ou caso prático diferente; distratores que trocam um único detalhe do texto da lei.
 - perguntas: 4 a 6, de recordação ativa sobre as exceções e distinções.
 - objetivos e esquema: curtos. mnemonicos e gatilhos: vazios.`;
+// Tom de professor explicando em aula, para quem nunca estudou o assunto. O termo técnico fica (a prova usa), mas
+// sempre traduzido. Na revisão curta, os itens continuam de uma linha.
+const VOICE_RULES = `Linguagem (obrigatório):
+- Escreva como um professor explicando em aula para um aluno que nunca estudou o assunto: fale com o aluno ("você"), em tom próximo e encorajador, como numa conversa, sem gíria.
+- Explique primeiro a ideia com palavras do dia a dia e só depois dê o nome técnico. Todo termo técnico, na primeira vez que aparece, vem com o significado em palavras simples (ex.: "citação, que é o ato de avisar oficialmente a pessoa de que existe um processo contra ela"). Mantenha os termos técnicos, porque a prova usa, mas nunca sem tradução.
+- Ao comentar um artigo, diga primeiro o que ele quer dizer, como quem traduz para o aluno ("Na prática, o artigo diz que…"), e depois o detalhe que cai na prova.
+- Use exemplos concretos, com pessoas e situações do dia a dia ou da rotina do cargo ("Imagine que o oficial de justiça chega à casa de Maria…").
+- Frases curtas e na ordem direta (quem faz o quê), um assunto por parágrafo. Nada de juridiquês ou palavra rebuscada ("outrossim", "destarte", "consoante", "ex vi", "mister", "hodiernamente") nem latim sem tradução.
+- Antecipe a dúvida do aluno e responda ("E se a pessoa não estiver em casa? Aí…"), e ligue as partes ("Agora que você entendeu a regra, vamos às exceções").
+- Simplificar a linguagem nunca muda o conteúdo: prazos, números, sujeitos e exceções continuam exatos, como no texto da lei.`;
+const REVIEW_VOICE = `Linguagem (obrigatório): cada item continua curto, de uma linha, mas em palavras simples, como o professor resumiria no quadro. Termo técnico vem com o significado em poucas palavras quando não for óbvio (ex.: "citação = aviso oficial do processo"). Nada de juridiquês. Prazos, números e exceções exatos, como na lei.`;
 const L = REVIEW_LIMITS;
 const REVIEW_RULES = `- Revisão curta: nada de texto corrido nem questões de fixação. Cada item cabe numa linha. Não repita a mesma informação em campos diferentes.
 - introducao: 1 frase. objetivos, secoes e questoes: vazios.
@@ -155,13 +167,14 @@ Regras obrigatórias:
 - Não cite jurisprudência, súmulas, autores ou posições doutrinárias. Não invente leis, prazos ou números.
 - Siga o texto da lei fornecido; ele é a versão vigente.
 ${deep ? DEEP_RULES : full ? FULL_RULES : REVIEW_RULES}
+${full ? VOICE_RULES : REVIEW_VOICE}
 - quadros: compare só o que a banca costuma confundir (espécies, prazos, requisitos, diferenças entre institutos). Sem quadro se o tema não tiver o que comparar.
 - memorizar: só números, prazos, quóruns e listas que estejam nos trechos de lei ou no conteúdo do edital, nunca de memória. Vazio se não houver.
 ${full ? `- questoes: inéditas, ${ce ? 'no formato certo ou errado (alternativas vazias; gabarito "C" ou "E")' : 'de múltipla escolha com 5 alternativas (gabarito A a E)'}, no estilo ${board.length ? 'das questões reais fornecidas' : `da ${p.banca || 'banca'}`}, cobrando o que a apostila ensinou. Uma única resposta correta, sem ambiguidade; o comentário explica o gabarito pela apostila ou pelo artigo fornecido.` : ''}
 - legislacao: comente os artigos fornecidos mais importantes para a prova (ref exatamente como no colchete).
 - pontos_banca e pegadinhas: o que costuma cair e as confusões comuns${p.banca ? ` da ${p.banca}` : ''}.
 - ${!full ? 'secoes: vazio.' : board.length ? 'secoes[].como_banca_cobra: diga como as questões fornecidas abordam o assunto da seção (letra da lei, caso prático, conceito, exceção, tipo de distrator). Só o que se observa nelas: sem percentuais, sem "sempre" ou "nunca", sem copiar enunciados. Deixe vazio na seção que nenhuma questão trata. As questões são só amostra de estilo, nunca fonte do conteúdo.' : 'secoes[].como_banca_cobra: deixe vazio em todas as seções.'}
-- Linguagem clara, frases curtas, sem markdown.`;
+- Sem markdown.`;
 }
 
 // Fontes legais da sessão: as leis citadas (com artigos) e os trechos carregados do banco.
