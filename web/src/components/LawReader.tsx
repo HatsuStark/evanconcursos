@@ -1,34 +1,38 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, Highlighter, Search, StickyNote } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import type { UnlistedNorm } from '../../../shared/legal/norms.ts';
 import type { LawRef } from '../../../shared/legal/refs.ts';
-import { LAWS, lawByKey } from '../../../shared/legal/registry.ts';
+import { LAWS, lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
 import { rangesLabel, saveMark, useLawArticles, useMarks, type Article, type Mark } from '../lib/legal.ts';
+import { LawUpload } from './LawUpload.tsx';
 
 const COLORS = ['yellow', 'green', 'pink', 'blue'] as const;
 
 // Leitor de lei seca: os artigos da sessão (ou a lei inteira com busca), com marca-texto e anotações.
-export function LawReader({ refs }: { refs: LawRef[] }) {
+// own: normas enviadas pelo estudante; missing: as citadas na sessão que o app não tem (pede o PDF).
+export function LawReader({ refs, own = [], missing = [] }: { refs: LawRef[]; own?: LawEntry[]; missing?: UnlistedNorm[] }) {
   const [extra, setExtra] = useState<LawRef | null>(null);
   const all = extra ? [...refs, extra] : refs;
   return (
     <div className="grid" style={{ gap: 18 }}>
-      {!refs.length && <div className="glass card muted">Esta sessão não cita lei. Se quiser, abra uma lei abaixo.</div>}
-      {all.map((r, i) => <LawBlock key={`${r.law}-${i}`} lawRef={r} />)}
+      {!refs.length && !missing.length && <div className="glass card muted">Esta sessão não cita lei. Se quiser, abra uma lei abaixo.</div>}
+      {missing.map((n) => <LawUpload key={n.key} norm={n} />)}
+      {all.map((r, i) => <LawBlock key={`${r.law}-${i}`} lawRef={r} own={own} />)}
       <div className="glass card" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <span className="muted small">Abrir outra lei:</span>
         <select className="select" style={{ maxWidth: 360 }} value="" onChange={(e) => e.target.value && setExtra({ law: e.target.value, ranges: [] })}>
           <option value="">Escolha…</option>
-          {LAWS.map((l) => <option key={l.key} value={l.key}>{l.short} · {l.name}</option>)}
+          {[...LAWS, ...own].map((l) => <option key={l.key} value={l.key}>{l.short} · {l.name}</option>)}
         </select>
       </div>
     </div>
   );
 }
 
-function LawBlock({ lawRef }: { lawRef: LawRef }) {
-  const law = lawByKey(lawRef.law)!;
-  const q = useLawArticles(lawRef);
+function LawBlock({ lawRef, own }: { lawRef: LawRef; own: LawEntry[] }) {
+  const law = lawByKey(lawRef.law, own) ?? { key: lawRef.law, short: lawRef.law, name: lawRef.law, urn: '', match: /$^/ };
+  const q = useLawArticles(lawRef, own);
   const [search, setSearch] = useState('');
   const articles = useMemo(() => {
     const list = q.data?.articles ?? [];
@@ -58,10 +62,15 @@ function LawBlock({ lawRef }: { lawRef: LawRef }) {
         ))}
       </div>
       {!lawRef.ranges.length && !search && (q.data?.articles.length ?? 0) > 40 && <p className="faint small">Mostrando os 40 primeiros artigos. Use a busca para ir a um artigo.</p>}
-      {q.data && (
+      {q.data?.norm.owner_id && (
+        <footer className="faint small law-credit">Fonte: PDF enviado por você em {new Date(q.data.norm.fetched_at).toLocaleDateString('pt-BR')}. Confira no texto oficial se houver dúvida.</footer>
+      )}
+      {q.data && !q.data.norm.owner_id && (
         <footer className="faint small law-credit">
-          Fonte: <a href={q.data.norm.source_url} target="_blank" rel="noopener noreferrer">normas.leg.br <ExternalLink size={11} /></a> (Congresso Nacional), licença CC BY 4.0 · atualizado em {new Date(q.data.norm.fetched_at).toLocaleDateString('pt-BR')}.
-          Texto para estudo; o oficial é o publicado no Diário Oficial da União.
+          {law.pdf
+            ? <>Fonte: <a href={law.page ?? q.data.norm.source_url} target="_blank" rel="noopener noreferrer">texto oficial publicado pelo órgão <ExternalLink size={11} /></a> · lido em {new Date(q.data.norm.fetched_at).toLocaleDateString('pt-BR')}. Texto para estudo; vale o publicado no Diário Oficial.</>
+            : <>Fonte: <a href={q.data.norm.source_url} target="_blank" rel="noopener noreferrer">normas.leg.br <ExternalLink size={11} /></a> (Congresso Nacional), licença CC BY 4.0 · atualizado em {new Date(q.data.norm.fetched_at).toLocaleDateString('pt-BR')}.
+              Texto para estudo; o oficial é o publicado no Diário Oficial da União.</>}
         </footer>
       )}
     </section>

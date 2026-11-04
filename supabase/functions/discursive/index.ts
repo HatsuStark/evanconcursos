@@ -25,7 +25,7 @@ async function start(auth: Auth, admin: Admin, model: string, body: Record<strin
   const scale = itemScale(rules), base = { notice_id: notice.id, owner_id: auth.user.id, format: rules.format, max_points: scale.max };
 
   let subject: { id: string; name: string } | null = null, session: { id: string; title: string; topic_ids: string[] } | null = null;
-  let topics: string[] = [], law: { ref: string; text: string }[] = [], articles: Awaited<ReturnType<typeof loadLawSources>>['articles'] = [];
+  let topics: string[] = [], law: { ref: string; text: string }[] = [], articles: Awaited<ReturnType<typeof loadLawSources>>['articles'] = [], extra: Awaited<ReturnType<typeof loadLawSources>>['extra'] = [];
 
   if (rules.format === 'questao') {
     const { data: plan } = await auth.client.from('study_plans').select('id, active_version_id').eq('notice_id', notice.id).eq('status', 'active').order('created_at', { ascending: false }).limit(1).maybeSingle();
@@ -45,7 +45,7 @@ async function start(auth: Auth, admin: Admin, model: string, body: Record<strin
     subject = (subs ?? []).find((s) => s.id === picked.subject_id) ?? null;
     const { data: tt } = picked.topic_ids.length ? await auth.client.from('notice_topics').select('id, text').in('id', picked.topic_ids) : { data: [] };
     topics = (tt ?? []).map((t) => t.text);
-    ({ law, articles } = await loadLawSources(admin, { title: picked.title, topics, subject: subject?.name ?? '' }));
+    ({ law, articles, extra } = await loadLawSources(admin, { title: picked.title, topics, subject: subject?.name ?? '', ownerId: auth.user.id }));
   }
 
   const input = { format: rules.format, banca: notice.board ?? '', subject: subject?.name ?? '', topics, law };
@@ -62,7 +62,7 @@ async function start(auth: Auth, admin: Admin, model: string, body: Record<strin
     try {
       const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: DiscursivePrompt, jsonSchema: discursivePromptJsonSchema(), temperature: 0.6,
         parts: [{ text: discursivePromptText({ ...input, cargo: notice.role_name ?? '', title: session?.title ?? '', avoid: (existing ?? []).map((p) => p.title) }) }] });
-      const v = verifyPrompt(r.data, articles, subject?.name ?? '');
+      const v = verifyPrompt(r.data, articles, subject?.name ?? '', extra);
       const { data: saved, error } = await admin.from('discursive_prompts').insert({
         cache_key: key, format: rules.format, banca: input.banca, subject_name: input.subject, title: v.prompt.titulo.slice(0, 200), content: v.prompt,
         sources: law.map((l) => l.ref), unverified: v.unverified, model, prompt_version: DISCURSIVE_PROMPT_VERSION,
@@ -104,16 +104,16 @@ async function grade(auth: Auth, admin: Admin, model: string, answerId: string) 
   try {
     const { data: promptRow } = await admin.from('discursive_prompts').select('content, banca, unverified').eq('id', answer.prompt_id).single();
     const prompt = promptRow!.content as DiscursivePrompt;
-    let articles: Awaited<ReturnType<typeof loadLawSources>>['articles'] = [], law: { ref: string; text: string }[] = [];
+    let articles: Awaited<ReturnType<typeof loadLawSources>>['articles'] = [], law: { ref: string; text: string }[] = [], extra: Awaited<ReturnType<typeof loadLawSources>>['extra'] = [];
     if (answer.session_id) {
       const { data: s } = await auth.client.from('study_sessions').select('title, topic_ids').eq('id', answer.session_id).maybeSingle();
       const { data: tt } = s?.topic_ids?.length ? await auth.client.from('notice_topics').select('text').in('id', s.topic_ids) : { data: [] };
-      if (s) ({ articles, law } = await loadLawSources(admin, { title: s.title, topics: (tt ?? []).map((t) => t.text), subject: answer.subject_name }));
+      if (s) ({ articles, law, extra } = await loadLawSources(admin, { title: s.title, topics: (tt ?? []).map((t) => t.text), subject: answer.subject_name, ownerId: auth.user.id }));
     }
     const statement = [answer.statement, ...answer.support_texts].join('\n\n');
     const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: DiscursiveGrade, jsonSchema: discursiveGradeJsonSchema(), temperature: 0.1,
       parts: [{ text: gradePromptText({ format: answer.format, banca: promptRow!.banca, statement, prompt, law, body: answer.body }) }] });
-    const scored = scoreGrade(r.data, { format: answer.format, prompt, body: answer.body, maxPoints: Number(answer.max_points) || 10, law: articles, subject: answer.subject_name });
+    const scored = scoreGrade(r.data, { format: answer.format, prompt, body: answer.body, maxPoints: Number(answer.max_points) || 10, law: articles, subject: answer.subject_name, extra });
     // Citações sem fonte da resposta modelo também entram no aviso da tela.
     const report = { ...scored.report, unverified: [...new Set([...scored.report.unverified, ...promptRow!.unverified])] };
     const { error } = await admin.from('discursive_answers').update({ status: 'graded', points: scored.points, pct: scored.pct, report, graded_at: new Date().toISOString() }).eq('id', answer.id);

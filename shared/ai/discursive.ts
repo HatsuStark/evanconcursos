@@ -1,7 +1,7 @@
 // Discursivas: regras lidas do edital, enunciado e correção pela IA, nota calculada no código e verificações.
 // A IA avalia cada ponto; a nota sai de uma conta fixa, e trechos e artigos citados são conferidos depois.
 import { z } from 'zod';
-import { lawByKey } from '../legal/registry.ts';
+import { lawByKey, type LawEntry } from '../legal/registry.ts';
 import { unverifiedLawRefs, type ProvidedArticle } from './guide.ts';
 import { normalizeText } from './notice.ts';
 
@@ -100,14 +100,14 @@ Regras obrigatórias:
 - Linguagem clara, sem markdown.`;
 }
 
-export const provided = (law: { lawKey: string; label: string }[]) => law.map((a) => `${lawByKey(a.lawKey)?.short ?? a.lawKey}, art. ${a.label}`.toLowerCase());
+export const provided = (law: { lawKey: string; label: string }[], extra: LawEntry[] = []) => law.map((a) => `${lawByKey(a.lawKey, extra)?.short ?? a.lawKey}, art. ${a.label}`.toLowerCase());
 
 // Tira do espelho os fundamentos que não são fontes fornecidas e aponta artigos citados sem fonte.
-export function verifyPrompt(p: DiscursivePrompt, law: ProvidedArticle[], subject = '') {
-  const refs = new Set(provided(law));
+export function verifyPrompt(p: DiscursivePrompt, law: ProvidedArticle[], subject = '', extra: LawEntry[] = []) {
+  const refs = new Set(provided(law, extra));
   const espelho = p.espelho.map((e) => ({ ...e, peso: Math.min(5, Math.max(1, e.peso)), fundamento: e.fundamento.filter((f) => refs.has(f.trim().toLowerCase())) }));
   const text = [p.enunciado, ...p.textos_apoio, ...p.espelho.map((e) => e.ponto), p.resposta_modelo].join('\n');
-  return { prompt: { ...p, espelho, linhas: Math.min(40, Math.max(5, p.linhas)) }, unverified: unverifiedLawRefs(text, law, subject) };
+  return { prompt: { ...p, espelho, linhas: Math.min(40, Math.max(5, p.linhas)) }, unverified: unverifiedLawRefs(text, law, subject, extra) };
 }
 
 // ---------- correção ----------
@@ -171,7 +171,7 @@ export const countWords = (s: string) => s.trim().split(/\s+/).filter(Boolean).l
 
 // Nota calculada e correção conferida. Ponto que a IA não avaliou conta como ausente; trecho que não
 // está na resposta do candidato é descartado; fora do tema zera a nota.
-export function scoreGrade(g: DiscursiveGrade, p: { format: DiscursiveFormat; prompt: DiscursivePrompt; body: string; maxPoints: number; law: ProvidedArticle[]; subject?: string }) {
+export function scoreGrade(g: DiscursiveGrade, p: { format: DiscursiveFormat; prompt: DiscursivePrompt; body: string; maxPoints: number; law: ProvidedArticle[]; subject?: string; extra?: LawEntry[] }) {
   const body = squeeze(p.body);
   const pontos = p.prompt.espelho.map((e, i) => {
     const found = g.pontos.find((x) => x.indice === i);
@@ -195,7 +195,7 @@ export function scoreGrade(g: DiscursiveGrade, p: { format: DiscursiveFormat; pr
         linguagem: { pct: Math.round(linguagem * 100), peso: w.linguagem, comentario: g.linguagem.comentario },
       },
       pontos, trechos, pontos_fortes: g.pontos_fortes, prioridade: g.prioridade,
-      unverified: unverifiedLawRefs(text, p.law, p.subject ?? ''),
+      unverified: unverifiedLawRefs(text, p.law, p.subject ?? '', p.extra ?? []),
       resposta_modelo: p.prompt.resposta_modelo,
     },
   };

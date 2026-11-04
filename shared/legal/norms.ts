@@ -1,0 +1,58 @@
+// Normas citadas em textos de edital ou de sessão que não estão no registro (ex.: "Resolução n.º 354/2020 do Conselho
+// Nacional de Justiça", "Lei n.º 11.608, de 29/12/2003", "LC 1.111/2010"). Sem o texto oficial, o app não mostra a lei
+// seca nem dá artigos à IA: o estudante pode enviar o PDF, e a norma enviada vira uma entrada de registro só dele.
+import { LAWS, type LawEntry } from './registry.ts';
+
+export interface UnlistedNorm { key: string; citation: string; pattern: string }
+
+const KINDS: { slug: string; re: string; name: string }[] = [
+  { slug: 'lc', re: String.raw`Lei\s+Complementar|\bLC\b`, name: 'Lei Complementar' },
+  { slug: 'dl', re: String.raw`Decreto-Lei`, name: 'Decreto-Lei' },
+  { slug: 'lei', re: String.raw`\bLei\b`, name: 'Lei' },
+  { slug: 'dec', re: String.raw`\bDecreto\b`, name: 'Decreto' },
+  { slug: 'res', re: String.raw`Resolu[çc][ãa]o|\bRes\.`, name: 'Resolução' },
+  { slug: 'prov', re: String.raw`Provimento|\bProv\.`, name: 'Provimento' },
+  { slug: 'port', re: String.raw`Portaria`, name: 'Portaria' },
+  { slug: 'in', re: String.raw`Instru[çc][ãa]o\s+Normativa`, name: 'Instrução Normativa' },
+  { slug: 'ec', re: String.raw`Emenda\s+Constitucional`, name: 'Emenda Constitucional' },
+];
+// Tipo, qualificadores ("Estadual", "CNJ", "n.º"), número com ou sem ponto, ano ("/2020" ou ", de 29/12/2003") e o
+// órgão logo depois ("do Conselho Nacional de Justiça"), que só entra na citação mostrada ao estudante.
+const CITATION = new RegExp(String.raw`(${KINDS.map((k) => k.re).join('|')})((?:\s+(?:Estadual|Federal|Municipal|Conjunta|CNJ|CSM|CG|CGJ|GP))*)\s*(?:n\.?\s*[º°o]?\.?\s*)?(\d{1,3}(?:\.\d{3})+|\d{1,6})(?:\s*\/\s*(\d{2,4})|,?\s+de\s+\d{1,2}[./]\d{1,2}[./](\d{4})|,?\s+de\s+\d{1,2}\s+de\s+[a-zç]+\s+de\s+(\d{4}))?((?:\s+d[oa]\s+(?:[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÀ-ú]*|de|da|do|e)(?:\s+(?:[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÀ-ú]*|de|da|do|e))*))?`, 'g');
+
+const kindOf = (s: string) => KINDS.find((k) => new RegExp(`^(?:${k.re})$`, 'i').test(s.trim()))!;
+const year4 = (y?: string) => (!y ? '' : y.length === 2 ? (Number(y) > 50 ? '19' : '20') + y : y);
+
+export function unlistedNorms(text: string, extra: LawEntry[] = []): UnlistedNorm[] {
+  const out = new Map<string, UnlistedNorm>();
+  const known = [...LAWS, ...extra];
+  for (const m of text.matchAll(CITATION)) {
+    const kind = kindOf(m[1]!);
+    if (!kind) continue;
+    const num = m[3]!.replace(/\./g, ''), year = year4(m[4] ?? m[5] ?? m[6]);
+    if (known.some((l) => new RegExp(l.match.source, 'i').test(m[0]))) continue;
+    // Número curto sem ano costuma ser outra coisa ("Lei 1", "Res. 2" de uma lista): só com ano ou com 3+ dígitos.
+    if (!year && num.length < 3) continue;
+    const key = `${kind.slug}-${num}${year ? '-' + year : ''}`;
+    const numRe = num.length > 3 ? `${num.slice(0, -3)}\\.?${num.slice(-3)}` : num;
+    const pattern = String.raw`(?:${kind.re})[^\d\n]{0,40}?${numRe}\b`;
+    const org = (m[7] ?? '').trim();
+    const citation = `${kind.name} ${num.length > 3 ? Number(num).toLocaleString('pt-BR').replace(/\s/g, '.') : num}${year ? '/' + year : ''}${org ? ' ' + org : ''}`;
+    // A mesma norma citada com e sem ano: fica a com ano (chave mais específica).
+    const twin = [...out.values()].find((u) => u.pattern === pattern);
+    if (twin && (twin.key.split('-').length >= key.split('-').length)) continue;
+    if (twin) out.delete(twin.key);
+    out.set(key, { key, citation: citation.slice(0, 160), pattern });
+  }
+  return [...out.values()];
+}
+
+// Norma enviada pelo estudante (linha de legal_norms com owner_id) como entrada de registro.
+export interface OwnNormRow { law_key: string; short_name: string; name: string; urn: string; match_pattern: string | null }
+export function ownLawEntry(r: OwnNormRow): LawEntry | null {
+  if (!r.match_pattern) return null;
+  try { return { key: r.law_key, short: r.short_name, name: r.name, urn: r.urn, match: new RegExp(r.match_pattern, 'i') }; } catch { return null; }
+}
+export const uploadUrn = (ownerId: string, key: string) => `upload:${ownerId}:${key}`;
+// Nome curto para citar ("Resolução 354/2020"), sem o órgão.
+export const shortCitation = (citation: string) => citation.replace(/\s+d[oa]\s+.*$/, '');

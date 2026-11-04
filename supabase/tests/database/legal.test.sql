@@ -31,6 +31,22 @@ delete from public.legal_marks;
 select pg_temp.as_user('00000000-0000-4000-8000-0000000000a2');
 select is((select note from public.legal_marks), 'cai muito', 'delete de B não afetou A');
 
+-- Norma enviada por A (PDF): só A lê e só A apaga; B não apaga a lei compartilhada.
+reset role;
+insert into public.legal_norms (id, urn, law_key, name, source_url, content_url, version, owner_id, match_pattern)
+values ('30000000-0000-4000-8000-000000000002', 'upload:a:res-354-2020', 'res-354-2020', 'Resolução 354/2020', 'leis/a/res.pdf', 'leis/a/res.pdf', 'Current', '00000000-0000-4000-8000-0000000000a2', 'Resolu[çc][ãa]o[^\d]{0,40}?354\b');
+insert into public.legal_articles (id, norm_id, ord, label, num, text)
+values ('31000000-0000-4000-8000-000000000002', '30000000-0000-4000-8000-000000000002', 0, '8', 8, 'Art. 8º Texto da resolução.');
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000b2');
+select is((select count(*) from public.legal_norms where id = '30000000-0000-4000-8000-000000000002'), 0::bigint, 'B não vê a norma enviada por A');
+select is((select count(*) from public.legal_articles where norm_id = '30000000-0000-4000-8000-000000000002'), 0::bigint, 'B não lê os artigos dela');
+delete from public.legal_norms;
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000a2');
+select is((select count(*) from public.legal_norms), 2::bigint, 'delete de B não apagou nada');
+select is((select count(*) from public.legal_articles where norm_id = '30000000-0000-4000-8000-000000000002'), 1::bigint, 'A lê os artigos da norma que enviou');
+delete from public.legal_norms;
+select is((select count(*) from public.legal_norms), 1::bigint, 'A apaga só a norma que enviou');
+
 -- Apostilas: compartilhadas (leitura), gravadas só pelo backend.
 reset role;
 insert into public.study_guides (cache_key, depth, subject_name, title, content, model, prompt_version) values ('k1', 'completa', 'Penal', 'Peculato', '{}', 'm', 'v');

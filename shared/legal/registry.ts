@@ -5,11 +5,11 @@ export interface LawEntry { key: string; short: string; name: string; urn: strin
 
 export const LAWS: LawEntry[] = [
   { key: 'CF', short: 'CF', name: 'Constituição Federal', urn: 'urn:lex:br:federal:constituicao:1988-10-05;1988', match: /\bCF\b|\bCF\/88\b|Constitui[çc][ãa]o( Federal| da Rep[úu]blica)/i },
-  { key: 'CPP', short: 'CPP', name: 'Código de Processo Penal', urn: 'urn:lex:br:federal:decreto.lei:1941-10-03;3689', match: /\bCPP\b|C[óo]digo de Processo Penal/i },
+  { key: 'CPP', short: 'CPP', name: 'Código de Processo Penal', urn: 'urn:lex:br:federal:decreto.lei:1941-10-03;3689', match: /\bCPP\b|C[óo]digo de Processo Penal|Decreto-Lei (n[º°o.]*\s*)?3\.?689/i },
   { key: 'CPC', short: 'CPC', name: 'Código de Processo Civil', urn: 'urn:lex:br:federal:lei:2015-03-16;13105', match: /\bCPC\b|C[óo]digo de Processo Civil|Lei (n[º°o.]*\s*)?13\.?105/i },
-  { key: 'CP', short: 'CP', name: 'Código Penal', urn: 'urn:lex:br:federal:decreto.lei:1940-12-07;2848', match: /\bCP\b|C[óo]digo Penal/i },
+  { key: 'CP', short: 'CP', name: 'Código Penal', urn: 'urn:lex:br:federal:decreto.lei:1940-12-07;2848', match: /\bCP\b|C[óo]digo Penal|Decreto-Lei (n[º°o.]*\s*)?2\.?848/i },
   { key: 'CC', short: 'CC', name: 'Código Civil', urn: 'urn:lex:br:federal:lei:2002-01-10;10406', match: /\bCC\b|C[óo]digo Civil|Lei (n[º°o.]*\s*)?10\.?406/i },
-  { key: 'LINDB', short: 'LINDB', name: 'Lei de Introdução às Normas do Direito Brasileiro', urn: 'urn:lex:br:federal:decreto.lei:1942-09-04;4657', match: /\bLINDB\b|Lei de Introdu[çc][ãa]o/i },
+  { key: 'LINDB', short: 'LINDB', name: 'Lei de Introdução às Normas do Direito Brasileiro', urn: 'urn:lex:br:federal:decreto.lei:1942-09-04;4657', match: /\bLINDB\b|Lei de Introdu[çc][ãa]o|Decreto-Lei (n[º°o.]*\s*)?4\.?657/i },
   { key: 'CDC', short: 'CDC', name: 'Código de Defesa do Consumidor', urn: 'urn:lex:br:federal:lei:1990-09-11;8078', match: /\bCDC\b|Defesa do Consumidor|Lei (n[º°o.]*\s*)?8\.?078/i },
   { key: 'ECA', short: 'ECA', name: 'Estatuto da Criança e do Adolescente', urn: 'urn:lex:br:federal:lei:1990-07-13;8069', match: /\bECA\b|Estatuto da Crian[çc]a|Lei (n[º°o.]*\s*)?8\.?069/i },
   { key: 'L8429', short: 'Lei 8.429/92', name: 'Lei de Improbidade Administrativa', urn: 'urn:lex:br:federal:lei:1992-06-02;8429', match: /Lei (Federal )?(n[º°o.]*\s*)?8\.?429|Improbidade Administrativa/i },
@@ -30,7 +30,7 @@ export const LAWS: LawEntry[] = [
   { key: 'L13146', short: 'Lei 13.146/15', name: 'Estatuto da Pessoa com Deficiência', urn: 'urn:lex:br:federal:lei:2015-07-06;13146', match: /Lei (n[º°o.]*\s*)?13\.?146|Estatuto da Pessoa com Defici[êe]ncia/i },
 ];
 
-export const lawByKey = (key: string) => LAWS.find((l) => l.key === key);
+export const lawByKey = (key: string, extra: LawEntry[] = []) => LAWS.find((l) => l.key === key) ?? extra.find((l) => l.key === key);
 export const lawByUrn = (urn: string) => LAWS.find((l) => l.urn === urn);
 
 // Sem lei citada, a matéria indica a lei principal (ex.: "Direito Processual Penal" → CPP).

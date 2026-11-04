@@ -6,10 +6,13 @@ import { LEVEL_NAMES, type PlanInputs } from '../../../shared/ai/plan.ts';
 import { ymd } from '../../../shared/domain/dates.ts';
 import { subjectEquivalence } from '../../../shared/domain/notice-diff.ts';
 import { isOpenEnded } from '../../../shared/domain/rounds.ts';
+import { LawUpload } from '../components/LawUpload.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { fmtDate, Steps, SubjectIcon } from '../components/ui.tsx';
 import { generatePlan, updatePlanFromNotice, useActivePlan, type GenProgress, type SubjectRow } from '../lib/plans.ts';
+import { useOwnLaws } from '../lib/legal.ts';
 import { supabase } from '../lib/supabase.ts';
+import { unlistedNorms } from '../../../shared/legal/norms.ts';
 
 const DAYS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 
@@ -30,6 +33,18 @@ export function QuestionnairePage() {
       return data as SubjectRow[];
     },
   });
+  // Normas citadas no edital que o app não tem (nem no registro, nem enviadas): o estudante pode enviar o PDF antes de
+  // montar o cronograma, para as sessões delas serem medidas e terem lei seca, apostila e questões com o texto.
+  const own = useOwnLaws();
+  const topicText = useQuery({
+    queryKey: ['notice-topic-text', noticeId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('notice_subjects').select('notice_topics(text)').eq('notice_id', noticeId!);
+      if (error) throw new Error(error.message);
+      return (data as { notice_topics: { text: string }[] }[]).flatMap((s) => s.notice_topics.map((t) => t.text)).join('\n');
+    },
+  });
+  const missingLaws = topicText.data && own.data ? unlistedNorms(topicText.data, own.data.entries) : [];
   const notice = useQuery({
     queryKey: ['notice-exam-date', noticeId],
     queryFn: async () => {
@@ -169,6 +184,16 @@ export function QuestionnairePage() {
           </div>
         ))}
       </div>
+
+      {missingLaws.length > 0 && (
+        <>
+          <div className="section-title"><h2>Normas do edital sem texto no app</h2></div>
+          <div className="glass card" style={{ display: 'grid', gap: 14 }}>
+            <p className="muted small" style={{ margin: 0 }}>Opcional. Se você enviar o PDF oficial destas normas antes de gerar o cronograma, as sessões delas são ajustadas ao tamanho do texto, e a lei seca, a apostila e as questões da IA passam a usar os artigos. O PDF fica só para você. Dá para enviar depois, na aba Lei seca da sessão.</p>
+            {missingLaws.map((n) => <LawUpload key={n.key} norm={n} compact />)}
+          </div>
+        </>
+      )}
 
       <div className="section-title"><h2>Conte um pouco sobre você</h2></div>
       <textarea className="textarea glass" maxLength={1500} value={inputs.profile} onChange={(e) => set({ profile: e.target.value })}

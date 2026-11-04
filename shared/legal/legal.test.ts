@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseLawHtml, parseNormsText } from './parse.ts';
+import { ownLawEntry, shortCitation, unlistedNorms, uploadUrn } from './norms.ts';
 import { citesUnlistedLaw, findLawRefs, inRanges, noticeLawKeys, parseRanges, rangesLabel, sessionLawRefs } from './refs.ts';
 
 // Trecho real do HTML do CPP no normas.leg.br (estrutura preservada).
@@ -162,5 +163,31 @@ describe('rótulo dos artigos', () => {
     const r = findLawRefs('Normas da CGJ (arts. 1.071 a 1.091-A, 105)')[0]!;
     expect(rangesLabel(r)).toBe('arts. 1.071 a 1.091-A, 105');
     expect(findLawRefs(`NSCGJ, ${rangesLabel(r)}`)).toEqual([r]);
+  });
+});
+
+describe('normas fora do registro', () => {
+  const item = 'Lei n.º 6.830/1980 (artigos 1º; 2º; 7º; 8º; 11; 37); Resolução n.º 354/2020 do Conselho Nacional de Justiça (artigos 1º; 8º a 10); Lei n.º 11.608, de 29/12/2003 e Normas Judiciais da Corregedoria Geral da Justiça (Tomo I – Capítulo I: art. 1º a 4º); Lei Complementar Estadual nº 1.111/2010';
+  it('acha as do edital que faltam, sem as do registro', () => {
+    expect(unlistedNorms(item).map((n) => [n.key, n.citation])).toEqual([
+      ['res-354-2020', 'Resolução 354/2020 do Conselho Nacional de Justiça'],
+      ['lei-11608-2003', 'Lei 11.608/2003'],
+      ['lc-1111-2010', 'Lei Complementar 1.111/2010'],
+    ]);
+  });
+  it('a norma enviada vira lei do registro para o estudante: título e artigos', () => {
+    const res = unlistedNorms(item)[0]!;
+    const own = ownLawEntry({ law_key: res.key, short_name: shortCitation(res.citation), name: res.citation, urn: uploadUrn('u1', res.key), match_pattern: res.pattern })!;
+    expect(findLawRefs('Cumprimento digital de atos: Res. CNJ 354 (arts. 8º a 10)', '', [own])).toEqual([{ law: 'res-354-2020', ranges: [{ from: 8, to: 10 }] }]);
+    expect(unlistedNorms(item, [own]).map((n) => n.key)).toEqual(['lei-11608-2003', 'lc-1111-2010']);
+    expect(sessionLawRefs('Resolução CNJ 354/2020: cumprimento digital (arts. 8º a 10)', [item])).toEqual([]);
+    expect(sessionLawRefs('Resolução CNJ 354/2020: cumprimento digital (arts. 8º a 10)', [item], '', [own]).map((r) => r.law)).toEqual(['res-354-2020']);
+  });
+  it('lei do registro citada pelo número (Decreto-Lei 4.657/1942 = LINDB) não é pedida', () => {
+    expect(unlistedNorms('LINDB: vigência (Decreto-Lei nº 4.657/1942); Decreto-Lei 2.848/1940; Decreto-Lei 3.689/41')).toEqual([]);
+    expect(findLawRefs('Decreto-Lei nº 4.657/1942, arts. 1º a 6º').map((r) => r.law)).toEqual(['LINDB']);
+  });
+  it('número curto sem ano não conta', () => {
+    expect(unlistedNorms('conforme a Lei 1 e a Res. 2')).toEqual([]);
   });
 });

@@ -5,20 +5,20 @@
 // O calendário é montado no app pelo scheduler determinístico e gravado por create_plan_version.
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { inRanges, rangesLabel, sessionLawRefs } from '../../../shared/legal/refs.ts';
-import { lawByKey } from '../../../shared/legal/registry.ts';
+import { lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
 import { type LawSize, mergeShortLawSessions, PLAN_PROMPT_VERSION, PlanInputs, PlanStrategy, repairSessions, sessionsJsonSchema, sessionsPrompt, strategyJsonSchema, strategyPrompt, SubjectSessions } from '../../../shared/ai/plan.ts';
 import { isOpenEnded } from '../../../shared/domain/rounds.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-import { ensureLaw } from '../_shared/legal.ts';
+import { ensureLaw, ownLaws } from '../_shared/legal.ts';
 
 const int = (v: unknown, min: number, max: number) => Math.max(min, Math.min(max, Math.round(Number(v) || 0)));
 
 // Tamanho do texto vigente dos artigos citados pela sessão (texto oficial no banco). Sem artigo citado, ou lei fora do
 // banco, null: a sessão fica como a IA montou.
-async function lawSize(admin: ReturnType<typeof adminClient>, title: string, topics: string[], subject: string): Promise<LawSize[] | null> {
+async function lawSize(admin: ReturnType<typeof adminClient>, title: string, topics: string[], subject: string, own: LawEntry[]): Promise<LawSize[] | null> {
   const out: LawSize[] = [];
-  for (const ref of sessionLawRefs(title, topics, subject).slice(0, 4)) {
-    const law = lawByKey(ref.law);
+  for (const ref of sessionLawRefs(title, topics, subject, own).slice(0, 4)) {
+    const law = lawByKey(ref.law, own);
     if (!law) return null;
     // Lei do registro ainda fora do banco é baixada agora (uma vez para todos), para a sessão poder ser medida.
     const normId = await ensureLaw(admin, law);
@@ -88,7 +88,8 @@ Deno.serve(async (req) => {
       usage = r.usage; latencyMs = r.latencyMs;
       // Sessão de lei quase vazia (artigos revogados ou só remissivos) é juntada à vizinha da mesma lei; repairSessions
       // divide a maior para manter as n sessões.
-      const sizes = await Promise.all(r.data.sessions.map((x) => lawSize(admin, x.title, x.topics.map((t) => topics[t - 1] ?? ''), subject.name)));
+      const own = await ownLaws(admin, auth.user.id);
+      const sizes = await Promise.all(r.data.sessions.map((x) => lawSize(admin, x.title, x.topics.map((t) => topics[t - 1] ?? ''), subject.name, own)));
       const short = mergeShortLawSessions(r.data.sessions, sizes);
       const { sessions, fixes } = repairSessions({ ...r.data, sessions: short.sessions }, n, topics);
       fixes.unshift(...short.merged.map((m) => `lei curta: ${m}`));

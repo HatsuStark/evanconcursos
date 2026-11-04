@@ -4,6 +4,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { parseLawHtml } from '../../../shared/legal/parse.ts';
 import type { LawEntry } from '../../../shared/legal/registry.ts';
+import { ownLawEntry, type OwnNormRow } from '../../../shared/legal/norms.ts';
 
 const API = 'https://normas.leg.br/api/public';
 export const MAX_AGE_MS = 30 * 864e5;
@@ -47,6 +48,12 @@ export async function ingestLaw(admin: SupabaseClient, law: LawEntry) {
 export async function ensureLaw(admin: SupabaseClient, law: LawEntry): Promise<string | null> {
   const { data: cur } = await admin.from('legal_norms').select('id').eq('urn', law.urn).maybeSingle();
   if (cur) return cur.id as string;
-  if (law.pdf) return null;
+  if (law.pdf || law.urn.startsWith('upload:')) return null;
   try { return await ingestLaw(admin, law); } catch (e) { console.error('ensureLaw:', law.key, e); return null; }
+}
+
+// Normas que o estudante enviou em PDF (só dele), como entradas de registro.
+export async function ownLaws(admin: SupabaseClient, ownerId: string): Promise<LawEntry[]> {
+  const { data } = await admin.from('legal_norms').select('law_key, short_name, name, urn, match_pattern').eq('owner_id', ownerId).limit(100);
+  return ((data ?? []) as OwnNormRow[]).map(ownLawEntry).filter((l): l is LawEntry => !!l);
 }

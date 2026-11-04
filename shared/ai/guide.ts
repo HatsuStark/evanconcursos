@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { roleContext } from './plan.ts';
 import { findLawRefs, inRanges, type LawRef } from '../legal/refs.ts';
-import { lawByKey } from '../legal/registry.ts';
+import { lawByKey, type LawEntry } from '../legal/registry.ts';
 
 export const GUIDE_PROMPT_VERSION = 'guide-v4';
 // Revisão curta com versão própria: folha de memorização (mapa mental, mnemônicos, gatilhos), sem texto corrido nem
@@ -157,18 +157,19 @@ ${full ? `- questoes: inéditas, ${ce ? 'no formato certo ou errado (alternativa
 }
 
 // Fontes legais da sessão: as leis citadas (com artigos) e os trechos carregados do banco.
-export const sourceRef = (lawKey: string, label: string) => `${lawByKey(lawKey)?.short ?? lawKey}, art. ${label}`;
+// `extra`: normas enviadas pelo estudante (PDF), que valem como leis do registro para ele.
+export const sourceRef = (lawKey: string, label: string, extra: LawEntry[] = []) => `${lawByKey(lawKey, extra)?.short ?? lawKey}, art. ${label}`;
 
 export interface ProvidedArticle { lawKey: string; label: string; num: number; suffix: string }
 
 // Artigos citados no texto (ex.: "art. 312 do CP") que não caem nas fontes fornecidas.
-export function unverifiedLawRefs(text: string, provided: ProvidedArticle[], subject = '') {
+export function unverifiedLawRefs(text: string, provided: ProvidedArticle[], subject = '', extra: LawEntry[] = []) {
   const unverified: string[] = [];
-  for (const r of findLawRefs(text, subject) as LawRef[]) {
+  for (const r of findLawRefs(text, subject, extra) as LawRef[]) {
     for (const range of r.ranges) {
       for (let n = range.from; n <= Math.min(range.to, range.from + 50); n++) {
         const ok = provided.some((p) => p.lawKey === r.law && p.num === n && inRanges([range], p.num, p.suffix));
-        if (!ok) unverified.push(`${lawByKey(r.law)?.short ?? r.law}, art. ${n}`);
+        if (!ok) unverified.push(`${lawByKey(r.law, extra)?.short ?? r.law}, art. ${n}`);
       }
     }
   }
@@ -177,8 +178,8 @@ export function unverifiedLawRefs(text: string, provided: ProvidedArticle[], sub
 
 // Confere as citações: refs da seção "legislacao" precisam ser fontes fornecidas; artigos citados no texto
 // precisam cair nos intervalos fornecidos. Devolve as citações não verificáveis.
-export function verifyGuide(g: Guide, provided: ProvidedArticle[], subject = '') {
-  const refs = new Set(provided.map((p) => sourceRef(p.lawKey, p.label).toLowerCase()));
+export function verifyGuide(g: Guide, provided: ProvidedArticle[], subject = '', extra: LawEntry[] = []) {
+  const refs = new Set(provided.map((p) => sourceRef(p.lawKey, p.label, extra).toLowerCase()));
   const legislacao = g.legislacao.filter((l) => refs.has(l.ref.trim().toLowerCase()));
   const text = [
     g.introducao, ...(g.objetivos ?? []), ...(g.esquema ?? []).flatMap((e) => [e.topico, ...e.itens]), ...g.secoes.flatMap((s) => [s.texto, ...s.exemplos, s.como_banca_cobra]),
@@ -186,7 +187,7 @@ export function verifyGuide(g: Guide, provided: ProvidedArticle[], subject = '')
     ...(g.gatilhos ?? []).flatMap((x) => [x.pista, x.resposta]), ...g.pontos_banca, ...g.pegadinhas, ...g.resumo,
     ...(g.questoes ?? []).flatMap((q) => [q.enunciado, ...q.alternativas, q.comentario]), ...g.perguntas.flatMap((q) => [q.pergunta, q.resposta]),
   ].join('\n');
-  return { guide: { ...g, legislacao }, unverified: unverifiedLawRefs(text, provided, subject), droppedRefs: g.legislacao.length - legislacao.length };
+  return { guide: { ...g, legislacao }, unverified: unverifiedLawRefs(text, provided, subject, extra), droppedRefs: g.legislacao.length - legislacao.length };
 }
 
 // Chave de reaproveitamento: mesmo tema, mesmas fontes, mesma profundidade e versão do prompt.

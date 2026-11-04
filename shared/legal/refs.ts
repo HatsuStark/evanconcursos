@@ -1,7 +1,8 @@
 // Encontra referências a leis e artigos em textos livres (títulos de sessão, tópicos do edital):
 // "CP, arts. 327 e 312 a 315", "Código de Processo Penal - artigos 251 a 258; 261 a 267",
 // "Lei n.º 9.099 de 26.09.1995 (artigos 60 a 83; 88 e 89)", "art. 5º da CF".
-import { LAWS, lawForSubject } from './registry.ts';
+import { unlistedNorms } from './norms.ts';
+import { LAWS, lawForSubject, type LawEntry } from './registry.ts';
 
 export interface ArticleRange { from: number; to: number; fromSuffix?: string; toSuffix?: string }
 export interface LawRef { law: string; ranges: ArticleRange[] } // ranges vazio = a lei toda / sem artigo citado
@@ -27,16 +28,17 @@ const SEP = String.raw`\s*(?:,|;|e|a|até|ao|-)`;
 const ART_LIST = String.raw`\b(?:arts?\.|artigos?)\s*(${NUM}(?:${SEP}\s*${NUM})*(?:${SEP})?)`;
 
 // Cita lei fora do registro (ex.: estadual)? Então os artigos do texto são dela, não de outra lei conhecida.
-export function citesUnlistedLaw(text: string) {
-  return [...text.matchAll(/\bLei(?:\s+Complementar)?\s*(?:Estadual\s*)?(?:n[º°o.]*\s*)?\d{1,2}\.?\d{3}/gi)].some((m) => !LAWS.some((l) => l.match.test(m[0])));
+// `extra`: normas enviadas pelo estudante (PDF), que valem como leis do registro para ele.
+export function citesUnlistedLaw(text: string, extra: LawEntry[] = []) {
+  return unlistedNorms(text, extra).length > 0;
 }
 
-export function findLawRefs(text: string, subject = ''): LawRef[] {
+export function findLawRefs(text: string, subject = '', extra: LawEntry[] = []): LawRef[] {
   const found = new Map<string, ArticleRange[]>();
   const add = (law: string, ranges: ArticleRange[]) => found.set(law, [...(found.get(law) ?? []), ...ranges]);
   // Posições de cada menção a lei.
   const mentions: { law: string; start: number; end: number }[] = [];
-  for (const l of LAWS) {
+  for (const l of [...LAWS, ...extra]) {
     const re = new RegExp(l.match.source, 'gi');
     for (const m of text.matchAll(re)) mentions.push({ law: l.key, start: m.index!, end: m.index! + m[0].length });
   }
@@ -55,7 +57,7 @@ export function findLawRefs(text: string, subject = ''): LawRef[] {
     add(m.law, [...(b ? parseRanges(b[1]!) : []), ...(a ? parseRanges(a[1]!) : [])]);
   });
   // Sem lei citada: artigos soltos ("arts. 4º a 23") vão para a lei principal da matéria.
-  if (!found.size && !citesUnlistedLaw(text)) {
+  if (!found.size && !citesUnlistedLaw(text, extra)) {
     const law = lawForSubject(subject), a = new RegExp(ART_LIST, 'i').exec(text);
     if (law) add(law, a ? parseRanges(a[1]!) : []);
   }
@@ -94,12 +96,12 @@ export function inRanges(ranges: ArticleRange[], n: number, suffix = ''): boolea
 //   (arts. 1º a 4º)" recebia a Lei 6.830, a primeira do item);
 // - título que nomeia a lei sem artigos ("Lei Maria da Penha: medidas protetivas"): os artigos dessa lei no item;
 // - título sem lei: o item só vale se tiver uma lei só.
-export function sessionLawRefs(title: string, topics: string[], subject = ''): LawRef[] {
-  const inTitle = findLawRefs(title, subject);
+export function sessionLawRefs(title: string, topics: string[], subject = '', extra: LawEntry[] = []): LawRef[] {
+  const inTitle = findLawRefs(title, subject, extra);
   const withArts = inTitle.filter((r) => r.ranges.length);
   if (withArts.length) return withArts;
-  if (citesUnlistedLaw(title) || new RegExp(ART_LIST, 'i').test(title)) return [];
-  const fromTopics = findLawRefs(topics.join('\n'), subject).filter((r) => r.ranges.length);
+  if (citesUnlistedLaw(title, extra) || new RegExp(ART_LIST, 'i').test(title)) return [];
+  const fromTopics = findLawRefs(topics.join('\n'), subject, extra).filter((r) => r.ranges.length);
   if (inTitle.length) return fromTopics.filter((r) => inTitle.some((t) => t.law === r.law));
   return fromTopics.length === 1 ? fromTopics : [];
 }

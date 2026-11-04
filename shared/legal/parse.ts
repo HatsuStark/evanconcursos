@@ -116,6 +116,8 @@ export function parseNormsText(raw: string): LegalArticle[] {
     const cut = ls.findIndex((l) => FOOTNOTE_RE.test(l));
     const marks = new Set((cut >= 0 ? ls.slice(cut) : []).map((l) => FOOTNOTE_RE.exec(l)?.[1]).filter((n): n is string => !!n));
     for (let l of cut >= 0 ? ls.slice(0, cut) : ls) {
+      // Número de página e rodapé de impressão ("12", "Página 3 de 40") não são texto da norma.
+      if (/^(\d{1,4}|p[áa]gina\s+\d+(\s+de\s+\d+)?|\d+\s*\/\s*\d+)$/i.test(l)) continue;
       l = l.replace(/([.;:)”"])\s*(\d{1,3})$/, (m, p, n) => (marks.has(n) ? p : m));
       // Títulos e nomes de seção (linhas curtas) também levam chamada de nota: "Seção IV 6", "Do Sistema Informatizado Oficial 2".
       if (NORM_HEADING_RE.test(l) || UPPER_RE.test(l) || l.length < 70) l = l.replace(/([A-Za-zÀ-ú])\s(\d{1,3})$/, (m, w, n) => (marks.has(n) ? w : m));

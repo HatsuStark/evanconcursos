@@ -35,10 +35,10 @@ async function resolve(auth: Auth, admin: Admin, task: { subject_id: string | nu
   const { data: notice } = await auth.client.from('notices').select('board, role_name, organization, role_duties, structure').eq('id', subject!.notice_id).single();
   const { data: tt } = session?.topic_ids?.length ? await auth.client.from('notice_topics').select('id, text').in('id', session.topic_ids) : { data: [] };
   const topics = (tt ?? []).sort((a, b) => session!.topic_ids.indexOf(a.id) - session!.topic_ids.indexOf(b.id)).map((t) => t.text);
-  const { articles, law } = await loadLawSources(admin, { title: session!.title, topics, subject: subject!.name });
+  const { articles, law, extra } = await loadLawSources(admin, { title: session!.title, topics, subject: subject!.name, ownerId: auth.user.id });
   const input = { depth, banca: notice?.board ?? '', subject: subject!.name, title: session!.title, topics, law };
   return {
-    input, key: guideCacheKey({ ...input, cargo: String(notice?.role_name ?? '') }), articles, noticeId: subject!.notice_id as string, cargo: (notice?.role_name ?? '') as string,
+    extra, input, key: guideCacheKey({ ...input, cargo: String(notice?.role_name ?? '') }), articles, noticeId: subject!.notice_id as string, cargo: (notice?.role_name ?? '') as string,
     duties: String(notice?.role_duties ?? ''), otherRoles: ((notice?.structure as { otherRoles?: string[] } | null)?.otherRoles ?? []) as string[],
     sessionId: task.session_id, subjectId: task.subject_id, keyword: (session?.keyword ?? '') as string,
     organization: String(notice?.organization ?? ''),
@@ -124,7 +124,7 @@ async function generate(admin: Admin, ownerId: string, jobId: string, ctx: Guide
       parts: [{ text: guidePrompt({ ...input, cargo, boardQuestions, format: String(sm?.banca_tipo ?? ''), duties, otherRoles }) }] });
     usage = r.usage;
     const data = input.depth === 'revisao' ? trimReview(r.data) : r.data;
-    const v = verifyGuide(applyBoardEvidence(data, input.banca, boardQuestions.length), articles, input.subject);
+    const v = verifyGuide(applyBoardEvidence(data, input.banca, boardQuestions.length), articles, input.subject, ctx.extra);
     const { error } = await admin.from('study_guides').upsert({
       cache_key: key, depth: input.depth, subject_name: input.subject, subject_key: normalizeText(input.subject), banca: normalizeText(input.banca), topic_keys: topicKeys(input.topics),
       title: input.title, content: v.guide, sources: input.law.map((l) => l.ref), unlisted_sources: unlistedLaws([input.title, ...input.topics].join('\n')), unverified: v.unverified,

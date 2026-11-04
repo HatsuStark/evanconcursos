@@ -15,7 +15,7 @@ import { Shell } from '../components/Shell.tsx';
 import { TheoryReviewCard } from '../components/TheoryReviewCard.tsx';
 import { VideosPanel } from '../components/VideosPanel.tsx';
 import { fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
-import { sessionLawRefs } from '../lib/legal.ts';
+import { missingNorms, sessionLawRefs, useOwnLaws } from '../lib/legal.ts';
 import { KIND_LABEL, setTaskDone } from '../lib/plans.ts';
 import { saveTimeSpent, useStudy, type StudyData } from '../lib/study.ts';
 
@@ -67,9 +67,11 @@ function StudyView({ d }: { d: StudyData }) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const timer = useTimer(d.task.id, d.task.time_spent_sec);
-  const lawRefs = sessionLawRefs(d.task.title, d.topics, d.subject?.name ?? '');
+  const own = useOwnLaws().data?.entries ?? [];
+  const lawRefs = sessionLawRefs(d.task.title, d.topics, d.subject?.name ?? '', own);
+  const missing = missingNorms(d.task.title, own);
   const hasSession = !!d.task.session_id;
-  const tabs = TABS.filter((t) => (t.key === 'pente' ? d.task.kind === 'pente_fino' : t.key === 'lei' ? lawRefs.length > 0 : t.key === 'apostila' || t.key === 'videos' || t.key === 'material' ? hasSession : true));
+  const tabs = TABS.filter((t) => (t.key === 'pente' ? d.task.kind === 'pente_fino' : t.key === 'lei' ? lawRefs.length > 0 || missing.length > 0 : t.key === 'apostila' || t.key === 'videos' || t.key === 'material' ? hasSession : true));
   // Lei seca abre direto nos artigos.
   const [tab, setTab] = useState<TabKey>(d.task.kind === 'lei_seca' && tabs.some((t) => t.key === 'lei') ? 'lei' : tabs[0]!.key);
   const [videosOpened, setVideosOpened] = useState(false);
@@ -188,7 +190,7 @@ function StudyView({ d }: { d: StudyData }) {
           {tab === 'videos' ? null
             : tab === 'questoes' ? <QuestionsPanel source={{ kind: 'task', taskId: d.task.id, planId: d.task.plan_id }} goal={d.task.goal_questions} answered={mine.length} />
             : tab === 'pente' ? <PenteFinoPanel taskId={d.task.id} />
-            : tab === 'lei' ? <LawReader refs={lawRefs} />
+            : tab === 'lei' ? <LawReader refs={lawRefs} own={own} missing={missing} />
             : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={hasSession} initialDepth={params.has('revisao') || d.task.title.startsWith(REVIEW_PREFIX) ? 'revisao' : 'completa'} />
             : <SessionMaterials sessionId={d.task.session_id} minutes={d.task.kind === 'theory' ? d.task.minutes : 0} />}
         </>
