@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { findVideos, parseDuration, rankVideos, searchYoutube, videoQuery, YoutubeError, type VideoCandidate } from './videos.ts';
+import { findVideos, foreignRoleTerms, parseDuration, rankVideos, searchYoutube, videoQuery, YoutubeError, type VideoCandidate } from './videos.ts';
 
 const NOW = new Date('2026-10-30T00:00:00Z').getTime();
 const video = (over: Partial<VideoCandidate> = {}): VideoCandidate => ({
@@ -162,5 +162,35 @@ describe('searchYoutube', () => {
     expect(e).toBeInstanceOf(YoutubeError);
     expect((e as YoutubeError).quota).toBe(true);
     expect((e as YoutubeError).message).not.toContain('segredo');
+  });
+});
+
+describe('vídeos de outro cargo', () => {
+  const ids = (vs: { id: string }[]) => vs.map((v) => v.id);
+  const others = ['AGENTE DE SEGURANÇA ESCOLAR', 'COZINHEIRO ESCOLAR', 'AUXILIAR DE SECRETARIA', 'PROFESSOR DE EDUCAÇÃO BÁSICA I 30H', 'MÉDICO PEDIATRA 10H'];
+  it('tira cargos alheios e a família do professor, menos o que o próprio cargo ou o tema cita', () => {
+    const avoid = foreignRoleTerms('AGENTE ESCOLAR', others, 'O espaço escolar');
+    expect(avoid).toEqual(expect.arrayContaining(['professor', 'pedagogia', 'cozinheiro', 'medico']));
+    expect(avoid).not.toContain('agente');
+    expect(avoid).not.toContain('auxiliar');
+    expect(foreignRoleTerms('PROFESSOR DE EDUCAÇÃO BÁSICA I', others, 'Didática')).not.toContain('professor');
+    expect(foreignRoleTerms('AUXILIAR DE ATIVIDADES ESCOLARES', others, 'Relação auxiliar, professor e gestão')).not.toContain('professor');
+  });
+  it('em Suzano, aula de concurso de professor sobre o espaço escolar sai', () => {
+    const { terms, avoid, must } = videoQuery({ subject: 'Conhecimentos Específicos', title: 'O espaço escolar', topics: ['O espaço escolar.'], role: 'AGENTE ESCOLAR', otherRoles: others });
+    const r = rankVideos([video({ id: 'prof', title: 'O espaço escolar - Concurso Professor PEB I' }), video({ id: 'ped', title: 'Espaço escolar e pedagogia', channel: 'B' }), video({ id: 'ok', title: 'Espaço escolar para agente de organização escolar', channel: 'C' })], terms, NOW, '', { avoid, must });
+    expect(ids(r)).toEqual(['ok']);
+  });
+  it('sessão sobre o cargo busca com o nome dele e exige o cargo no título', () => {
+    const v = videoQuery({ subject: 'Conhecimentos Específicos', title: 'Principais atribuições do cargo', topics: ['Principais atribuições do cargo.'], role: 'AGENTE ESCOLAR', otherRoles: others });
+    expect(v.q).toBe('AGENTE ESCOLAR Principais atribuições do cargo concurso');
+    expect(v.must).toEqual(['agente', 'escolar']);
+    const r = rankVideos([video({ id: 'geral', title: 'Atribuições do cargo público' }), video({ id: 'cargo', title: 'Agente Escolar: atribuições', channel: 'B' })], v.terms, NOW, '', { avoid: v.avoid, must: v.must });
+    expect(ids(r)).toEqual(['cargo']);
+  });
+  it('sem cargo no edital, nada muda', () => {
+    const v = videoQuery({ subject: 'Direito Penal', title: 'Peculato', topics: [] });
+    expect(v.avoid).toEqual([]);
+    expect(v.must).toEqual([]);
   });
 });

@@ -2,6 +2,7 @@
 // Sem IA: a ordem sai de uma conta fixa que privilegia o quanto o vídeo é sobre o tema (termos no título, frase da
 // palavra-chave, lei da sessão), depois a relevância do YouTube, as visualizações e a idade. A duração não conta: aula
 // longa sobre o tema vale mais que vídeo curto genérico. Só Shorts saem.
+import { roleSpecific } from '../ai/guide.ts';
 import { normalizeText } from '../ai/notice.ts';
 
 export interface Video { id: string; title: string; channel: string; durationSec: number; publishedAt: string; views: number; thumb: string }
@@ -10,7 +11,7 @@ export interface VideoCandidate extends Video { description: string; embeddable:
 // Os termos da API exigem renovar ou apagar dados guardados em até 30 dias.
 export const CACHE_DAYS = 30;
 // Muda quando as regras mudam: busca guardada com as regras antigas não é reaproveitada.
-export const CACHE_VERSION = 'v4';
+export const CACHE_VERSION = 'v5';
 const MIN_RESULTS = 3, MAX_RESULTS = 5, MAX_PER_CHANNEL = 2;
 const SHORT_SEC = 60; // Shorts e cortes soltos
 const OLD_YEARS = 5;
@@ -28,12 +29,32 @@ function shortTopic(title: string, topics: string[]) {
   return (/^Estudo \d+ de \d+$/.test(head) ? clean(topics[0] ?? '') : head).split(' ').slice(0, 8).join(' ');
 }
 
+// Palavras que marcam vídeo de outro cargo. Em tema genérico ("O espaço escolar", "Ética e relações interpessoais"),
+// o YouTube devolve sobretudo aulas para concursos de professor: no edital de Suzano, o Agente Escolar recebia vídeos de
+// pedagogia. Vale a 1ª palavra de cada outro cargo do edital (Professor, Médico, Cozinheiro...) e sempre a família do
+// professor; palavras genéricas de cargo ("Auxiliar", "Técnico") não contam, e nada que o próprio cargo ou o tema cite.
+const TEACHER = ['professor', 'professora', 'professores', 'pedagogia', 'pedagogo', 'pedagogica', 'docente', 'docencia', 'peb'];
+const GENERIC_HEADS = new Set(['agente', 'auxiliar', 'assistente', 'tecnico', 'analista', 'oficial', 'escrevente', 'servidor', 'cargo', 'operador', 'especialista']);
+export function foreignRoleTerms(role: string, otherRoles: string[], topicText: string) {
+  const own = normalizeText(`${role} ${topicText}`).split(' ');
+  const heads = otherRoles.map((r) => normalizeText(r).split(' ')[0] ?? '').filter((w) => w.length > 2 && !GENERIC_HEADS.has(w));
+  return [...new Set([...heads, ...TEACHER])].filter((t) => !hasTerm(own, t)).sort();
+}
+
 // Busca da sessão. `key` identifica a busca no cache; `terms` são as palavras que um vídeo precisa citar.
 // A palavra-chave do plano diz o assunto melhor que o começo do título ("Ingresso e Exercício" é vago; "Estatuto SP
 // provimento posse", não), e já dispensa a matéria na busca.
 // `lawNames`: nomes e siglas das leis da sessão ("CPP", "Código de Processo Penal"), que aproximam o vídeo do tema.
-export function videoQuery({ subject, title, topics, keyword = '', lawNames = [] }: { subject: string; title: string; topics: string[]; keyword?: string; lawNames?: string[] }) {
+// `role`/`otherRoles`: cargo do edital e os demais. Sessão sobre o próprio cargo (atribuições, rotina) busca com o nome
+// do cargo e só aceita vídeo que o cite no título (`must`); sem nenhum, a sessão fica sem vídeos.
+export function videoQuery({ subject, title, topics, keyword = '', lawNames = [], role = '', otherRoles = [] }: { subject: string; title: string; topics: string[]; keyword?: string; lawNames?: string[]; role?: string; otherRoles?: string[] }) {
   const topic = shortTopic(title, topics);
+  const avoid = role || otherRoles.length ? foreignRoleTerms(role, otherRoles, [subject, title, keyword, ...topics].join(' ')) : [];
+  const roleTerms = termsOf(role);
+  if (roleTerms.length && roleSpecific({ title, topics })) {
+    const q = [role.trim(), topic, 'concurso'].filter(Boolean).join(' ');
+    return { q, alt: '', key: normalizeText(q), terms: roleTerms, law: '', phrase: [] as string[], lawNames: [] as string[], avoid, must: roleTerms };
+  }
   const subjectInTopic = normalizeText(topic).includes(normalizeText(subject));
   const lawDigits = /\bLei\s*(?:Complementar\s*)?(?:Federal\s*|Estadual\s*)?(?:n[º°o.]*\s*)?(\d{1,2}\.?\d{3})/i.exec(title)?.[1]?.replace('.', '');
   const law = lawDigits ? `${lawDigits.slice(0, -3)}.${lawDigits.slice(-3)}` : '';
@@ -44,7 +65,7 @@ export function videoQuery({ subject, title, topics, keyword = '', lawNames = []
   const altQ = [subjectInTopic ? '' : subject, topic, law && `Lei ${law}`, keyword.trim() ? '' : 'videoaula'].filter(Boolean).join(' ');
   const alt = !normalizeText(topic) || normalizeText(altQ) === normalizeText(q) ? '' : altQ;
   const phrase = termsOf(keyword.trim() || topic);
-  return { q, alt, key: normalizeText(q), terms: topicTerms.length ? topicTerms : subjectTerms, law, phrase, lawNames: [...new Set(lawNames.map(normalizeText).filter(Boolean))] };
+  return { q, alt, key: normalizeText(q), terms: topicTerms.length ? topicTerms : subjectTerms, law, phrase, lawNames: [...new Set(lawNames.map(normalizeText).filter(Boolean))], avoid, must: [] as string[] };
 }
 
 // Vídeo que cita a lei da sessão ("10.261" ou "10261"), para vir antes das aulas sobre leis parecidas de outros lugares.
@@ -55,15 +76,17 @@ export function parseDuration(iso: string) {
   return m ? Number(m[1] ?? 0) * 86400 + Number(m[2] ?? 0) * 3600 + Number(m[3] ?? 0) * 60 + Number(m[4] ?? 0) : 0;
 }
 
-export interface RankOptions { phrase?: string[]; lawNames?: string[] }
+// `avoid`: palavras de outro cargo (vídeo com alguma no título sai); `must`: palavras que o título precisa ter todas.
+export interface RankOptions { phrase?: string[]; lawNames?: string[]; avoid?: string[]; must?: string[] }
 const isShort = (v: VideoCandidate) => v.durationSec <= SHORT_SEC || /#shorts?\b/i.test(`${v.title} ${v.description}`);
 
 // `candidates` vem na ordem de relevância do YouTube. `phrase`: termos da palavra-chave (todos no título = bem no tema);
 // `lawNames`: nomes e siglas normalizados das leis da sessão.
-export function rankVideos(candidates: VideoCandidate[], terms: string[], now = Date.now(), law = '', { phrase = [], lawNames = [] }: RankOptions = {}): Video[] {
+export function rankVideos(candidates: VideoCandidate[], terms: string[], now = Date.now(), law = '', { phrase = [], lawNames = [], avoid = [], must = [] }: RankOptions = {}): Video[] {
   const scored = candidates.flatMap((v, i) => {
     if (!v.embeddable || v.live || v.blockedBR || isShort(v)) return [];
     const titleWords = normalizeText(v.title).split(' '), textWords = [...titleWords, ...normalizeText(v.description).split(' ')];
+    if (avoid.some((t) => hasTerm(titleWords, t)) || !must.every((t) => hasTerm(titleWords, t))) return [];
     // Tema no título basta. Na descrição, que costuma ser longa e genérica, precisa citar pelo menos metade dos termos.
     const inTitle = terms.filter((t) => hasTerm(titleWords, t)).length, inText = terms.filter((t) => hasTerm(textWords, t)).length;
     if (terms.length && !inTitle && inText < terms.length / 2) return [];
