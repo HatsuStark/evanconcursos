@@ -8,6 +8,7 @@
 import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { GENERATED_EXAMPLES, GENERATED_MAX, GENERATED_PROMPT_VERSION, GeneratedQuestions, generatedJsonSchema, generatedPrompt, generatedTheme, toPublic } from '../../../shared/qbank/generated.ts';
 import { loadLawSources } from '../_shared/law.ts';
+import { DEEP_PREFIX, PRACTICE_PREFIX } from '../../../shared/ai/plan.ts';
 import { ownLaws } from '../_shared/legal.ts';
 import { prunedAssuntos, rejectedIds, RELEVANCE_PROMPT_VERSION, RelevanceVerdicts, relevanceJsonSchema, relevancePrompt } from '../../../shared/qbank/relevance.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
@@ -16,7 +17,7 @@ import { lawByKey } from '../../../shared/legal/registry.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import {
   equalIncidence, EXPLAIN_PROMPT_VERSION, Explanation, explainPrompt, explanationJsonSchema, inTurn, measureIncidence, planPicks,
-  QMAP_PROMPT_VERSION, roleKeyword, searchFilters, SESSION_ASSUNTOS, SESSION_DIFFICULTIES, type Incidence, type SessionFilter,
+  DEEP_DIFFICULTIES, QMAP_PROMPT_VERSION, roleKeyword, searchFilters, SESSION_ASSUNTOS, SESSION_DIFFICULTIES, type Incidence, type SessionFilter,
 } from '../../../shared/qbank/map.ts';
 import { conceptKey, MNEMONIC_PROMPT_VERSION, MnemonicChoice, mnemonicJsonSchema, mnemonicPrompt, pickExisting } from '../../../shared/qbank/mnemonic.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
@@ -29,6 +30,8 @@ const RELEVANCE_ROUNDS = 3;
 // Questões inéditas da IA levam até ~55 s (casos concretos, com questões reais de modelo): só começam se ainda houver tempo
 // antes do limite da função (150 s): 60 s de busca + 75 s de geração.
 const GENERATE_BEFORE_MS = 60_000, GENERATE_TIMEOUT_MS = 75_000;
+// Aquecimento: questões da sessão anterior no começo de uma sessão nova.
+const WARMUP_QUESTIONS = 3;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -166,13 +169,22 @@ Deno.serve(async (req) => {
       return { name: subject.name, board: String(notice?.board ?? ''), topics, organization: String(notice?.organization ?? '') };
     });
 
+    // Dia de aprofundamento: o tema escolhido na hora (source_session_id) dá o mapa de assuntos, a triagem e o título; as
+    // questões são só médias-difíceis a muito difíceis e começam pelos erros do estudante nele.
+    const { data: own } = task.session_id
+      ? await auth.client.from('study_sessions').select('source_session_id, title, position, plan_version_id').eq('id', task.session_id).maybeSingle()
+      : { data: null };
+    const deep = !!own && (own.title.startsWith(DEEP_PREFIX) || own.title.startsWith(PRACTICE_PREFIX));
+    const sid: string | null = (own?.source_session_id as string | null) ?? task.session_id;
+    const diffs = deep ? DEEP_DIFFICULTIES : SESSION_DIFFICULTIES;
+
     // Filtro: assuntos da sessão (uma vez por sessão); em dias de reforço, os assuntos em que o estudante mais erra.
     let filter: SessionFilter = { materia: null, assuntos: [], how: '' };
     let incidence: Incidence[] | null = null;
-    const scope = task.session_id ?? `subject:${subject.id}`;
-    if (task.session_id) {
-      const m = await ensureSessionMap(admin, deps, auth.user.id, task.session_id, sm.materia, async () => {
-        const { data: ss } = await auth.client.from('study_sessions').select('title, keyword, topic_ids').eq('id', task.session_id).single();
+    const scope = sid ?? `subject:${subject.id}`;
+    if (sid) {
+      const m = await ensureSessionMap(admin, deps, auth.user.id, sid, sm.materia, async () => {
+        const { data: ss } = await auth.client.from('study_sessions').select('title, keyword, topic_ids').eq('id', sid).single();
         const { data: tt } = ss?.topic_ids?.length ? await auth.client.from('notice_topics').select('text').in('id', ss.topic_ids) : { data: [] };
         const { data: n } = await auth.client.from('notices').select('organization').eq('id', subject.notice_id).single();
         return { subject: subject.name, title: ss?.title ?? '', keyword: ss?.keyword ?? '', topics: (tt ?? []).map((t) => t.text), organization: String(n?.organization ?? '') };
@@ -193,16 +205,16 @@ Deno.serve(async (req) => {
     const format = await ensureBoardFormat(admin, quest, subject.id, sm);
     // Cargo e escolaridade só entram na busca se rendem nesta matéria (sem eles, cada assunto passa por 2 níveis, não 6).
     const narrow = await ensureNarrowing(admin, quest, subject.id, sm.materia, roleKeyword(String(notice?.role_name ?? '')), String(notice?.education_level ?? ''));
-    const allFilters = searchFilters(filter, sm.banca, { ...narrow, format });
+    const allFilters = searchFilters(filter, sm.banca, { ...narrow, format, difficulties: diffs });
     // Sessão sem assunto no banco de questões vai direto para as questões inéditas da IA.
-    if (!allFilters.length && !task.session_id) { await log('qbank_fetch', 'ok'); return json(200, { questions: [], reason: 'sem-assunto' }); }
+    if (!allFilters.length && !sid) { await log('qbank_fetch', 'ok'); return json(200, { questions: [], reason: 'sem-assunto' }); }
 
     // Peso de cada assunto: medido uma vez por sessão. Se a medição falhar, divide igual e tenta de novo na próxima busca.
     if (!incidence && allFilters.length) {
-      if (task.session_id) {
+      if (sid) {
         try {
           incidence = await measureIncidence((params) => quest.count(params), filter, sm.banca);
-          await admin.from('qbank_session_maps').update({ incidence }).eq('session_id', task.session_id);
+          await admin.from('qbank_session_maps').update({ incidence }).eq('session_id', sid);
         } catch { incidence = equalIncidence(filter.assuntos.slice(0, SESSION_ASSUNTOS)); }
       } else incidence = equalIncidence(filter.assuntos);
     }
@@ -214,15 +226,15 @@ Deno.serve(async (req) => {
     const { data: done } = await admin.from('question_attempts').select('qid, assunto, session_id').eq('owner_id', auth.user.id).eq('subject_id', subject.id).limit(5000);
     // Triagem de relevância da sessão: o que já foi julgado não é julgado de novo, e o que ficou fora do tema nunca volta.
     const judged = new Set<string>(), rejected = new Set<string>(), verdicts: { assunto: string; relevant: boolean }[] = [];
-    const { data: sess } = task.session_id ? await auth.client.from('study_sessions').select('title, keyword').eq('id', task.session_id).maybeSingle() : { data: null };
+    const { data: sess } = sid ? await auth.client.from('study_sessions').select('title, keyword').eq('id', sid).maybeSingle() : { data: null };
     if (sess) {
-      const { data: rel } = await admin.from('qbank_relevance').select('qid, assunto, relevant').eq('session_id', task.session_id);
+      const { data: rel } = await admin.from('qbank_relevance').select('qid, assunto, relevant').eq('session_id', sid);
       for (const r of rel ?? []) { judged.add(r.qid); verdicts.push({ assunto: r.assunto, relevant: r.relevant }); if (!r.relevant) rejected.add(r.qid); }
     }
     // Também as que já estão na tela, ainda sem resposta (o app manda em `exclude`).
     const seen = new Set([...(done ?? []).map((d) => d.qid as string), ...(Array.isArray(body.exclude) ? (body.exclude as unknown[]).map(String).slice(0, 500) : []), ...rejected]);
     const served = new Map<string, number>();
-    for (const d of done ?? []) if (task.session_id && d.session_id === task.session_id) served.set(normalizeText(d.assunto), (served.get(normalizeText(d.assunto)) ?? 0) + 1);
+    for (const d of done ?? []) if (sid && d.session_id === sid) served.set(normalizeText(d.assunto), (served.get(normalizeText(d.assunto)) ?? 0) + 1);
     // Uma chamada à IA por lote, com raciocínio baixo. Se falhar, as questões passam: o estudo não para por causa da triagem.
     const screen = async (qs: PublicQuestion[]) => {
       const fresh = sess ? qs.filter((q) => !judged.has(q.qid)) : [];
@@ -234,7 +246,7 @@ Deno.serve(async (req) => {
         usage.inputTokens += r.usage.inputTokens; usage.outputTokens += r.usage.outputTokens; usage.thinkingTokens += r.usage.thinkingTokens;
         const bad = rejectedIds(r.data, fresh.map((q) => q.qid));
         await admin.from('qbank_relevance').upsert(fresh.map((q) => ({
-          session_id: task.session_id, owner_id: auth.user.id, qid: q.qid, assunto: q.assunto, relevant: !bad.has(q.qid), reason: bad.get(q.qid) ?? '', prompt_version: RELEVANCE_PROMPT_VERSION,
+          session_id: sid, owner_id: auth.user.id, qid: q.qid, assunto: q.assunto, relevant: !bad.has(q.qid), reason: bad.get(q.qid) ?? '', prompt_version: RELEVANCE_PROMPT_VERSION,
         })));
         for (const q of fresh) { judged.add(q.qid); verdicts.push({ assunto: q.assunto, relevant: !bad.has(q.qid) }); if (bad.has(q.qid)) rejected.add(q.qid); }
         return qs.filter((q) => !bad.has(q.qid));
@@ -256,12 +268,12 @@ Deno.serve(async (req) => {
       for (const q of reuse) seen.add(q.qid);
       if (reuse.length >= n) return reuse;
       try {
-        const { data: ss } = await auth.client.from('study_sessions').select('topic_ids').eq('id', task.session_id).single();
+        const { data: ss } = await auth.client.from('study_sessions').select('topic_ids').eq('id', sid).single();
         const { data: tt } = ss?.topic_ids?.length ? await auth.client.from('notice_topics').select('text').in('id', ss.topic_ids) : { data: [] };
         const { law } = await loadLawSources(admin, { title: sess!.title, topics: (tt ?? []).map((t) => t.text as string), subject: subject.name, ownerId: auth.user.id });
         const { data: nt } = await auth.client.from('notices').select('board, role_name').eq('id', subject.notice_id).single();
         // Modelos de estilo e nível: as questões reais que a triagem aprovou nesta sessão; sem elas, as do cache nos assuntos dela.
-        const { data: ok } = await admin.from('qbank_relevance').select('qid').eq('session_id', task.session_id).eq('relevant', true).limit(10);
+        const { data: ok } = await admin.from('qbank_relevance').select('qid').eq('session_id', sid).eq('relevant', true).limit(10);
         const okIds = (ok ?? []).map((r) => r.qid as string).filter((id) => !id.startsWith('ia-'));
         let { data: ex } = okIds.length ? await admin.from('qbank_questions').select('payload, gabarito').in('qid', okIds).limit(GENERATED_EXAMPLES) : { data: [] };
         if (!ex?.length && filter.materia && filter.assuntos.length) {
@@ -291,6 +303,36 @@ Deno.serve(async (req) => {
     };
     let timedOut = false;
     const result: PublicQuestion[] = [];
+    // Começo da tarefa (nada respondido nela e nada na tela): no aprofundamento, os erros do tema; nas demais sessões,
+    // aquecimento com questões da sessão anterior da matéria (recordar antes do conteúdo novo).
+    const { count: answeredHere } = await admin.from('question_attempts').select('id', { count: 'exact', head: true }).eq('owner_id', auth.user.id).eq('task_id', task.id);
+    const fresh = !answeredHere && !(Array.isArray(body.exclude) && body.exclude.length);
+    const replay = async (sessionId: string, n: number, warmup: boolean) => {
+      const { data: tries } = await admin.from('question_attempts').select('qid, correct, created_at').eq('owner_id', auth.user.id).eq('session_id', sessionId).order('created_at', { ascending: false }).limit(200);
+      const last = new Map<string, boolean>();
+      for (const t of tries ?? []) if (!last.has(t.qid)) last.set(t.qid, t.correct);
+      // Erradas primeiro (a última resposta foi errada); no aquecimento, completa com as acertadas.
+      const ids = [...[...last].filter(([, ok]) => !ok).map(([q]) => q), ...(warmup ? [...last].filter(([, ok]) => ok).map(([q]) => q).reverse() : [])].slice(0, n);
+      if (!ids.length) return [];
+      const { data: rows } = await admin.from('qbank_questions').select('qid, payload').in('qid', ids);
+      const byId = new Map((rows ?? []).map((r) => [r.qid as string, r.payload as PublicQuestion]));
+      return ids.map((id) => byId.get(id)).filter((q): q is PublicQuestion => !!q).map((q) => (warmup ? { ...q, warmupOf: sessionId } : q));
+    };
+    if (fresh && task.kind === 'theory' && sid) {
+      if (deep && own?.source_session_id) result.push(...await replay(sid, Math.ceil(count / 2), false));
+      else if (!deep && own && count >= 4) {
+        // A sessão concluída mais recente da matéria, antes desta na ordem do plano.
+        const { data: doneTasks } = await auth.client.from('tasks').select('session_id').eq('plan_id', task.plan_id).eq('subject_id', subject.id)
+          .eq('kind', 'theory').not('done_at', 'is', null).not('session_id', 'is', null).limit(500);
+        const doneIds = [...new Set((doneTasks ?? []).map((t) => t.session_id as string))];
+        const { data: prev } = doneIds.length
+          ? await auth.client.from('study_sessions').select('id').in('id', doneIds).lt('position', own.position).order('position', { ascending: false }).limit(1)
+          : { data: [] };
+        const prevId = (prev?.[0] as { id?: string } | undefined)?.id;
+        if (prevId) result.push(...await replay(prevId, WARMUP_QUESTIONS, true));
+      }
+      for (const q of result) seen.add(q.qid);
+    }
     // Até 3 rodadas: as questões descartadas pela triagem são repostas no mesmo pedido.
     // Assunto que trouxe muito descarte nesta sessão deixa de ser comprado (prunedAssuntos); sem assunto bom, vai para o plano B.
     for (let round = 0; round < RELEVANCE_ROUNDS && result.length < count && !timedOut; round++) {
@@ -319,7 +361,7 @@ Deno.serve(async (req) => {
       for (const board of [true, false]) {
         for (const [assunto, n] of wanted) {
           if (n <= 0 || timedOut) continue;
-          const got = await fromCache(admin, { materia: filter.materia!, assunto, dificuldades: SESSION_DIFFICULTIES, tipo: format, ...(board ? { banca: sm.banca } : { preferBanca: sm.banca }) }, n, isNewCached);
+          const got = await fromCache(admin, { materia: filter.materia!, assunto, dificuldades: diffs, tipo: format, ...(board ? { banca: sm.banca } : { preferBanca: sm.banca }) }, n, isNewCached);
           cached.push(...got);
           let left = n - got.length;
           const fs = live.filter((x) => x.assunto === assunto && x.board === board);

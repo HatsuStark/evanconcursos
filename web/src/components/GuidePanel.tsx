@@ -46,7 +46,7 @@ const MAP_COLORS = ['var(--cyan)', 'var(--violet)', 'var(--lime)', 'var(--orange
 const paragraphs = (t: string) => t.split(/\n\s*\n|\n/).map((p) => p.trim()).filter(Boolean);
 
 // Apostila da sessão: completa ou revisão curta, gerada pela IA a partir do edital e da lei seca oficial.
-export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { taskId: string; hasSession: boolean; initialDepth?: 'completa' | 'revisao' }) {
+export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { taskId: string; hasSession: boolean; initialDepth?: 'completa' | 'revisao' | 'aprofundamento' }) {
   const [depth, setDepth] = useState(initialDepth);
   const [guide, setGuide] = useState<GuideRow | null>(null);
   const [loading, setLoading] = useState(false);
@@ -91,6 +91,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
         <div className="segmented">
           <button className={depth === 'completa' ? 'on' : ''} onClick={() => setDepth('completa')}>Completa</button>
           <button className={depth === 'revisao' ? 'on' : ''} onClick={() => setDepth('revisao')}>Revisão curta</button>
+          <button className={depth === 'aprofundamento' ? 'on' : ''} onClick={() => setDepth('aprofundamento')}>Aprofundamento</button>
         </div>
         {g && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -104,7 +105,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
       {g && !loading && (
         <article ref={article} className="glass guide printable">
           <header {...reading('intro')}>
-            <span className="badge violet"><BookOpen size={12} /> Apostila · {guide!.depth === 'completa' ? 'completa' : 'revisão curta'}</span>
+            <span className="badge violet"><BookOpen size={12} /> Apostila · {guide!.depth === 'completa' ? 'completa' : guide!.depth === 'aprofundamento' ? 'aprofundamento' : 'revisão curta'}</span>
             <h2>{g.titulo}</h2>
             <p className="lead">{g.introducao}</p>
             {!!g.objetivos?.length && <div className="guide-goals"><strong>Ao final, você vai saber</strong><ul>{g.objetivos.map((o, i) => <li key={i}>{o}</li>)}</ul></div>}

@@ -8,6 +8,7 @@ export interface Question {
   prova: { banca: string; ano: number; orgao: string; cargo: string } | null;
   materia: string; assunto: string;
   mnemo?: 'yes' | 'no' | 'maybe';   // mnemônico já existe, foi descartado ou ainda não avaliado
+  warmupOf?: string;                // aquecimento: questão da sessão anterior (a resposta conta para ela)
 }
 export interface Explanation { resumo: string; alternativas: { letra: string; comentario: string }[]; artigos: string[]; dica: string; fontes: string[]; geradoEm: string }
 export interface NextResult { questions: Question[]; filter?: { materia: string | null; assuntos: string[]; how: string }; reason: 'sem-materia' | 'sem-assunto' | 'esgotado' | 'esgotado-dificeis' | 'demorou' | 'sem-erros' | 'fim-revisao' | null }
@@ -25,8 +26,9 @@ async function call<T>(body: Record<string, unknown>): Promise<T> {
 // exclude: questões já mostradas (a revisão semanal tira delas os próximos erros).
 export const nextQuestions = (taskId: string, count = 5, exclude: string[] = []) => call<NextResult>({ action: 'next', taskId, count, exclude });
 // Resposta corrigida direto no banco (answer_question): uma ida e volta, sem passar pela Edge Function.
-export async function answerQuestion(taskId: string | null, qid: string, chosen: string, context: 'plan' | 'free' | 'review' = 'plan') {
-  const { data, error } = await supabase.rpc('answer_question', { p_qid: qid, p_chosen: chosen, p_task: taskId, p_context: context });
+// sessionId: questão de aquecimento, que conta para a sessão anterior.
+export async function answerQuestion(taskId: string | null, qid: string, chosen: string, context: 'plan' | 'free' | 'review' = 'plan', sessionId?: string) {
+  const { data, error } = await supabase.rpc('answer_question', { p_qid: qid, p_chosen: chosen, p_task: taskId, p_context: context, ...(sessionId ? { p_session: sessionId } : {}) });
   if (error) throw new Error(error.message);
   return data as { correct: boolean; gabarito: string };
 }

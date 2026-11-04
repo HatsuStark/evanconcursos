@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { evaluate, latestAnswers, questionScore, scoreGoal } from '../../../shared/domain/adaptive.ts';
 import { REVIEW_PREFIX } from '../../../shared/ai/plan-build.ts';
-import { PRACTICE_PREFIX } from '../../../shared/ai/plan.ts';
+import { DEEP_PREFIX, PRACTICE_PREFIX } from '../../../shared/ai/plan.ts';
 import { videoQuery } from '../../../shared/domain/videos.ts';
 import { GuidePanel } from '../components/GuidePanel.tsx';
 import { LawReader } from '../components/LawReader.tsx';
@@ -192,7 +192,7 @@ function StudyView({ d }: { d: StudyData }) {
             : tab === 'questoes' ? <QuestionsPanel source={{ kind: 'task', taskId: d.task.id, planId: d.task.plan_id }} goal={d.task.goal_questions} answered={mine.length} />
             : tab === 'pente' ? <PenteFinoPanel taskId={d.task.id} />
             : tab === 'lei' ? <LawReader refs={lawRefs} own={own} missing={missing} />
-            : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={hasSession} initialDepth={params.has('revisao') || d.task.title.startsWith(REVIEW_PREFIX) || d.task.title.startsWith(PRACTICE_PREFIX) ? 'revisao' : 'completa'} />
+            : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={hasSession} initialDepth={params.has('revisao') || d.task.title.startsWith(REVIEW_PREFIX) || d.task.title.startsWith(PRACTICE_PREFIX) ? 'revisao' : d.task.title.startsWith(DEEP_PREFIX) ? 'aprofundamento' : 'completa'} />
             : <SessionMaterials sessionId={d.task.session_id} minutes={d.task.kind === 'theory' ? d.task.minutes : 0} />}
         </>
       )}

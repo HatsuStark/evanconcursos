@@ -9,8 +9,10 @@ export const GUIDE_PROMPT_VERSION = 'guide-v4';
 // Revisão curta com versão própria: folha de memorização (mapa mental, mnemônicos, gatilhos), sem texto corrido nem
 // questões. Mudar só a revisão não refaz as apostilas completas.
 export const REVIEW_PROMPT_VERSION = 'review-v1';
-export const guideVersion = (depth: GuideDepth) => (depth === 'revisao' ? REVIEW_PROMPT_VERSION : GUIDE_PROMPT_VERSION);
-export type GuideDepth = 'completa' | 'revisao';
+// Aprofundamento: para quem já estudou o tema; mesmo formato da completa, sem repetir o básico.
+export const DEEP_PROMPT_VERSION = 'deep-v1';
+export const guideVersion = (depth: GuideDepth) => (depth === 'revisao' ? REVIEW_PROMPT_VERSION : depth === 'aprofundamento' ? DEEP_PROMPT_VERSION : GUIDE_PROMPT_VERSION);
+export type GuideDepth = 'completa' | 'revisao' | 'aprofundamento';
 
 // Apostila como um professor especialista em concursos monta: objetivos, mapa do tema, seções com prioridade, quadros
 // comparativos, o que memorizar, lei seca comentada, pegadinhas, resumo e questões de fixação no formato da banca.
@@ -118,6 +120,12 @@ const FULL_RULES = `- Ordem didática: do conceito e da regra geral para as exce
 - secoes: 3 a 6 seções; quadros: 1 ou 2; questoes: 4 ou 5; perguntas: 4 a 6.
 - objetivos e esquema: curtos; o esquema é o mapa mental do tema, na ordem das seções.
 - mnemonicos e gatilhos: vazios (ficam na revisão curta).`;
+const DEEP_RULES = `- Aprofundamento: o aluno já estudou o tema e resolveu questões. Não repita definições nem a regra geral: no máximo uma frase de lembrete por seção.
+- secoes: 3 a 5, sobre o que separa quem acerta de quem erra: exceções e ressalvas, distinções finas entre institutos parecidos, prazos e sujeitos que a banca troca, casos práticos em que a regra geral não se aplica, combinação de artigos. Cada seção traz pelo menos um exemplo de caso difícil resolvido.
+- quadros: 1 ou 2, comparando o que a banca costuma confundir. pegadinhas: 5 a 8, cada uma com a troca exata que a banca faz.
+- questoes: 5, de dificuldade difícil, cada uma cobrando uma exceção, distinção ou caso prático diferente; distratores que trocam um único detalhe do texto da lei.
+- perguntas: 4 a 6, de recordação ativa sobre as exceções e distinções.
+- objetivos e esquema: curtos. mnemonicos e gatilhos: vazios.`;
 const L = REVIEW_LIMITS;
 const REVIEW_RULES = `- Revisão curta: nada de texto corrido nem questões de fixação. Cada item cabe numa linha. Não repita a mesma informação em campos diferentes.
 - introducao: 1 frase. objetivos, secoes e questoes: vazios.
@@ -131,8 +139,8 @@ const REVIEW_RULES = `- Revisão curta: nada de texto corrido nem questões de f
 // format: formato predominante da banca na matéria ('certo e errado' ou múltipla escolha), para as questões de fixação.
 // duties/otherRoles: atribuições do cargo no edital e os outros cargos dele, para a apostila não descrever outro cargo.
 export function guidePrompt(p: { depth: GuideDepth; banca: string; cargo: string; subject: string; title: string; topics: string[]; law: GuideSource[]; boardQuestions?: BoardQuestion[]; format?: string; duties?: string; otherRoles?: string[] }) {
-  const full = p.depth === 'completa', board = p.boardQuestions ?? [], ce = /certo/i.test(p.format ?? '');
-  return `Você é professor especialista em concursos públicos brasileiros, autor de material de cursinho que aprova. ${full ? 'Escreva uma apostila completa, para quem está começando o tema (cerca de 20 minutos de leitura antes de resolver questões).' : 'Monte a revisão curta do tema: uma folha de memorização para quem já estudou (cerca de 5 minutos), sem texto corrido.'}
+  const full = p.depth !== 'revisao', deep = p.depth === 'aprofundamento', board = p.boardQuestions ?? [], ce = /certo/i.test(p.format ?? '');
+  return `Você é professor especialista em concursos públicos brasileiros, autor de material de cursinho que aprova. ${deep ? 'Escreva o aprofundamento do tema para quem já estudou a base e quer subir o acerto (cerca de 20 minutos de leitura antes de questões difíceis).' : full ? 'Escreva uma apostila completa, para quem está começando o tema (cerca de 20 minutos de leitura antes de resolver questões).' : 'Monte a revisão curta do tema: uma folha de memorização para quem já estudou (cerca de 5 minutos), sem texto corrido.'}
 Concurso: ${p.cargo || 'não informado'}${p.banca ? `, banca ${p.banca}` : ''}.
 ${roleContext(p.cargo, p.duties, p.otherRoles)}
 Matéria: ${p.subject}
@@ -146,7 +154,7 @@ Regras obrigatórias:
 - Cite artigos SOMENTE dos trechos fornecidos, no formato do colchete (ex.: "CP, art. 312"). Se não houver trecho, não cite números de artigos.
 - Não cite jurisprudência, súmulas, autores ou posições doutrinárias. Não invente leis, prazos ou números.
 - Siga o texto da lei fornecido; ele é a versão vigente.
-${full ? FULL_RULES : REVIEW_RULES}
+${deep ? DEEP_RULES : full ? FULL_RULES : REVIEW_RULES}
 - quadros: compare só o que a banca costuma confundir (espécies, prazos, requisitos, diferenças entre institutos). Sem quadro se o tema não tiver o que comparar.
 - memorizar: só números, prazos, quóruns e listas que estejam nos trechos de lei ou no conteúdo do edital, nunca de memória. Vazio se não houver.
 ${full ? `- questoes: inéditas, ${ce ? 'no formato certo ou errado (alternativas vazias; gabarito "C" ou "E")' : 'de múltipla escolha com 5 alternativas (gabarito A a E)'}, no estilo ${board.length ? 'das questões reais fornecidas' : `da ${p.banca || 'banca'}`}, cobrando o que a apostila ensinou. Uma única resposta correta, sem ambiguidade; o comentário explica o gabarito pela apostila ou pelo artigo fornecido.` : ''}

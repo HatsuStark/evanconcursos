@@ -183,7 +183,7 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
     if (!st.chosen || st.result) return;
     setBusy('answer'); setError('');
     try {
-      const r = await answerQuestion(taskId, q.qid, st.chosen, source.kind === 'review' ? 'review' : source.kind === 'task' ? 'plan' : 'free');
+      const r = await answerQuestion(taskId, q.qid, st.chosen, source.kind === 'review' ? 'review' : source.kind === 'task' ? 'plan' : 'free', q.warmupOf);
       patch({ result: r, tab: 'explicacao' });
       void qc.invalidateQueries({ queryKey: ['study'] });
       void qc.invalidateQueries({ queryKey: ['due-counts'] });
@@ -221,6 +221,7 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
   return (
       <article className="glass q-card">
         {source.kind === 'review' && <span className="badge orange" style={{ justifySelf: 'start' }}><RotateCcw size={12} /> Revisão do caderno de erros</span>}
+        {q.warmupOf && <span className="badge cyan" style={{ justifySelf: 'start' }}><RotateCcw size={12} /> Aquecimento: da sessão anterior</span>}
         <QuestionBody q={q} number={number} chosen={st.chosen} struck={st.struck} gabarito={st.result?.gabarito ?? null} locked={!!st.result} onSelect={select} onStrike={strike} />
 
         {st.result ? (

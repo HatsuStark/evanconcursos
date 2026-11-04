@@ -1,6 +1,6 @@
 // Edge Function "study-guide": apostila da sessão gerada pela IA, baseada só no conteúdo do edital e nos
 // artigos oficiais da lei seca, sempre em segundo plano (leva cerca de 35 s e não depende da tela aberta). POST:
-//   {taskId, depth:'completa'|'revisao'} → 200 {guide} se já existe; senão começa a gerar e responde 202 {pending}.
+//   {taskId, depth:'completa'|'revisao'|'aprofundamento'} → 200 {guide} se já existe; senão começa a gerar e responde 202 {pending}.
 //   {taskId, depth, poll:true} → como acima, mas não começa nada: 502 se a geração falhou.
 //   {action:'prepare', planId} → 202; prepara as apostilas completas das próximas sessões (ver PREPARE_*).
 //   {action:'pente', taskId} → 200 {items}; o que memorizar e as pegadinhas das sessões já estudadas da matéria (só leitura).
@@ -10,7 +10,7 @@ import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/
 import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide, guideCacheKey, guideVersion, guideJsonSchema, guidePrompt, lawKeys, pickSimilarGuide, topicKeys, trimReview, unlistedLaws, verifyGuide, type BoardQuestion, type GuideDepth } from '../../../shared/ai/guide.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient } from '../../../shared/qbank/client.ts';
-import { QMAP_PROMPT_VERSION } from '../../../shared/qbank/map.ts';
+import { measureIncidence, QMAP_PROMPT_VERSION } from '../../../shared/qbank/map.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { loadLawSources } from '../_shared/law.ts';
 import { cacheQuestions, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, type PublicQuestion } from '../_shared/qbank.ts';
@@ -90,6 +90,14 @@ async function boardEvidence(admin: Admin, ownerId: string, ctx: GuideContext): 
       return { name: input.subject, board: input.banca, topics: (all ?? []).map((t) => t.text), organization: ctx.organization };
     });
     const filter = await ensureSessionMap(admin, deps, ownerId, ctx.sessionId, sm.materia, async () => ({ subject: input.subject, title: input.title, keyword: ctx.keyword, topics: input.topics, organization: ctx.organization }));
+    // Cobrança real da banca em cada assunto (3 créditos por assunto, uma vez por sessão): a escolha do aprofundamento usa
+    // essa medida antes mesmo de a sessão buscar questões.
+    if (!filter.incidence && filter.materia && filter.assuntos.length) {
+      try {
+        const incidence = await measureIncidence((params) => quest.count(params), filter, sm.banca);
+        await admin.from('qbank_session_maps').update({ incidence }).eq('session_id', ctx.sessionId);
+      } catch (e) { console.error('incidence:', e); }
+    }
     // Atualidades envelhece rápido, e sem banca identificada não há o que observar.
     if (!sm.banca || !filter.materia || !filter.assuntos.length || /atualidade/i.test(filter.materia)) return [];
     const { data: cached } = await admin.from('qbank_questions').select('payload').eq('materia', filter.materia).in('assunto', filter.assuntos).limit(300);
@@ -203,7 +211,7 @@ Deno.serve(async (req) => {
       return json(202, { ok: true });
     }
     if (body.action === 'pente') return json(200, { items: await penteFino(auth, admin, String(body.taskId ?? '')) });
-    const depth: GuideDepth = body.depth === 'revisao' ? 'revisao' : 'completa';
+    const depth: GuideDepth = body.depth === 'revisao' ? 'revisao' : body.depth === 'aprofundamento' ? 'aprofundamento' : 'completa';
     const { data: task } = await auth.client.from('tasks').select('subject_id, session_id').eq('id', String(body.taskId ?? '')).maybeSingle();
     const ctx = task && await resolve(auth, admin, task, depth);
     if (!ctx) return json(400, { error: 'A apostila é gerada para tarefas de teoria (com sessão de conteúdo).' });

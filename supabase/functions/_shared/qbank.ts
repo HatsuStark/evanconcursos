@@ -18,7 +18,8 @@ export function publicQuestion(q: QuestQuestion) {
     materia: q.classificacao?.materia ?? '', assunto: q.classificacao?.assunto ?? '',
   };
 }
-export type PublicQuestion = ReturnType<typeof publicQuestion>;
+// warmupOf: questão de aquecimento, da sessão anterior (a resposta conta para ela).
+export type PublicQuestion = ReturnType<typeof publicQuestion> & { warmupOf?: string };
 
 export async function cacheQuestions(admin: SupabaseClient, items: QuestQuestion[]) {
   const rows = items.filter((q) => q.gabarito).map((q) => ({

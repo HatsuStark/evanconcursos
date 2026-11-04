@@ -26,7 +26,13 @@ export const useStudy = (taskId: string | undefined) => useQuery({
   queryKey: ['study', taskId],
   enabled: !!taskId,
   queryFn: async (): Promise<StudyData> => {
-    const task = must(await supabase.from('tasks').select('id, plan_id, date, minutes, kind, subject_id, session_id, title, keyword, goal_questions, done_at, time_spent_sec').eq('id', taskId!).single()) as StudyData['task'];
+    const pick = async () => must(await supabase.from('tasks').select('id, plan_id, date, minutes, kind, subject_id, session_id, title, keyword, goal_questions, done_at, time_spent_sec').eq('id', taskId!).single()) as StudyData['task'];
+    let task = await pick();
+    // Aberto direto pelo link: escolhe o tema do aprofundamento antes de mostrar.
+    if (/^(Aprofundamento|Revisão com questões): /.test(task.title) && !task.done_at) {
+      const { data: bound } = await supabase.rpc('bind_adaptive_sessions', { p_plan: task.plan_id });
+      if (bound) task = await pick();
+    }
     const plan = must(await supabase.from('study_plans').select('notice_id, pacing').eq('id', task.plan_id).single()) as { notice_id: string; pacing: Pacing };
     const notice = must(await supabase.from('notices').select('cutoff_pct').eq('id', plan.notice_id).single()) as { cutoff_pct: number | null };
     const [subjects, session, attempts, goals] = await Promise.all([

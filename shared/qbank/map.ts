@@ -209,6 +209,8 @@ export async function mapSession(d: MapDeps, subjectMateria: string | null,
 // Dificuldade das questões das sessões: média, difícil e muito difícil. A API só aceita um valor por busca.
 // Sem a muito difícil faltariam questões: em amostra real, a escala 4 tinha 3 das 193 questões de um assunto, e a 5, 39.
 export const SESSION_DIFFICULTIES = ['3', '4', '5'];
+// Dia de aprofundamento: só difícil e muito difícil.
+export const DEEP_DIFFICULTIES = ['4', '5'];
 
 // Opção das questões livres que busca essas mesmas dificuldades.
 export const MEDIUM_OR_HARD = 'media-dificil';
@@ -240,7 +242,7 @@ export function roleKeyword(role: string) {
 
 // Busca da mais à menos específica: mesmo cargo, depois escolaridade do edital, depois qualquer uma; em cada etapa, a banca e
 // depois as outras no formato dela. Nunca solta a dificuldade.
-export function searchFilters(f: SessionFilter, banca: string, o: { level?: string; role?: string; format?: string } = {}, now = new Date()): SearchFilter[] {
+export function searchFilters(f: SessionFilter, banca: string, o: { level?: string; role?: string; format?: string; difficulties?: string[] } = {}, now = new Date()): SearchFilter[] {
   if (!f.materia || !f.assuntos.length) return [];
   const m = f.materia, format: Record<string, string> = o.format ? { tipo: o.format } : {};
   const places: { tag: string; board: boolean; params: Record<string, string> }[] = /atualidade/i.test(m)
@@ -252,7 +254,7 @@ export function searchFilters(f: SessionFilter, banca: string, o: { level?: stri
     ...(o.level ? narrowed(o.level, { nivel_escolaridade: o.level }) : []),
     ...places,
   ];
-  return tiers.flatMap((t, tier) => f.assuntos.flatMap((assunto) => SESSION_DIFFICULTIES.map((dificuldade, turn) => ({
+  return tiers.flatMap((t, tier) => f.assuntos.flatMap((assunto) => (o.difficulties ?? SESSION_DIFFICULTIES).map((dificuldade, turn) => ({
     key: `${t.tag}:${assunto}:d${dificuldade}`, assunto, tier, turn, board: t.board, params: { ...t.params, materia: m, assunto, dificuldade },
   }))));
 }

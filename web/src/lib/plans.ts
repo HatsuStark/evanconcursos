@@ -151,6 +151,8 @@ export const useActivePlan = (noticeId?: string) => useQuery({
     }
     const plan = (must(await q) as ActivePlan['plan'][])[0];
     if (!plan) return null;
+    // Dias de aprofundamento que chegaram: o tema é escolhido agora, pela sessão em que o estudante mais erra.
+    await supabase.rpc('bind_adaptive_sessions', { p_plan: plan.id });
     const [notice, version, subjects, tasks] = await Promise.all([
       supabase.from('notices').select('id, role_name, organization, board, exam_date, total_questions, education_level, cutoff_pct, role_duties, structure').eq('id', plan.notice_id).single(),
       plan.active_version_id ? supabase.from('plan_versions').select('id, number, reason, inputs, strategy, summary, created_at').eq('id', plan.active_version_id).single() : Promise.resolve({ data: null, error: null }),
