@@ -2,6 +2,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { subjectMinPct } from '../../../shared/domain/adaptive.ts';
 import { ymd } from '../../../shared/domain/dates.ts';
+import { prioritize, RUSH_WEEKS } from '../../../shared/domain/priority.ts';
+import type { PrioritizeSummary } from '../../../shared/domain/coverage.ts';
 import type { RebalanceSummary, Replan } from '../../../shared/domain/replan.ts';
 import { isOpenEnded, openEndDate, type RoundAttempt, type RoundSummary } from '../../../shared/domain/rounds.ts';
 import { buildPlanPayload, calendarSummary, carryOverSessions, GENERATOR_VERSION, theoryPlan, type PlanBase } from '../../../shared/ai/plan-build.ts';
@@ -89,6 +91,12 @@ export async function generatePlan(noticeId: string, inputs: PlanInputs, onProgr
     onProgress({ step: 'sessions', done: ++done, total: base.subjects.length });
   });
 
+  // Prazo curto: em cada matéria, os temas mais cobrados primeiro (partes juntas, aprofundamentos no lugar).
+  if (!openEnded && cal.weeks <= RUSH_WEEKS) {
+    for (const s of base.subjects) sessions[s.id] = prioritize(sessions[s.id]!);
+    strategy.advice = [...strategy.advice, `Prazo curto (${cal.weeks} semanas): em cada matéria, os temas mais cobrados vêm primeiro, para o principal estar visto se o tempo acabar.`];
+  }
+
   onProgress({ step: 'saving', done: 0, total: 1 });
   const review: Record<string, Set<number>> = {};
   if (carry) {
@@ -130,7 +138,7 @@ export type Pacing = 'agenda' | 'ciclo';
 export interface ActivePlan {
   plan: { id: string; name: string; notice_id: string; active_version_id: string | null; pacing: Pacing };
   notice: { id: string; role_name: string; organization: string; board: string; exam_date: string | null; total_questions: number; education_level: Draft['educationLevel']; cutoff_pct: number | null; role_duties: string; structure: { blocks?: { name: string; rule: string }[] } | null };
-  version: { id: string; number: number; reason: string; inputs: PlanInputs; strategy: Strategy; summary: { weeks?: number; hours?: number; perSubject?: { subjectId: string; name: string; days: number }[]; replan?: { round?: RoundSummary } & Partial<RebalanceSummary>; openEnded?: boolean }; created_at: string } | null;
+  version: { id: string; number: number; reason: string; inputs: PlanInputs; strategy: Strategy; summary: { weeks?: number; hours?: number; perSubject?: { subjectId: string; name: string; days: number }[]; replan?: { round?: RoundSummary } & (Partial<RebalanceSummary> | Partial<PrioritizeSummary>); openEnded?: boolean }; created_at: string } | null;
   subjects: SubjectRow[];
   tasks: TaskRow[];
   openEnded: boolean; // prova já realizada: plano sem prazo, que se adapta ao desempenho
@@ -211,3 +219,15 @@ export function prepareGuides(planId: string) {
   } catch { return; }
   void supabase.functions.invoke('study-guide', { body: { action: 'prepare', planId } }).catch(() => {});
 }
+
+// Cobrança estimada de cada sessão do plano (1 a 3), para priorizar os temas quando o tempo aperta.
+export const useSessionIncidence = (planId: string | undefined, enabled: boolean) => useQuery({
+  queryKey: ['session-incidence', planId],
+  enabled: enabled && !!planId,
+  staleTime: 10 * 60_000,
+  queryFn: async () => {
+    const versions = must(await supabase.from('plan_versions').select('id').eq('plan_id', planId!)) as { id: string }[];
+    const rows = versions.length ? must(await supabase.from('study_sessions').select('id, incidence').in('plan_version_id', versions.map((v) => v.id)).limit(5000)) as { id: string; incidence: number | null }[] : [];
+    return new Map(rows.map((r) => [r.id, r.incidence ?? 2]));
+  },
+});

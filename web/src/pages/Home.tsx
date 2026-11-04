@@ -5,6 +5,7 @@ import { cycleProgress, cycleQueue } from '../../../shared/domain/cycle.ts';
 import { groupReviews } from '../../../shared/domain/theory-reviews.ts';
 import { RebalanceCard } from '../components/RebalanceCard.tsx';
 import { OpenPlanCard } from '../components/OpenPlanCard.tsx';
+import { CoverageBanner } from '../components/CoverageBanner.tsx';
 import { ReplanBanner } from '../components/ReplanBanner.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { TaskCard } from '../components/TaskCard.tsx';
@@ -134,6 +135,7 @@ export function HomePage() {
       <OpenPlanCard active={active.data} />
       <RebalanceCard active={active.data} />
       <ReplanBanner active={active.data} />
+      <CoverageBanner active={active.data} />
       {!!(due.data?.errors || due.data?.cards) && (
         <div className="glass card review-today">
           <RotateCcw size={20} style={{ color: 'var(--orange)' }} />

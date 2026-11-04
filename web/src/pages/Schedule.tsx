@@ -5,6 +5,7 @@ import { cycleProgress, cycleQueue } from '../../../shared/domain/cycle.ts';
 import { parseYmd, ymd } from '../../../shared/domain/dates.ts';
 import { OpenPlanCard } from '../components/OpenPlanCard.tsx';
 import { PacingSwitch } from '../components/PacingSwitch.tsx';
+import { CoverageBanner } from '../components/CoverageBanner.tsx';
 import { ReplanBanner } from '../components/ReplanBanner.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { TaskCard, taskColor } from '../components/TaskCard.tsx';
@@ -117,6 +118,7 @@ export function SchedulePage() {
       }>
       <PacingSwitch planId={plan.id} pacing={plan.pacing} />
       <ReplanBanner active={active.data} />
+      <CoverageBanner active={active.data} />
       <div className="calendar glass" role="grid" aria-label="Calendário de estudos">
         {WEEKDAYS.map((d) => <div key={d} className="cal-head" role="columnheader">{d}</div>)}
         {cells.map((d) => {
