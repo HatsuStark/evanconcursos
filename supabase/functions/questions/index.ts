@@ -6,8 +6,8 @@
 //   {action:'mnemonic', qid, taskId?}     → mnemônico compartilhado (ou nenhum), vira flashcard do estudante
 // A chave da Quest API e o gabarito ficam só no servidor. taskId é opcional fora do cronograma.
 import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { GENERATED_EXAMPLES, GENERATED_MAX, GENERATED_PROMPT_VERSION, GeneratedQuestions, generatedJsonSchema, generatedPrompt, generatedTheme, toPublic } from '../../../shared/qbank/generated.ts';
-import { roleSpecific } from '../../../shared/ai/guide.ts';
+import { arrangeBatch, GENERATED_EXAMPLES, GENERATED_MAX, GENERATED_PROMPT_VERSION, GeneratedQuestions, generatedJsonSchema, generatedPrompt, generatedTheme, guideDigest, toPublic } from '../../../shared/qbank/generated.ts';
+import { guideCacheKey, roleSpecific } from '../../../shared/ai/guide.ts';
 import { loadLawSources } from '../_shared/law.ts';
 import { DEEP_PREFIX, PRACTICE_PREFIX } from '../../../shared/ai/plan.ts';
 import { ownLaws } from '../_shared/legal.ts';
@@ -279,8 +279,12 @@ Deno.serve(async (req) => {
       if (reuse.length >= n) return reuse;
       try {
         const { data: ss } = await auth.client.from('study_sessions').select('topic_ids').eq('id', sid).single();
-        const { data: tt } = ss?.topic_ids?.length ? await auth.client.from('notice_topics').select('text').in('id', ss.topic_ids) : { data: [] };
-        const { law } = await loadLawSources(admin, { title: sess!.title, topics: (tt ?? []).map((t) => t.text as string), subject: subject.name, ownerId: auth.user.id, lawRefs: sess!.law_refs });
+        const { data: tt } = ss?.topic_ids?.length ? await auth.client.from('notice_topics').select('id, text').in('id', ss.topic_ids) : { data: [] };
+        const topics = (tt ?? []).sort((a, b) => ss!.topic_ids.indexOf(a.id) - ss!.topic_ids.indexOf(b.id)).map((t) => t.text as string);
+        const { law } = await loadLawSources(admin, { title: sess!.title, topics, subject: subject.name, ownerId: auth.user.id, lawRefs: sess!.law_refs });
+        // Apostila completa da sessão (a mesma chave da study-guide): base do conteúdo das questões, quando já existe.
+        const { data: guide } = await admin.from('study_guides').select('content')
+          .eq('cache_key', guideCacheKey({ depth: 'completa', banca: String(nt?.board ?? ''), subject: subject.name, title: sess!.title, topics, law, cargo })).maybeSingle();
         // Modelos de estilo e nível: as questões reais que a triagem aprovou nesta sessão; sem elas, as do cache nos assuntos dela.
         const { data: ok } = await admin.from('qbank_relevance').select('qid').eq('session_id', sid).eq('relevant', true).limit(10);
         const okIds = (ok ?? []).map((r) => r.qid as string).filter((id) => !id.startsWith('ia-'));
@@ -297,9 +301,9 @@ Deno.serve(async (req) => {
         const r = await generateJson({ apiKey, model, schema: GeneratedQuestions, jsonSchema: generatedJsonSchema(), temperature: 0.5, timeoutMs: GENERATE_TIMEOUT_MS,
           parts: [{ text: generatedPrompt({ banca: String(nt?.board ?? ''), cargo, subject: subject.name, title: sess!.title, keyword: sess!.keyword ?? '',
             law, format, n: k, avoid: all.map((q) => plain(q.enunciado)).slice(-15), examples,
-            duties: String(nt?.role_duties ?? ''), otherRoles: ((nt?.structure as { otherRoles?: string[] } | null)?.otherRoles ?? []).map(String) }) }] });
+            guide: guide ? guideDigest(guide.content) : '', duties: String(nt?.role_duties ?? ''), otherRoles: ((nt?.structure as { otherRoles?: string[] } | null)?.otherRoles ?? []).map(String) }) }] });
         usage.inputTokens += r.usage.inputTokens; usage.outputTokens += r.usage.outputTokens; usage.thinkingTokens += r.usage.thinkingTokens;
-        const rows = r.data.questoes.map((q) => toPublic(q, {
+        const rows = arrangeBatch(r.data.questoes).map((q) => toPublic(q, {
           qid: `ia-${crypto.randomUUID()}`, format, materia: filter.materia ?? subject.name, assunto: filter.assuntos[0] ?? sess!.title, theme, year: new Date().getFullYear(), sources: law.length,
         })).filter((x) => x !== null);
         if (rows.length) await admin.from('qbank_questions').insert(rows.map((x) => ({ qid: x.payload.qid, materia: x.payload.materia, assunto: x.payload.assunto, payload: x.payload, gabarito: x.gabarito })));

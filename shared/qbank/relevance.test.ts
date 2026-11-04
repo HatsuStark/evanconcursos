@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generatedPrompt, generatedTheme, toPublic, GENERATED_BANCA, GENERATED_PROMPT_VERSION } from './generated.ts';
+import { arrangeBatch, generatedPrompt, generatedTheme, guideDigest, themeKind, toPublic, GENERATED_BANCA, GENERATED_PROMPT_VERSION } from './generated.ts';
 import { prunedAssuntos, rejectedIds, relevancePrompt } from './relevance.ts';
 
 const session = { subject: 'Direito Processual Penal', title: 'Prazos Processuais e Atos em Geral: contagem contínua e suspensão (arts. 792, 798 e 798-A do CPP)', keyword: 'prazos processuais' };
@@ -82,5 +82,44 @@ describe('questões da IA presas ao cargo', () => {
   it('cargo na chave só quando passado', () => {
     expect(generatedTheme('Específicos', 'O espaço escolar', 'Agente Escolar')).not.toBe(generatedTheme('Específicos', 'O espaço escolar', 'Agente de Segurança Escolar'));
     expect(generatedTheme('Português', 'Crase')).toBe('portugues crase');
+  });
+});
+
+describe('qgen-v3: receita por tipo de tema e alternativas embaralhadas', () => {
+  const base = { banca: 'NOSSO RUMO', cargo: 'AGENTE ESCOLAR', keyword: '', format: 'multipla escolha', n: 3, avoid: [] };
+  it('tipo do tema', () => {
+    expect(themeKind({ subject: 'Direito Penal', title: 'Peculato', law: [{ ref: 'CP, art. 312', text: '…' }] })).toBe('lei');
+    expect(themeKind({ subject: 'Matemática', title: 'Regra de três simples', law: [] })).toBe('calculo');
+    expect(themeKind({ subject: 'Língua Portuguesa', title: 'Classes de palavras', law: [] })).toBe('lingua');
+    expect(themeKind({ subject: 'Conhecimentos Específicos', title: 'Higienização e limpeza das instalações', law: [] })).toBe('pratica');
+  });
+  it('tema prático não pede incisos e usa a apostila como base', () => {
+    const p = generatedPrompt({ ...base, subject: 'Conhecimentos Específicos', title: 'EPIs usados na função', law: [], guide: 'Luvas nitrílicas: produtos químicos.' });
+    expect(p).toContain('situação do dia a dia do cargo');
+    expect(p).not.toContain('incisos');
+    expect(p).toContain('Apostila que o estudante leu nesta sessão');
+    expect(p).toContain('Luvas nitrílicas');
+  });
+  it('lei mantém a receita dos dispositivos; cálculo pede a conta', () => {
+    expect(generatedPrompt({ ...base, subject: 'Direito Penal', title: 'Peculato', law: [{ ref: 'CP, art. 312', text: '…' }] })).toContain('incisos');
+    expect(generatedPrompt({ ...base, subject: 'Matemática', title: 'Porcentagem', law: [] })).toContain('erro típico');
+  });
+  it('apostila vira texto corrido com seções, quadros, memorizar e pegadinhas', () => {
+    const d = guideDigest({ secoes: [{ titulo: 'Limpeza', texto: 'Do mais limpo para o mais sujo.', exemplos: ['Pia antes do vaso'] }], quadros: [{ titulo: 'Produtos', colunas: ['Uso', 'Produto'], linhas: [['Piso', 'Detergente']] }], memorizar: ['Nunca misturar cloro e amônia'], pegadinhas: ['Água sanitária não limpa, desinfeta'] });
+    for (const t of ['Do mais limpo', 'Pia antes do vaso', 'Piso / Detergente', 'cloro e amônia', 'não limpa, desinfeta']) expect(d).toContain(t);
+  });
+  const q = (alts: string[], gab = 'A') => ({ enunciado: 'Enunciado longo o bastante', alternativas: alts, gabarito: gab, fundamento: '' });
+  const five = (i: number) => ['certa resposta aqui', 'distrator um aqui', 'distrator dois aqui', 'distrator três aqui', 'distrator quatro aqui'].map((t, j) => `${t} ${i}${j}`);
+  it('espalha a correta pelas letras e mantém o gabarito apontando para ela', () => {
+    let seed = 7; const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const out = arrangeBatch([0, 1, 2, 3, 4].map((i) => q(five(i))), rand);
+    expect(new Set(out.map((x) => x.gabarito)).size).toBe(5);
+    for (const [i, x] of out.entries()) expect(x.alternativas[x.gabarito.charCodeAt(0) - 65]).toBe(`certa resposta aqui ${i}0`);
+  });
+  it('tira a questão cuja correta é bem mais longa; não embaralha alternativa que cita outra', () => {
+    expect(arrangeBatch([q(['a resposta certa traz todos os detalhes possíveis e mais um pouco', 'curta um', 'curta dois', 'curta três', 'curta quatro'])])).toEqual([]);
+    const ref = q(['Somente I', 'Somente II', 'I e II', 'Todas as anteriores', 'Nenhuma'], 'C');
+    expect(arrangeBatch([ref])[0]).toMatchObject({ alternativas: ref.alternativas, gabarito: 'C' });
+    expect(arrangeBatch([{ ...q([], 'C') }])[0]!.gabarito).toBe('C');
   });
 });
