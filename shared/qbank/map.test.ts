@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { theoryGoal } from '../domain/scheduler.ts';
-import { dominantFormat, localPlace, pickBoard, equalIncidence, interleave, inTurn, assuntoPrompt, prefilterAssuntos, mapSession, mapSubject, measureIncidence, newestPage, planPicks, roleKeyword, searchFilters, type MapDeps } from './map.ts';
+import { dominantFormat, localPlace, pickBoard, equalIncidence, interleave, inTurn, assuntoPrompt, prefilterAssuntos, mapSession, mapSubject, measureIncidence, newestPage, usefulNarrowing, planPicks, roleKeyword, searchFilters, type MapDeps } from './map.ts';
 
 const tally = (picks: string[]) => picks.reduce<Record<string, number>>((m, a) => ({ ...m, [a]: (m[a] ?? 0) + 1 }), {});
 
@@ -39,13 +39,28 @@ describe('measureIncidence', () => {
   const filter = { materia: 'Direito Penal', assuntos: ['a', 'b'], how: '' };
   it('mede na banca do edital', async () => {
     const calls: Record<string, string>[] = [];
-    const r = await measureIncidence(async (p) => { calls.push(p); return p.assunto === 'a' ? 10 : p.banca ? 0 : 4; }, filter, 'FGV');
+    const r = await measureIncidence(async (p) => { calls.push(p); return p.assunto === 'a' ? 10 : p.banca ? 0 : 7; }, filter, 'FGV');
     expect(r).toEqual([{ assunto: 'a', total: 10 }, { assunto: 'b', total: 0 }]);
     expect(calls.filter((c) => !c.banca).map((c) => c.assunto)).toEqual(['b']);
   });
   it('assunto sem questão em banca nenhuma sai da sessão', async () => {
     const r = await measureIncidence(async (p) => (p.assunto === 'a' ? 10 : 0), filter, 'FGV');
     expect(r).toEqual([{ assunto: 'a', total: 10 }]);
+  });
+  it('assunto com menos de 5 questões nas outras bancas também sai', async () => {
+    expect(await measureIncidence(async (p) => (p.assunto === 'a' ? 10 : p.banca ? 0 : 4), filter, 'FGV')).toEqual([{ assunto: 'a', total: 10 }]);
+  });
+  it('fica com os 5 primeiros assuntos com questões, na ordem do mapa, e para de medir', async () => {
+    const asked: string[] = [];
+    const r = await measureIncidence(async (p) => { if (p.banca) asked.push(p.assunto!); return p.assunto === 'x2' ? 0 : 3; },
+      { ...filter, assuntos: ['x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7', 'x8'] }, 'FGV');
+    expect(r.map((i) => i.assunto)).toEqual(['x1', 'x3', 'x4', 'x5', 'x6']);
+    expect(asked).toEqual(['x1', 'x2', 'x3', 'x4', 'x5', 'x6']);
+  });
+  it('cargo e escolaridade só estreitam a busca quando rendem', () => {
+    expect(usefulNarrowing(6173, 178)).toBe(false);   // Oficial de Justiça no CPC: quase todo assunto volta vazio
+    expect(usefulNarrowing(6173, 5992)).toBe(false);  // nível superior: 97% da matéria, repete a busca sem filtro
+    expect(usefulNarrowing(6173, 2500)).toBe(true);
   });
   it('sem questão em lugar nenhum, não sobra assunto', async () => {
     expect(await measureIncidence(async () => 0, filter, 'FGV')).toEqual([]);

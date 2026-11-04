@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
-import { dominantFormat, mapSession, mapSubject, newestPage, pickBoard, QMAP_PROMPT_VERSION, QUESTION_FORMATS, type Incidence, type MapDeps, type SessionFilter } from '../../../shared/qbank/map.ts';
+import { dominantFormat, mapSession, mapSubject, newestPage, pickBoard, QMAP_PROMPT_VERSION, QUESTION_FORMATS, usefulNarrowing, type Incidence, type MapDeps, type SessionFilter } from '../../../shared/qbank/map.ts';
 
 export const plain = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -113,6 +113,22 @@ export async function ensureBoardFormat(admin: SupabaseClient, quest: QuestClien
     await admin.from('qbank_subject_maps').update({ banca_tipo: format }).eq('subject_id', subjectId);
     return format;
   } catch { return ''; }
+}
+
+// Cargo e escolaridade que valem a pena na busca desta disciplina (usefulNarrowing), medidos uma vez: 3 buscas, ~4 s.
+// Muda o cargo ou a escolaridade do edital, mede de novo. Se a medição falhar, busca com os dois, como antes.
+export async function ensureNarrowing(admin: SupabaseClient, quest: QuestClient, subjectId: string, materia: string | null, role: string, level: string) {
+  if (!materia || (!role && !level)) return { role, level };
+  const { data } = await admin.from('qbank_subject_maps').select('narrowing').eq('subject_id', subjectId).maybeSingle();
+  const n = data?.narrowing as { role: string; level: string; useRole: boolean; useLevel: boolean } | null;
+  if (n && n.role === role && n.level === level) return { role: n.useRole ? role : '', level: n.useLevel ? level : '' };
+  try {
+    const total = await quest.usableTotal({ materia });
+    const useRole = !!role && usefulNarrowing(total, await quest.usableTotal({ materia, cargo: role }));
+    const useLevel = !!level && usefulNarrowing(total, await quest.usableTotal({ materia, nivel_escolaridade: level }));
+    await admin.from('qbank_subject_maps').update({ narrowing: { role, level, useRole, useLevel } }).eq('subject_id', subjectId);
+    return { role: useRole ? role : '', level: useLevel ? level : '' };
+  } catch { return { role, level }; }
 }
 
 // Assuntos da sessão (uma vez por sessão e versão do prompt). Mapa de versão antiga é refeito na próxima abertura; a

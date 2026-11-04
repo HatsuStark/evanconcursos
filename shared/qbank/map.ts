@@ -11,7 +11,10 @@ import { organSearch, placeFilter } from './places.ts';
 // qmap-v4: o tema da sessão é o foco; o item do edital é só contexto (um item longo, como "Classes de palavras: substantivo,
 // adjetivo, …, conjunção", vira várias sessões) e assunto genérico só entra sem um específico do tema.
 // qmap-v5: assunto com o nome do tema ("Competência" numa sessão de competência) não conta como genérico.
-export const QMAP_PROMPT_VERSION = 'qmap-v5';
+// qmap-v6: até 8 assuntos em ordem de relevância; a medição fica com os 5 primeiros que têm questões. A IA prefere nomes que
+// parecem específicos ("Conceito, Princípios e Regras de Competência", 2 questões) aos que têm volume ("Competência", 159).
+export const QMAP_PROMPT_VERSION = 'qmap-v6';
+export const SESSION_ASSUNTOS = 5, ASSUNTO_CANDIDATES = 8;
 
 const STOP = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'a', 'o', 'as', 'os', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'ao', 'aos', 'art', 'arts', 'lei', 'nocoes', 'noções']);
 export const tokens = (s: string) => normalizeText(s).split(' ').filter((w) => w.length > 2 && !STOP.has(w));
@@ -56,7 +59,7 @@ Escolha a matéria cujas questões melhor cobrem a disciplina. Prefira a geral �
 }
 
 export const AssuntoChoice = z.object({
-  assuntos: z.array(z.string()).describe('Até 5 assuntos da lista, exatamente como escritos, do mais ao menos relevante.'),
+  assuntos: z.array(z.string()).describe('Até 8 assuntos da lista, exatamente como escritos, do mais ao menos relevante.'),
 });
 export const assuntoJsonSchema = () => z.toJSONSchema(AssuntoChoice, { target: 'draft-7' });
 export function assuntoPrompt(p: { subject: string; materia: string; title: string; keyword: string; topics: string[]; assuntos: string[] }) {
@@ -67,7 +70,7 @@ Palavra-chave: ${p.keyword || '—'}
 Item do edital de onde o tema saiu (só contexto; pode listar assuntos que são de outras sessões): ${p.topics.join(' | ').slice(0, 1200) || '—'}
 Assuntos disponíveis no banco de questões (escolha somente desta lista, exatamente como escritos):
 ${p.assuntos.map((a) => `- ${a}`).join('\n')}
-Escolha até 5 assuntos cujas questões treinam exatamente o TEMA da sessão, do mais ao menos relevante.
+Escolha até 8 assuntos cujas questões treinam exatamente o TEMA da sessão, do mais ao menos relevante (o app fica com os primeiros que tiverem questões).
 - O item do edital costuma ser maior que o tema: ignore o que ele lista fora do tema (ex.: tema "Substantivos e adjetivos" num item que cita todas as classes de palavras não leva pronome, verbo nem conjunção).
 - Evite assunto genérico que abrange a matéria ou vários temas (ex.: "Classes de palavras", "Morfologia", "Gramática") quando houver assunto específico do tema; use o genérico só se não houver nenhum específico.
 - Assunto com o nome do próprio tema ou de uma parte dele não é genérico: inclua-o (ex.: "Competência" numa sessão sobre competência, "Princípios do Direito Processual Civil" numa sessão sobre os princípios do CPC). Os subassuntos dele entram junto, não no lugar.
@@ -181,7 +184,7 @@ export async function mapSession(d: MapDeps, subjectMateria: string | null,
     const lista = fits(materia) ? (await d.assuntosOf(materia)).filter(fits) : [];
     if (!lista.length) return [];
     const r = await d.ai(AssuntoChoice, assuntoJsonSchema(), assuntoPrompt({ subject: s.subject, materia, title: s.title, keyword: s.keyword, topics: s.topics, assuntos: prefilterAssuntos(lista, [s.title, s.keyword].join(' '), 120, s.topics.join(' ')) }));
-    return keepValid(r.assuntos, lista);
+    return keepValid(r.assuntos, lista, ASSUNTO_CANDIDATES);
   };
   if (subjectMateria) {
     const a = await tryMateria(subjectMateria);
@@ -271,22 +274,31 @@ export const inTurn = (filters: SearchFilter[], turn: number) => {
 export interface Incidence { assunto: string; total: number }
 export const equalIncidence = (assuntos: string[]): Incidence[] => assuntos.map((assunto) => ({ assunto, total: 1 }));
 
-// Quantas questões a banca tem em cada assunto. Sem nenhuma na banca, vale o total das outras bancas.
-// Assunto sem questão em banca nenhuma sai da lista: buscá-lo gastaria ~1 s por filtro (cargo, escolaridade, banca, dificuldade)
-// e estouraria o tempo do pedido antes dos assuntos bons, mandando a sessão para as questões da IA.
+// Quantas questões a banca tem em cada assunto, na ordem de relevância do mapa, até 5 assuntos com questões. Assunto sem
+// questão na banca entra com total 0 se tiver ao menos 5 nas outras; com menos, sai: buscá-lo gastaria ~1,1 s por filtro
+// (limite da API) e estouraria o tempo do pedido antes dos assuntos bons, mandando a sessão para as questões da IA.
+// Sem nenhuma questão na banca, valem os totais das outras bancas.
 // Atualidades fica em partes iguais: só contam as provas recentes, e o histórico não diz o que volta a cair.
-export async function measureIncidence(count: (params: Record<string, string>) => Promise<number>, f: SessionFilter, banca: string): Promise<Incidence[]> {
-  if (!f.materia || /atualidade/i.test(f.materia)) return equalIncidence(f.assuntos);
-  const measure = async (assuntos: string[], extra: Record<string, string>) => {
-    const out: Incidence[] = [];
-    for (const assunto of assuntos) out.push({ assunto, total: await count({ ...extra, materia: f.materia!, assunto }) });
-    return out;
-  };
-  const inBoard = banca ? await measure(f.assuntos, { banca }) : [];
-  if (!inBoard.some((i) => i.total > 0)) return (await measure(f.assuntos, {})).filter((i) => i.total > 0);
-  const elsewhere = new Set((await measure(inBoard.filter((i) => !i.total).map((i) => i.assunto), {})).filter((i) => i.total > 0).map((i) => i.assunto));
-  return inBoard.filter((i) => i.total > 0 || elsewhere.has(i.assunto));
+export const MIN_ASSUNTO_QUESTIONS = 5;
+export async function measureIncidence(count: (params: Record<string, string>) => Promise<number>, f: SessionFilter, banca: string, max = SESSION_ASSUNTOS): Promise<Incidence[]> {
+  if (!f.materia || /atualidade/i.test(f.materia)) return equalIncidence(f.assuntos.slice(0, max));
+  const out: { assunto: string; total: number; all: number }[] = [];
+  for (const assunto of f.assuntos) {
+    if (out.length >= max) break;
+    const inBoard = banca ? await count({ banca, materia: f.materia, assunto }) : 0;
+    if (inBoard > 0) { out.push({ assunto, total: inBoard, all: inBoard }); continue; }
+    const all = await count({ materia: f.materia, assunto });
+    if (all >= MIN_ASSUNTO_QUESTIONS) out.push({ assunto, total: 0, all });
+  }
+  const board = out.some((i) => i.total > 0);
+  return out.map((i) => ({ assunto: i.assunto, total: board ? i.total : i.all }));
 }
+
+// Cargo e escolaridade só estreitam a busca quando rendem. Com menos de 500 questões na matéria (ex.: "Oficial de Justiça",
+// 178 no CPC), quase todo assunto volta vazio; com mais de 90% dela (nível superior, 97% no CPC), repetem a busca sem filtro.
+// Cada nível inútil custa 3 buscas por assunto (uma por dificuldade), ~1,1 s cada pelo limite da API.
+export const NARROW_MIN = 500, NARROW_MAX_SHARE = 0.9;
+export const usefulNarrowing = (materiaTotal: number, narrowed: number) => narrowed >= NARROW_MIN && narrowed <= materiaTotal * NARROW_MAX_SHARE;
 
 // Quais assuntos recebem as próximas n questões: primeiro todos passam pela sessão, do mais ao menos cobrado;
 // depois, cada questão vai para o assunto que está mais abaixo da sua parte na cobrança da banca.

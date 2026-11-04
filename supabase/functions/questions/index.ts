@@ -15,11 +15,11 @@ import { lawByKey } from '../../../shared/legal/registry.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import {
   equalIncidence, EXPLAIN_PROMPT_VERSION, Explanation, explainPrompt, explanationJsonSchema, inTurn, measureIncidence, planPicks,
-  QMAP_PROMPT_VERSION, roleKeyword, searchFilters, SESSION_DIFFICULTIES, type Incidence, type SessionFilter,
+  QMAP_PROMPT_VERSION, roleKeyword, searchFilters, SESSION_ASSUNTOS, SESSION_DIFFICULTIES, type Incidence, type SessionFilter,
 } from '../../../shared/qbank/map.ts';
 import { conceptKey, MNEMONIC_PROMPT_VERSION, MnemonicChoice, mnemonicJsonSchema, mnemonicPrompt, pickExisting } from '../../../shared/qbank/mnemonic.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-import { activePlan, ensureBoardFormat, fromCache, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, questFailure, recordAnswer, takeNewest, upsertFlashcard, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
+import { activePlan, ensureBoardFormat, ensureNarrowing, fromCache, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, questFailure, recordAnswer, takeNewest, upsertFlashcard, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
 
 // Com alguma questão pronta, não faz o estudante esperar por mais; sem nenhuma, desiste antes do limite da função.
 const SOFT_LIMIT_MS = 15_000, HARD_LIMIT_MS = 90_000;
@@ -189,7 +189,9 @@ Deno.serve(async (req) => {
     }
     const { data: notice } = await auth.client.from('notices').select('education_level, role_name').eq('id', subject.notice_id).single();
     const format = await ensureBoardFormat(admin, quest, subject.id, sm);
-    const allFilters = searchFilters(filter, sm.banca, { level: String(notice?.education_level ?? ''), role: roleKeyword(String(notice?.role_name ?? '')), format });
+    // Cargo e escolaridade só entram na busca se rendem nesta matéria (sem eles, cada assunto passa por 2 níveis, não 6).
+    const narrow = await ensureNarrowing(admin, quest, subject.id, sm.materia, roleKeyword(String(notice?.role_name ?? '')), String(notice?.education_level ?? ''));
+    const allFilters = searchFilters(filter, sm.banca, { ...narrow, format });
     // Sessão sem assunto no banco de questões vai direto para as questões inéditas da IA.
     if (!allFilters.length && !task.session_id) { await log('qbank_fetch', 'ok'); return json(200, { questions: [], reason: 'sem-assunto' }); }
 
@@ -199,7 +201,7 @@ Deno.serve(async (req) => {
         try {
           incidence = await measureIncidence((params) => quest.count(params), filter, sm.banca);
           await admin.from('qbank_session_maps').update({ incidence }).eq('session_id', task.session_id);
-        } catch { incidence = equalIncidence(filter.assuntos); }
+        } catch { incidence = equalIncidence(filter.assuntos.slice(0, SESSION_ASSUNTOS)); }
       } else incidence = equalIncidence(filter.assuntos);
     }
     // Assunto sem questão em banca nenhuma ficou fora da medição: nem entra na busca.
