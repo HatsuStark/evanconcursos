@@ -149,7 +149,7 @@ export function parseNormsText(raw: string): LegalArticle[] {
       const label = `${normLabel(num)}${suffix ? '-' + suffix : ''}`;
       const rest = line.slice(a[0].length).trim();
       current = { ord: out.length, label, num, suffix, heading: headings.map((h) => h.text).join(' › '),
-        text: `Art. ${label}${num < 10 && !suffix ? 'º' : '.'} ${rest}`.trim(), notes: [], revoked: /^\(?Revogad[oa]\)?\.?$/i.test(rest) };
+        text: `Art. ${label}${num < 10 && !suffix ? 'º' : '.'} ${rest}`.trim(), notes: [], revoked: /^\(?Revogad[oa]\)?\.?\s*\d{0,3}$/i.test(rest) };
       out.push(current);
       continue;
     }

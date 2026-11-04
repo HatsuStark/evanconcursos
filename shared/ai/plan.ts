@@ -156,3 +156,41 @@ export function repairSessions(raw: SubjectSessions, n: number, topics: string[]
   s = s.map((x) => ({ ...x, keyword: x.keyword || topicKeyword(x.title) }));
   return { sessions: s, fixes };
 }
+
+// ---------- sessões de lei quase vazia ----------
+// O edital às vezes cita artigos revogados ou que só remetem a outro capítulo (ex.: Normas da CGJ, arts. 105 a 110: o 105
+// remete ao Capítulo VII e os demais foram revogados em 2023). Uma sessão inteira para isso desperdiça um dia. A medição
+// vem do texto oficial (artigos vigentes e revogados dos intervalos citados no título); a sessão curta é juntada à
+// vizinha que cita a mesma lei (ou, sem ela, à vizinha mais próxima), e o título leva os artigos das duas para a lei seca,
+// a apostila e as questões continuarem cobrindo tudo. Depois, repairSessions divide a maior para manter a contagem.
+export interface LawSize { law: string; short: string; ranges: string; liveChars: number; liveArticles: number; revokedArticles: number }
+export const SHORT_LAW_CHARS = 600, MOSTLY_REVOKED_CHARS = 1500;
+export function isShortLaw(sizes: LawSize[]) {
+  if (!sizes.length) return false;
+  const live = sizes.reduce((a, s) => a + s.liveChars, 0), revoked = sizes.reduce((a, s) => a + s.revokedArticles, 0);
+  const total = revoked + sizes.reduce((a, s) => a + s.liveArticles, 0);
+  return live < SHORT_LAW_CHARS || (revoked * 2 >= total && live < MOSTLY_REVOKED_CHARS);
+}
+export function mergeShortLawSessions<T extends { title: string; keyword: string; topics: number[]; incidence?: number }>(list: T[], sizes: (LawSize[] | null)[]): { sessions: T[]; merged: string[] } {
+  const s = list.map((x, i) => ({ x, size: sizes[i] ?? null }));
+  const merged: string[] = [];
+  for (let i = 0; i < s.length && s.length > 1; i++) {
+    const cur = s[i]!;
+    if (!cur.size || !isShortLaw(cur.size)) continue;
+    const laws = new Set(cur.size.map((z) => z.law));
+    const shares = (j: number) => !!s[j]?.size?.some((z) => laws.has(z.law)) && !isShortLaw(s[j]!.size!);
+    // A mais próxima que cita a mesma lei; sem nenhuma, a vizinha seguinte (ou a anterior, no fim).
+    let target = -1;
+    for (let d = 1; d < s.length && target < 0; d++) for (const j of [i + d, i - d]) if (target < 0 && j >= 0 && j < s.length && shares(j)) target = j;
+    if (target < 0) target = i + 1 < s.length ? i + 1 : i - 1;
+    const t = s[target]!;
+    // Artigos todos revogados não vão para o título: não há o que ler nem cobrar.
+    const extra = cur.size.filter((z) => z.liveArticles > 0).map((z) => `${z.short}, ${z.ranges}`).join('; ');
+    t.x = { ...t.x, title: (extra ? `${t.x.title}; ${extra}` : t.x.title).slice(0, 200), topics: [...new Set([...t.x.topics, ...cur.x.topics])].sort((a, b) => a - b), incidence: Math.max(t.x.incidence ?? 2, cur.x.incidence ?? 2) };
+    t.size = [...(t.size ?? []), ...cur.size];
+    merged.push(`"${cur.x.title}" juntada a "${t.x.title}"`);
+    s.splice(i, 1);
+    i--;
+  }
+  return { sessions: s.map((y) => y.x), merged };
+}

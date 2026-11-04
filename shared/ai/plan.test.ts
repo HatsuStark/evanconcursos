@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { theoryGoal } from '../domain/scheduler.ts';
 import { buildPlanPayload, carryOverSessions, questionsOf, theoryPlan, type PlanBase } from './plan-build.ts';
-import { fallbackSessions, repairSessions, type SubjectSessions } from './plan.ts';
+import { fallbackSessions, isShortLaw, mergeShortLawSessions, repairSessions, type SubjectSessions } from './plan.ts';
+import { findLawRefs } from '../legal/refs.ts';
 
 function rng(seed: number) { return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32; }; }
 const topicsOf = (n: number) => Array.from({ length: n }, (_, i) => `Tópico ${i + 1}: assunto ${i + 1}`);
@@ -144,5 +145,33 @@ describe('questionsOf', () => {
   });
   it('sem bloco, usa o que falta no total da prova', () => {
     expect(questionsOf(base([sub('a', 30), sub('b', 0), sub('c', 0)]))).toEqual({ a: 30, b: 20, c: 20 });
+  });
+});
+
+describe('sessão de lei quase vazia', () => {
+  const size = (law: string, ranges: string, liveChars: number, liveArticles: number, revokedArticles: number) => [{ law, short: law, ranges, liveChars, liveArticles, revokedArticles }];
+  const s = (title: string, topics: number[]) => ({ title, keyword: '', topics, incidence: 2 });
+  it('artigos revogados ou só remissivos: junta à sessão mais próxima da mesma lei, com os artigos no título', () => {
+    const r = mergeShortLawSessions(
+      [s('Disposições Gerais: Normas da CGJ (arts. 1º a 4º)', [1]), s('Execução fiscal: Lei 6.830/80 (arts. 1º a 8º)', [1]), s('Carga de Autos: Normas da CGJ (arts. 105 a 110)', [1]), s('Mandados: Normas da CGJ (arts. 994 a 1.091-A)', [1, 2])],
+      [size('NSCGJ', 'arts. 1 a 4', 2500, 4, 0), size('L6830', 'arts. 1 a 8', 3000, 8, 0), size('NSCGJ', 'arts. 105 a 110', 360, 1, 5), size('NSCGJ', 'arts. 994 a 1.091-A', 60000, 90, 3)]);
+    expect(r.sessions.map((x) => x.title)).toEqual(['Disposições Gerais: Normas da CGJ (arts. 1º a 4º)', 'Execução fiscal: Lei 6.830/80 (arts. 1º a 8º)', 'Mandados: Normas da CGJ (arts. 994 a 1.091-A); NSCGJ, arts. 105 a 110']);
+    expect(r.merged).toHaveLength(1);
+  });
+  it('sessão toda revogada some sem levar artigos para o título da vizinha', () => {
+    const r = mergeShortLawSessions([s('Prazos e Certidões: Normas da CGJ (arts. 1.046 a 1.070)', [1]), s('Despesas: NSCGJ (arts. 1.071 a 1.091-A)', [2])],
+      [size('NSCGJ', 'arts. 1.046 a 1.070', 9000, 20, 1), size('NSCGJ', 'arts. 1.071 a 1.091-A', 0, 0, 22)]);
+    expect(r.sessions).toEqual([{ ...s('Prazos e Certidões: Normas da CGJ (arts. 1.046 a 1.070)', [1, 2]) }]);
+  });
+  it('sessão com texto suficiente ou sem lei medida fica como está', () => {
+    const list = [s('Princípios: CPC (arts. 1º a 12)', [1]), s('Competência', [2])];
+    expect(mergeShortLawSessions(list, [size('CPC', 'arts. 1 a 12', 2400, 12, 0), null]).sessions).toEqual(list);
+  });
+  it('maioria revogada com pouco texto vigente também conta como curta', () => {
+    expect(isShortLaw(size('NSCGJ', 'arts. 1 a 6', 1200, 2, 4))).toBe(true);
+    expect(isShortLaw(size('CPC', 'arts. 1 a 4', 800, 4, 0))).toBe(false);
+  });
+  it('o título juntado aponta os artigos das duas sessões', () => {
+    expect(findLawRefs('Mandados: Normas da CGJ (arts. 994 a 1.091-A); NSCGJ, arts. 105 a 110')).toEqual([{ law: 'NSCGJ', ranges: [{ from: 994, to: 1091, toSuffix: 'A' }, { from: 105, to: 110 }] }]);
   });
 });

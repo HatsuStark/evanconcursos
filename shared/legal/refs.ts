@@ -103,3 +103,11 @@ export function sessionLawRefs(title: string, topics: string[], subject = ''): L
   if (inTitle.length) return fromTopics.filter((r) => inTitle.some((t) => t.law === r.law));
   return fromTopics.length === 1 ? fromTopics : [];
 }
+
+// "arts. 105 a 110, 994", "art. 5" ou "lei completa".
+// Números com ponto de milhar e sufixo ("1.091-A"), como no texto da lei, para o título voltar a apontar os mesmos artigos.
+const artLabel = (n: number, suffix?: string) => `${n.toLocaleString('pt-BR').replace(/\s/g, '.')}${suffix ? '-' + suffix : ''}`;
+export const rangesLabel = (r: LawRef) => r.ranges.length
+  ? (r.ranges.length === 1 && r.ranges[0]!.from === r.ranges[0]!.to && r.ranges[0]!.fromSuffix === r.ranges[0]!.toSuffix ? 'art. ' : 'arts. ')
+    + r.ranges.map((x) => x.from === x.to && x.fromSuffix === x.toSuffix ? artLabel(x.from, x.fromSuffix) : `${artLabel(x.from, x.fromSuffix)} a ${artLabel(x.to, x.toSuffix)}`).join(', ')
+  : 'lei completa';

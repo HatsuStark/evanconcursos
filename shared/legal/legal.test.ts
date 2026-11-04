@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseLawHtml, parseNormsText } from './parse.ts';
-import { citesUnlistedLaw, findLawRefs, inRanges, noticeLawKeys, parseRanges, sessionLawRefs } from './refs.ts';
+import { citesUnlistedLaw, findLawRefs, inRanges, noticeLawKeys, parseRanges, rangesLabel, sessionLawRefs } from './refs.ts';
 
 // Trecho real do HTML do CPP no normas.leg.br (estrutura preservada).
 const HTML = `<html><body>
@@ -154,5 +154,13 @@ describe('artigos de lei da sessão: o título manda', () => {
   it('título sem lei: o item só vale com uma lei só', () => {
     expect(sessionLawRefs('Custas e despesas processuais', item)).toEqual([]);
     expect(sessionLawRefs('Prazos processuais', ['Código de Processo Penal: artigos 798 e 798-A'])).toEqual([{ law: 'CPP', ranges: [{ from: 798, to: 798 }, { from: 798, to: 798, fromSuffix: 'A' }] }]);
+  });
+});
+
+describe('rótulo dos artigos', () => {
+  it('ponto de milhar e sufixo, para o título apontar os mesmos artigos', () => {
+    const r = findLawRefs('Normas da CGJ (arts. 1.071 a 1.091-A, 105)')[0]!;
+    expect(rangesLabel(r)).toBe('arts. 1.071 a 1.091-A, 105');
+    expect(findLawRefs(`NSCGJ, ${rangesLabel(r)}`)).toEqual([r]);
   });
 });

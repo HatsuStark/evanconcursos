@@ -4,11 +4,32 @@
 //   {step:'sessions', noticeId, subjectId, n, minutes, level, focus, profile} → n sessões da matéria, cobrindo todos os tópicos
 // O calendário é montado no app pelo scheduler determinístico e gravado por create_plan_version.
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { PLAN_PROMPT_VERSION, PlanInputs, PlanStrategy, repairSessions, sessionsJsonSchema, sessionsPrompt, strategyJsonSchema, strategyPrompt, SubjectSessions } from '../../../shared/ai/plan.ts';
+import { inRanges, rangesLabel, sessionLawRefs } from '../../../shared/legal/refs.ts';
+import { lawByKey } from '../../../shared/legal/registry.ts';
+import { type LawSize, mergeShortLawSessions, PLAN_PROMPT_VERSION, PlanInputs, PlanStrategy, repairSessions, sessionsJsonSchema, sessionsPrompt, strategyJsonSchema, strategyPrompt, SubjectSessions } from '../../../shared/ai/plan.ts';
 import { isOpenEnded } from '../../../shared/domain/rounds.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 
 const int = (v: unknown, min: number, max: number) => Math.max(min, Math.min(max, Math.round(Number(v) || 0)));
+
+// Tamanho do texto vigente dos artigos citados pela sessão (texto oficial no banco). Sem artigo citado, ou lei fora do
+// banco, null: a sessão fica como a IA montou.
+async function lawSize(admin: ReturnType<typeof adminClient>, title: string, topics: string[], subject: string): Promise<LawSize[] | null> {
+  const out: LawSize[] = [];
+  for (const ref of sessionLawRefs(title, topics, subject).slice(0, 4)) {
+    const law = lawByKey(ref.law);
+    if (!law) return null;
+    const { data: norm } = await admin.from('legal_norms').select('id').eq('urn', law.urn).maybeSingle();
+    if (!norm) return null;
+    const { data: arts } = await admin.from('legal_articles').select('num, suffix, text, revoked').eq('norm_id', norm.id)
+      .gte('num', Math.min(...ref.ranges.map((x) => x.from))).lte('num', Math.max(...ref.ranges.map((x) => x.to))).limit(400);
+    const hit = (arts ?? []).filter((a) => inRanges(ref.ranges, a.num, a.suffix));
+    if (!hit.length) return null;
+    const live = hit.filter((a) => !a.revoked);
+    out.push({ law: ref.law, short: law.short, ranges: rangesLabel(ref), liveChars: live.reduce((n, a) => n + a.text.length, 0), liveArticles: live.length, revokedArticles: hit.length - live.length });
+  }
+  return out.length ? out : null;
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -63,7 +84,12 @@ Deno.serve(async (req) => {
         }) }],
       });
       usage = r.usage; latencyMs = r.latencyMs;
-      const { sessions, fixes } = repairSessions(r.data, n, topics);
+      // Sessão de lei quase vazia (artigos revogados ou só remissivos) é juntada à vizinha da mesma lei; repairSessions
+      // divide a maior para manter as n sessões.
+      const sizes = await Promise.all(r.data.sessions.map((x) => lawSize(admin, x.title, x.topics.map((t) => topics[t - 1] ?? ''), subject.name)));
+      const short = mergeShortLawSessions(r.data.sessions, sizes);
+      const { sessions, fixes } = repairSessions({ ...r.data, sessions: short.sessions }, n, topics);
+      fixes.unshift(...short.merged.map((m) => `lei curta: ${m}`));
       await logUsage(admin, { ownerId: auth.user.id, operation, model, promptVersion: PLAN_PROMPT_VERSION, usage, latencyMs, status: 'ok' });
       return json(200, { sessions, fixes });
     }

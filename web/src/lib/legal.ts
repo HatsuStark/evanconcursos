@@ -1,6 +1,6 @@
 // Lei seca: leis citadas pela sessão, artigos (texto oficial compartilhado) e marcações pessoais.
 import { useQuery } from '@tanstack/react-query';
-import { citesUnlistedLaw, findLawRefs, inRanges, type LawRef } from '../../../shared/legal/refs.ts';
+import { findLawRefs, inRanges, rangesLabel, sessionLawRefs as lawRefsOfSession, type LawRef } from '../../../shared/legal/refs.ts';
 import { lawByKey } from '../../../shared/legal/registry.ts';
 import { supabase } from './supabase.ts';
 
@@ -8,17 +8,13 @@ export interface Norm { id: string; law_key: string; name: string; short_name: s
 export interface Article { id: string; ord: number; label: string; num: number; suffix: string; heading: string; text: string; notes: string[]; revoked: boolean }
 export interface Mark { id: string; article_id: string; color: string; note: string }
 
-// Leis da sessão: as citadas no título (mais específicas); se não houver artigos ali, as dos tópicos do edital.
+// Leis da sessão: a mesma regra das questões e da apostila (o título manda; o item do edital só completa quando bate com
+// ele). Sem artigos, a lei citada no título (ou a principal da matéria) inteira.
 export function sessionLawRefs(title: string, topics: string[], subject: string): LawRef[] {
-  const fromTitle = findLawRefs(title, subject);
-  if (fromTitle.some((r) => r.ranges.length) || citesUnlistedLaw(title)) return fromTitle;
-  const fromTopics = findLawRefs(topics.join('\n'), subject);
-  return fromTopics.length ? fromTopics : fromTitle;
+  const refs = lawRefsOfSession(title, topics, subject);
+  return refs.length ? refs : findLawRefs(title, subject);
 }
-
-export const rangesLabel = (r: LawRef) => r.ranges.length
-  ? (r.ranges.length === 1 && r.ranges[0]!.from === r.ranges[0]!.to ? 'art. ' : 'arts. ') + r.ranges.map((x) => x.from === x.to ? `${x.from}${x.fromSuffix ? '-' + x.fromSuffix : ''}` : `${x.from} a ${x.to}`).join(', ')
-  : 'lei completa';
+export { rangesLabel };
 
 // Garante a lei no banco (a função legal-text busca no normas.leg.br na primeira vez) e devolve os artigos.
 export const useLawArticles = (ref: LawRef | null) => useQuery({
