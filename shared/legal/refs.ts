@@ -18,6 +18,7 @@ export function citedArticleCount(text: string) {
 // Intervalos a partir de "293 a 305; 307; 308; 311-A; 312 a 317 e 319".
 export function parseRanges(s: string): ArticleRange[] {
   const out: ArticleRange[] = [];
+  s = s.replace(new RegExp(DEVICE, 'gi'), ' '); // "§ 1º" não é o art. 1º
   const re = new RegExp(`${NUM}(?:\\s*(?:a|até|ao|-)\\s*${NUM})?`, 'g');
   for (const m of s.matchAll(re)) {
     const from = num(m[1]!), to = m[3] ? num(m[3]) : from;
@@ -29,8 +30,13 @@ export function parseRanges(s: string): ArticleRange[] {
 
 // Trecho de artigos logo depois da menção à lei (ou "arts. X da CF", antes dela). O separador é obrigatório entre
 // os números: opcional, a regex tenta todas as divisões da lista e leva minutos em listas longas de edital.
-const SEP = String.raw`\s*(?:,|;|e|a|até|ao|-)`;
-const ART_LIST = String.raw`\b(?:arts?\.|artigos?)\s*(${NUM}(?:${SEP}\s*${NUM})*(?:${SEP})?)`;
+const SEP = String.raw`\s*(?:,\s*e\b|,|;|e|a|até|ao|-)`;
+// Dispositivo dentro do artigo ("196, XX", "282, § 1º", "inciso II", "parágrafo único", "alínea b"): o artigo entra
+// inteiro e a lista continua ("arts. 196, XX, 282, § 1º, 310" = arts. 196, 282 e 310). Começa por letra ou §, nunca por
+// dígito, para não disputar com o número seguinte da lista.
+const DEVICE = String.raw`(?:§+\s*\d{1,3}\s*(?:º|°)?|par[áa]grafo\s+[úu]nico|p\.\s*[úu]\.|caput|inc(?:iso)?s?\.?\s*[IVXLC]{1,7}\b|(?<![-\w])[IVXLC]{1,7}(?=\s*(?:[,;)]|e\s|$))|al[íi]neas?\s*["“]?[a-z]\b["”]?)`;
+const QUAL = String.raw`(?:\s*,?\s*${DEVICE})*`;
+const ART_LIST = String.raw`\b(?:arts?\.|artigos?)\s*(${NUM}${QUAL}(?:${SEP}\s*${NUM}${QUAL})*(?:${SEP})?)`;
 
 // Cita lei fora do registro (ex.: estadual)? Então os artigos do texto são dela, não de outra lei conhecida.
 // `extra`: normas enviadas pelo estudante (PDF), que valem como leis do registro para ele.

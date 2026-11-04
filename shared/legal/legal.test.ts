@@ -139,6 +139,14 @@ describe('Normas Judiciais da CGJ SP (PDF)', () => {
     expect(findLawRefs('Normas Judiciais da Corregedoria Geral da Justiça (Tomo I – Capítulo I: art. 1º a 4º)').map((r) => r.law)).toEqual(['NSCGJ']);
     expect(findLawRefs('Normas Extrajudiciais da Corregedoria Geral da Justiça').map((r) => r.law)).toEqual([]);
   });
+  it('incisos, parágrafos e alíneas no meio da lista não cortam os artigos seguintes', () => {
+    const one = (n: number, s?: string) => ({ from: n, to: n, ...(s ? { fromSuffix: s } : {}) });
+    expect(sessionLawRefs('Expedição de Mandados e Citações: Tomo I, arts. 196, XX, 282, § 1º, 310, 315, 410, 436, 436-A, 439, 440 e 440-A', [], 'Normas da Corregedoria'))
+      .toEqual([{ law: 'NSCGJ', ranges: [one(196), one(282), one(310), one(315), one(410), one(436), one(436, 'A'), one(439), one(440), one(440, 'A')] }]);
+    expect(findLawRefs('CPP, arts. 351, parágrafo único, 352, inciso II, 357, alínea b, e 311-C')[0]!.ranges)
+      .toEqual([one(351), one(352), one(357), one(311, 'C')]);
+    expect(findLawRefs('Tomo II, arts. 1 a 5').map((r) => r.law)).toEqual([]);
+  });
 });
 
 describe('artigos de lei da sessão: o título manda', () => {
