@@ -9,6 +9,7 @@ import { lawByKey } from '../../../shared/legal/registry.ts';
 import { type LawSize, mergeShortLawSessions, PLAN_PROMPT_VERSION, PlanInputs, PlanStrategy, repairSessions, sessionsJsonSchema, sessionsPrompt, strategyJsonSchema, strategyPrompt, SubjectSessions } from '../../../shared/ai/plan.ts';
 import { isOpenEnded } from '../../../shared/domain/rounds.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
+import { ensureLaw } from '../_shared/legal.ts';
 
 const int = (v: unknown, min: number, max: number) => Math.max(min, Math.min(max, Math.round(Number(v) || 0)));
 
@@ -19,9 +20,10 @@ async function lawSize(admin: ReturnType<typeof adminClient>, title: string, top
   for (const ref of sessionLawRefs(title, topics, subject).slice(0, 4)) {
     const law = lawByKey(ref.law);
     if (!law) return null;
-    const { data: norm } = await admin.from('legal_norms').select('id').eq('urn', law.urn).maybeSingle();
-    if (!norm) return null;
-    const { data: arts } = await admin.from('legal_articles').select('num, suffix, text, revoked').eq('norm_id', norm.id)
+    // Lei do registro ainda fora do banco é baixada agora (uma vez para todos), para a sessão poder ser medida.
+    const normId = await ensureLaw(admin, law);
+    if (!normId) return null;
+    const { data: arts } = await admin.from('legal_articles').select('num, suffix, text, revoked').eq('norm_id', normId)
       .gte('num', Math.min(...ref.ranges.map((x) => x.from))).lte('num', Math.max(...ref.ranges.map((x) => x.to))).limit(400);
     const hit = (arts ?? []).filter((a) => inRanges(ref.ranges, a.num, a.suffix));
     if (!hit.length) return null;
