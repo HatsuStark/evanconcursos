@@ -1,6 +1,6 @@
 // Lei seca: leis citadas pela sessão, artigos (texto oficial compartilhado) e marcações pessoais.
 import { useQuery } from '@tanstack/react-query';
-import { findLawRefs, inRanges, rangesLabel, sessionLawRefs as lawRefsOfSession, storedLawRefs, type LawRef } from '../../../shared/legal/refs.ts';
+import { findLawRefs, inRanges, rangesLabel, rangesOrFilter, sessionLawRefs as lawRefsOfSession, storedLawRefs, type LawRef } from '../../../shared/legal/refs.ts';
 import { ownLawEntry, unlistedNorms, type OwnNormRow, type UnlistedNorm } from '../../../shared/legal/norms.ts';
 import { lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
 import { supabase } from './supabase.ts';
@@ -82,7 +82,7 @@ export const useLawArticles = (ref: LawRef | null, own: LawEntry[] = []) => useQ
       if (!norm) throw new Error('Lei indisponível.');
     }
     let q = supabase.from('legal_articles').select('id, ord, label, num, suffix, heading, text, notes, revoked').eq('norm_id', norm.id).order('ord').limit(3000);
-    if (ref!.ranges.length) q = q.gte('num', Math.min(...ref!.ranges.map((r) => r.from))).lte('num', Math.max(...ref!.ranges.map((r) => r.to)));
+    if (ref!.ranges.length) q = q.or(rangesOrFilter(ref!.ranges));
     const { data, error } = await q;
     if (error) throw new Error(error.message);
     return { norm, articles: (data as Article[]).filter((a) => inRanges(ref!.ranges, a.num, a.suffix)) };

@@ -130,6 +130,13 @@ export const rangesLabel = (r: LawRef) => r.ranges.length
     + r.ranges.map((x) => x.from === x.to && x.fromSuffix === x.toSuffix ? artLabel(x.from, x.fromSuffix) : `${artLabel(x.from, x.fromSuffix)} a ${artLabel(x.to, x.toSuffix)}`).join(', ')
   : 'lei completa';
 
+// Filtro PostgREST (.or) só com os intervalos citados. Buscar do menor ao maior artigo trazia o meio todo, e o limite de
+// linhas cortava o fim: "arts. 196, ..., 439 a 440-A, 1.137 a 1.139, 1.245 e 1.247" das Normas da CGJ são 1.216 artigos
+// de 196 a 1.247, e a apostila recebia só até o 315. Sufixos ("436-A") são conferidos depois, com inRanges.
+export function rangesOrFilter(ranges: ArticleRange[]) {
+  return [...new Set(ranges.map((r) => (r.from === r.to ? `num.eq.${r.from}` : `and(num.gte.${r.from},num.lte.${r.to})`)))].join(',');
+}
+
 // ---------- artigos estruturados da sessão ----------
 // Na montagem do plano, a IA devolve, junto com o título, a lei e a lista de artigos de cada sessão. O app grava isso na
 // sessão (study_sessions.law_refs), e a lei seca, a apostila e as questões buscam os artigos por esse campo, sem reler o

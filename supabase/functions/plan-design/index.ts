@@ -4,7 +4,7 @@
 //   {step:'sessions', noticeId, subjectId, n, minutes, level, focus, profile} → n sessões da matéria, cobrindo todos os tópicos
 // O calendário é montado no app pelo scheduler determinístico e gravado por create_plan_version.
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { aiLawRefs, findLawRefs, inRanges, type LawRef, mergeLawRefs, rangesLabel, sessionLawRefs } from '../../../shared/legal/refs.ts';
+import { aiLawRefs, findLawRefs, inRanges, type LawRef, mergeLawRefs, rangesLabel, rangesOrFilter, sessionLawRefs } from '../../../shared/legal/refs.ts';
 import { LAWS, lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
 import { type LawSize, mergeShortLawSessions, PLAN_PROMPT_VERSION, PlanInputs, PlanStrategy, repairSessions, sessionsJsonSchema, sessionsPrompt, strategyJsonSchema, strategyPrompt, SubjectSessions } from '../../../shared/ai/plan.ts';
 import { isOpenEnded } from '../../../shared/domain/rounds.ts';
@@ -24,7 +24,7 @@ async function lawSize(admin: ReturnType<typeof adminClient>, refs: LawRef[], ow
     const normId = await ensureLaw(admin, law);
     if (!normId) return null;
     const { data: arts } = await admin.from('legal_articles').select('label, num, suffix, text, revoked, ord').eq('norm_id', normId)
-      .gte('num', Math.min(...ref.ranges.map((x) => x.from))).lte('num', Math.max(...ref.ranges.map((x) => x.to))).order('ord').limit(400);
+      .or(rangesOrFilter(ref.ranges)).order('ord').limit(400);
     const hit = (arts ?? []).filter((a) => inRanges(ref.ranges, a.num, a.suffix));
     if (!hit.length) return null;
     const live = hit.filter((a) => !a.revoked);

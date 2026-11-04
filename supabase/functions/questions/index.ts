@@ -12,7 +12,7 @@ import { DEEP_PREFIX, PRACTICE_PREFIX } from '../../../shared/ai/plan.ts';
 import { ownLaws } from '../_shared/legal.ts';
 import { prunedAssuntos, rejectedIds, RELEVANCE_PROMPT_VERSION, RelevanceVerdicts, relevanceJsonSchema, relevancePrompt } from '../../../shared/qbank/relevance.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
-import { findLawRefs, inRanges, storedLawRefs, type LawRef } from '../../../shared/legal/refs.ts';
+import { findLawRefs, inRanges, rangesOrFilter, storedLawRefs, type LawRef } from '../../../shared/legal/refs.ts';
 import { lawByKey } from '../../../shared/legal/registry.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import {
@@ -71,11 +71,14 @@ Deno.serve(async (req) => {
 
     // Trechos oficiais da lei: os citados na questão e os da sessão (só com artigos definidos).
     const lawExcerpts = async (p: PublicQuestion) => {
-      let sessionTitle = '';
-      if (task?.session_id) sessionTitle = (await auth.client.from('study_sessions').select('title').eq('id', task.session_id).maybeSingle()).data?.title ?? '';
+      let sessionTitle = '', stored: LawRef[] | null = null;
+      if (task?.session_id) {
+        const { data: ss } = await auth.client.from('study_sessions').select('title, law_refs').eq('id', task.session_id).maybeSingle();
+        sessionTitle = ss?.title ?? ''; stored = storedLawRefs(ss?.law_refs);
+      }
       const text = [plain(p.enunciado), ...p.alternativas.map((a) => plain(a.texto))].join('\n');
       const own = await ownLaws(admin, auth.user.id);
-      const refs: LawRef[] = [...findLawRefs(text, subject?.name ?? '', own), ...findLawRefs(sessionTitle, subject?.name ?? '', own)].filter((r) => r.ranges.length).slice(0, 4);
+      const refs: LawRef[] = [...findLawRefs(text, subject?.name ?? '', own), ...(stored ?? findLawRefs(sessionTitle, subject?.name ?? '', own))].filter((r) => r.ranges.length).slice(0, 4);
       const lei: { ref: string; text: string }[] = [];
       for (const r of refs) {
         const law = lawByKey(r.law, own);
@@ -83,7 +86,7 @@ Deno.serve(async (req) => {
         const { data: norm } = await admin.from('legal_norms').select('id').eq('urn', law.urn).maybeSingle();
         if (!norm) continue;
         const { data: arts } = await admin.from('legal_articles').select('label, num, suffix, text').eq('norm_id', norm.id)
-          .gte('num', Math.min(...r.ranges.map((x) => x.from))).lte('num', Math.max(...r.ranges.map((x) => x.to))).order('ord').limit(40);
+          .or(rangesOrFilter(r.ranges)).order('ord').limit(40);
         for (const a of (arts ?? []).filter((a) => inRanges(r.ranges, a.num, a.suffix)).slice(0, 8)) lei.push({ ref: `${law.short}, art. ${a.label}`, text: a.text.slice(0, 1500) });
       }
       return lei;

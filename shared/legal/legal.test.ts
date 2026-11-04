@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseLawHtml, parseNormsText } from './parse.ts';
 import { ownLawEntry, shortCitation, unlistedNorms, uploadUrn } from './norms.ts';
-import { aiLawRefs, citesUnlistedLaw, findLawRefs, inRanges, mergeLawRefs, noticeLawKeys, parseRanges, rangesLabel, resolveSessionRefs, sessionLawRefs, storedLawRefs } from './refs.ts';
+import { aiLawRefs, citesUnlistedLaw, findLawRefs, inRanges, mergeLawRefs, rangesOrFilter, noticeLawKeys, parseRanges, rangesLabel, resolveSessionRefs, sessionLawRefs, storedLawRefs } from './refs.ts';
 
 // Trecho real do HTML do CPP no normas.leg.br (estrutura preservada).
 const HTML = `<html><body>
@@ -241,5 +241,12 @@ describe('artigos estruturados da sessão', () => {
   it('junta por lei sem repetir', () => {
     expect(mergeLawRefs([{ law: 'CPP', ranges: [one(1)] }], null, [{ law: 'CPP', ranges: [one(1), one(2)] }, { law: 'CF', ranges: [one(5)] }]))
       .toEqual([{ law: 'CPP', ranges: [one(1), one(2)] }, { law: 'CF', ranges: [one(5)] }]);
+  });
+});
+
+describe('filtro dos artigos no banco', () => {
+  it('só os intervalos citados, não do menor ao maior artigo', () => {
+    const r = findLawRefs('Normas da CGJ: Atos processuais, arts. 196, 436-A, 439 a 440-A, 1137 a 1139 e 1247')[0]!;
+    expect(rangesOrFilter(r.ranges)).toBe('num.eq.196,num.eq.436,and(num.gte.439,num.lte.440),and(num.gte.1137,num.lte.1139),num.eq.1247');
   });
 });
