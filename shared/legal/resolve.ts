@@ -95,10 +95,13 @@ interface SenadoDoc { numero?: string; normaNome?: string; ementa?: string; data
 export interface SenadoHit { date: string; year: string; name: string; ementa: string; nickname: string }
 
 // Resposta de /dadosabertos/legislacao/lista. Com ano, só a do ano; sem ano, a mais recente (decretos repetem números).
-export function pickSenado(json: unknown, num: string, year: string): SenadoHit | null {
+// `spread`: sem a do ano exato, aceita a de um ano vizinho (ver yearSpread).
+export function pickSenado(json: unknown, num: string, year: string, spread = 0): SenadoHit | null {
   const raw = (json as { ListaDocumento?: { documentos?: { documento?: SenadoDoc | SenadoDoc[] } } })?.ListaDocumento?.documentos?.documento;
   const docs = (Array.isArray(raw) ? raw : raw ? [raw] : []).filter((d) => d.numero === num && /^\d{2}\/\d{2}\/\d{4}$/.test(d.dataassinatura ?? ''));
-  const hit = (year ? docs.filter((d) => d.anoassinatura === year) : docs).sort((a, b) => Number(b.anoassinatura) - Number(a.anoassinatura))[0];
+  const near = (d: SenadoDoc, s: number) => Math.abs(Number(d.anoassinatura) - Number(year)) <= s;
+  const pool = !year ? docs : docs.some((d) => near(d, 0)) ? docs.filter((d) => near(d, 0)) : docs.filter((d) => near(d, spread));
+  const hit = pool.sort((a, b) => Number(b.anoassinatura) - Number(a.anoassinatura))[0];
   if (!hit) return null;
   const [d, m, y] = hit.dataassinatura!.split('/');
   // "LEI-9613-1998-03-03 , Lei de Lavagem de Dinheiro (1998)" → "Lei de Lavagem de Dinheiro".
@@ -273,13 +276,16 @@ export const textVersion = (versao = '') => (/compila|vigente|atualizad|anotad/i
 // ---------- entrada de registro da norma achada ----------
 // O padrão não casa a mesma norma citada com outro ano ("Lei 10.261/2001" federal × "Lei 10.261/68" estadual), já que a
 // norma achada vale para todos os estudantes. Sem ano na citação, casa. Ato de órgão: a sigla ou o nome do órgão perto.
-export function resolvedPattern(kind: string, num: string, year: string, org: OrgSpec | null = null) {
-  const yy = year.slice(-2);
+// `spread`: anos vizinhos também valem (Lei Complementar federal tem numeração única; edital erra o ano às vezes).
+export function resolvedPattern(kind: string, num: string, year: string, org: OrgSpec | null = null, spread = 0) {
+  const ys = Array.from({ length: 2 * spread + 1 }, (_, i) => String(Number(year) - spread + i));
+  const four = ys.join('|'), two = ys.map((y) => y.slice(-2)).join('|');
   return normPattern(kind, num, org ? `(?:${org.acr}|${org.name.source})` : '')
-    + String.raw`(?!\s*\/\s*(?!(?:${year}|${yy})\b)\d{2,4}\b)`
-    + String.raw`(?!,?\s+de\s+\d{1,2}[./]\d{1,2}[./](?!${year}\b)\d{4})`
-    + String.raw`(?!,?\s+de\s+\d{1,2}\s*[º°]?\s+de\s+[a-zç]+\s+de\s+(?!${year}\b)\d{4})`;
+    + String.raw`(?!\s*\/\s*(?!(?:${four}|${two})\b)\d{2,4}\b)`
+    + String.raw`(?!,?\s+de\s+\d{1,2}[./]\d{1,2}[./](?!(?:${four})\b)\d{4})`
+    + String.raw`(?!,?\s+de\s+\d{1,2}\s*[º°]?\s+de\s+[a-zç]+\s+de\s+(?!(?:${four})\b)\d{4})`;
 }
+export const yearSpread = (kind: string, uf: string | null) => (kind === 'lc' && !uf ? 1 : 0);
 
 const fmtNum = (num: string) => (num.length > 3 ? Number(num).toLocaleString('pt-BR').replace(/\s/g, '.') : num);
 export interface ResolvedNorm { key: string; short: string; name: string; citation: string; pattern: string; urn: string }
@@ -290,6 +296,6 @@ export function resolvedNorm(n: Pick<UnlistedNorm, 'kind' | 'num'>, year: string
   const name = (title ? `${short} – ${title.replace(/\s+/g, ' ')}` : short).slice(0, 160);
   return {
     key: `${uf ? uf.toLowerCase() + '-' : ''}${n.kind}-${org ? org.acr.toLowerCase() + '-' : ''}${n.num}-${year}`, short, name,
-    citation: `${kind}${uf ? ' estadual ' + uf : scope} ${fmtNum(n.num)}/${year}`, pattern: resolvedPattern(n.kind, n.num, year, org), urn,
+    citation: `${kind}${uf ? ' estadual ' + uf : scope} ${fmtNum(n.num)}/${year}`, pattern: resolvedPattern(n.kind, n.num, year, org, yearSpread(n.kind, uf)), urn,
   };
 }

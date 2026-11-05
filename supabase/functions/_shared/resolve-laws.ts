@@ -8,7 +8,7 @@ import type { LegalArticle } from '../../../shared/legal/parse.ts';
 import type { LawEntry } from '../../../shared/legal/registry.ts';
 import {
   CNJ_ATOS, cnjIds, cnjSearchUrl, parseCnjAct, CTRESB_RAW, ctresbDir, federalUrn, infraFolder, type LocalNorm, localEntry, localNormsCited, orgOf, parseLawMarkdown, pickCtresbFile,
-  pickInfraFiles, pickSenado, resolvable, resolvedNorm, SENADO_TYPE, type SenadoHit, slugOf, stateUrn, textVersion,
+  pickInfraFiles, pickSenado, resolvable, yearSpread, resolvedNorm, SENADO_TYPE, type SenadoHit, slugOf, stateUrn, textVersion,
 } from '../../../shared/legal/resolve.ts';
 import { ingestLaw, MAX_AGE_MS, saveNorm } from './legal.ts';
 
@@ -16,7 +16,7 @@ const SENADO = 'https://legis.senado.leg.br/dadosabertos/legislacao/lista';
 const GITHUB_TREES = 'https://api.github.com/repos/ctresb/leis/git/trees/main:';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // Quando uma fonte nova entra, atualize: buscas que falharam antes disso são refeitas.
-const SOURCES_CHANGED_AT = Date.parse('2026-11-05T04:00:00Z');
+const SOURCES_CHANGED_AT = Date.parse('2026-11-05T02:30:00Z');
 
 async function getJson(url: string, headers: Record<string, string> = {}) {
   const res = await fetch(url, { headers: { Accept: 'application/json', ...headers }, signal: AbortSignal.timeout(15_000) });
@@ -56,9 +56,11 @@ type Outcome = { normId: string; short: string } | { normId: null; detail: strin
 
 // Índice do Senado. Ele recusa rajadas (503): mais duas tentativas, com espera.
 async function senado(n: UnlistedNorm): Promise<SenadoHit | null> {
-  const q = new URLSearchParams({ tipo: SENADO_TYPE[n.kind]!, numero: n.num, ...(n.year ? { ano: n.year } : {}) });
+  // Com tolerância de ano (Lei Complementar), busca só pelo número e o ano é conferido em pickSenado.
+  const spread = yearSpread(n.kind, null);
+  const q = new URLSearchParams({ tipo: SENADO_TYPE[n.kind]!, numero: n.num, ...(n.year && !spread ? { ano: n.year } : {}) });
   for (let i = 0; ; i++) {
-    try { return pickSenado(await getJson(`${SENADO}?${q}`), n.num, n.year); } catch (e) {
+    try { return pickSenado(await getJson(`${SENADO}?${q}`), n.num, n.year, spread); } catch (e) {
       if (i >= 2 || ![429, 503].includes((e as { status?: number }).status ?? 0)) throw e;
       await sleep(1500 * (i + 1));
     }

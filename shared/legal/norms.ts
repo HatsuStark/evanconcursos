@@ -22,7 +22,7 @@ const KINDS: { slug: string; re: string; name: string }[] = [
 // Tipo, qualificadores ("Estadual", "CNJ", "do CONAMA", "RFB", "n.º"), número com ou sem ponto, ano ("/2020" ou ", de
 // 29/12/2003") e o órgão logo depois ("do Conselho Nacional de Justiça").
 const QUALIFIER = String.raw`Estadual|Federal|Municipal|Conjunta|(?:d[oa]\s+)?[A-Z][A-Z0-9]{1,11}(?:[/-][A-Z]{2,})?`;
-const CITATION = new RegExp(String.raw`(${KINDS.map((k) => k.re).join('|')})((?:\s+(?:${QUALIFIER}))*)\s*(?:n\.?\s*[º°o]?\.?\s*)?(\d{1,3}(?:\.\d{3})+|\d{1,6})(?:\s*\/\s*(\d{2,4})|,?\s+de\s+\d{1,2}[./]\d{1,2}[./](\d{4})|,?\s+de\s+\d{1,2}\s+de\s+[a-zç]+\s+de\s+(\d{4}))?((?:\s+d[oa]\s+(?:[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÀ-ú]*|de|da|do|e)(?:\s+(?:[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÀ-ú]*|de|da|do|e))*))?`, 'g');
+const CITATION = new RegExp(String.raw`(${KINDS.map((k) => k.re).join('|')})((?:\s+(?:${QUALIFIER}))*)\s*(?:n\.?\s*[º°o]?\.?\s*)?(\d{1,3}(?:\.\d{3})+|\d{1,6})(?:\s*\/\s*(\d{2,4})|,?\s+de\s+\d{1,2}[./]\d{1,2}[./](\d{4})|,?\s+de\s+\d{1,2}\s+de\s+[a-zç]+\s+de\s+(\d{4}))?((?:,?\s+d[oa]\s+(?:[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÀ-ú]*|de|da|do|e)(?:\s+(?:[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÀ-ú]*|de|da|do|e))*))?`, 'g');
 
 const kindOf = (s: string) => KINDS.find((k) => new RegExp(`^(?:${k.re})$`, 'i').test(s.trim()))!;
 export const kindName = (slug: string) => KINDS.find((k) => k.slug === slug)?.name ?? slug;
@@ -52,7 +52,7 @@ export function unlistedNorms(text: string, extra: LawEntry[] = []): UnlistedNor
     const acr = ['res', 'port', 'in', 'prov'].includes(kind.slug) ? acronymOf(m[2] ?? '') : '';
     const key = `${kind.slug}-${acr ? acr.toLowerCase() + '-' : ''}${num}${year ? '-' + year : ''}`;
     const pattern = normPattern(kind.slug, num, acr);
-    const org = (m[7] ?? '').trim();
+    const org = (m[7] ?? '').replace(/^,/, '').trim();
     const citation = `${kind.name}${acr ? ' ' + acr : ''} ${num.length > 3 ? Number(num).toLocaleString('pt-BR').replace(/\s/g, '.') : num}${year ? '/' + year : ''}${org ? ' ' + org : ''}`;
     // A mesma norma citada com e sem ano: fica a com ano (chave mais específica).
     const twin = [...out.values()].find((u) => u.pattern === pattern);

@@ -227,3 +227,20 @@ describe('atos do CNJ (atos.cnj.jus.br)', () => {
     expect(unlistedNorms('Resolução CNJ nº 351/2020; Portaria PRES nº 4.657/2026').map((n) => n.citation)).toEqual(['Resolução CNJ 351/2020', 'Portaria PRES 4.657/2026']);
   });
 });
+
+describe('citações do edital do TRF3 que escapavam', () => {
+  it('órgão depois de vírgula: "Resolução nº 433/2021, do Conselho Nacional de Justiça"', () => {
+    const [n] = unlistedNorms('Resolução nº 433/2021, do Conselho Nacional de Justiça (Política Nacional do Poder Judiciário para o Clima)');
+    expect(n).toMatchObject({ key: 'res-433-2021', org: 'Conselho Nacional de Justiça', citation: 'Resolução 433/2021 do Conselho Nacional de Justiça' });
+    expect(resolvable(n!)).toBe(true);
+    expect(orgOf(n!.org)!.acr).toBe('CNJ');
+  });
+  it('Lei Complementar com o ano errado no edital (227/2025 é a LC 227/2026)', () => {
+    const doc = { numero: '227', normaNome: 'Lei Complementar nº 227 de 13/01/2026', dataassinatura: '13/01/2026', anoassinatura: '2026' };
+    expect(pickSenado(senado([doc]), '227', '2025')).toBeNull();
+    expect(pickSenado(senado([doc]), '227', '2025', 1)!.year).toBe('2026');
+    const r = resolvedNorm({ kind: 'lc', num: '227' }, '2026', null, 'urn:lex:br:federal:lei.complementar:2026-01-13;227', '');
+    const e = ownLawEntry({ law_key: r.key, short_name: r.short, name: r.name, urn: r.urn, match_pattern: r.pattern })!;
+    expect(unlistedNorms('leis complementares nº 214/2025 e nº 227/2026; Lei Complementar nº 227/2025; Lei Complementar nº 227/2019', [e]).map((n) => n.key)).toEqual(['lc-227-2019']);
+  });
+});
