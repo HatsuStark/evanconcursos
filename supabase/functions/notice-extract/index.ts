@@ -6,7 +6,7 @@
 // O app acompanha pelo job; o usuário confere e aprova depois (approve_notice).
 import { extractText } from 'unpdf';
 import { GeminiError, generateJson, toBase64, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { checkNotice, extractWithRetry, NOTICE_PROMPT_VERSION, NOTICE_THINKING, NoticeExtraction, noticeJsonSchema, noticePrompt, NoticeRoles, noticeRolesJsonSchema, normalizeText, ROLES_PROMPT_VERSION, rolesPrompt, uniqueRoles } from '../../../shared/ai/notice.ts';
+import { checkNotice, NOTICE_PROMPT_VERSION, NoticeRoles, noticeRolesJsonSchema, normalizeText, readNotice, ROLES_PROMPT_VERSION, rolesPrompt, uniqueRoles } from '../../../shared/ai/notice.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
@@ -90,10 +90,7 @@ async function process(p: { jobId: string; ownerId: string; noticeId: string; fi
 
     await step('analyzing');
     const pdf = toBase64(bytes);
-    const r = await extractWithRetry(({ temperature, retry, timeoutMs }) => generateJson({
-      apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: NoticeExtraction, jsonSchema: noticeJsonSchema(), temperature, timeoutMs, thinkingLevel: NOTICE_THINKING,
-      parts: [{ inline_data: { mime_type: 'application/pdf', data: pdf } }, { text: noticePrompt(p.roleHint, retry, p.exact ?? undefined) }],
-    }));
+    const r = await readNotice({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, pdfBase64: pdf, roleHint: p.roleHint, exact: p.exact ?? undefined });
     usage = r.usage; latencyMs = r.latencyMs;
     // Cargo escolhido na lista: nome e demais cargos vêm da escolha, não da leitura.
     if (p.exact && p.roleHint) {

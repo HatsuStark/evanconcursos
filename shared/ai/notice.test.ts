@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { checkNotice, comparableText, extractWithRetry, NOTICE_DEADLINE_MS, noticePrompt, NoticeExtraction, noticeJsonSchema, subjectWeights, topicInText, uniqueRoles } from './notice.ts';
+import { checkNotice, comparableText, extractWithRetry, NOTICE_DEADLINE_MS, mergeNoticeParts, noticePrompt, NoticeExtraction, noticeJsonSchema, noticeSpecificJsonSchema, subjectWeights, topicInText, uniqueRoles } from './notice.ts';
 
 describe('extractWithRetry', () => {
   const recitation = Object.assign(new Error('O Gemini não devolveu conteúdo (RECITATION).'), { finishReason: 'RECITATION' });
@@ -132,5 +132,28 @@ describe('escolha do cargo na lista do edital', () => {
     const r = (name: string, code = '') => ({ name, code, educationLevel: '' as const });
     expect(uniqueRoles([r('Agente Escolar', '102'), r('AGENTE ESCOLAR', '102'), r('Agente de Segurança Escolar', '101'), r(' - ')]).map((x) => x.name))
       .toEqual(['Agente Escolar', 'Agente de Segurança Escolar']);
+  });
+});
+
+describe('leitura em duas partes', () => {
+  const sub = (name: string, core: boolean, topics: string[] = []) => ({ name, block: '', questions: 0, core, topics: topics.map((text) => ({ text, page: 1 })) });
+  const main = { ...base, subjects: [sub('Língua Portuguesa', false, ['Ortografia.']), sub('Direito Tributário', true), sub('Legislação Aduaneira', true)] };
+  it('tópicos das específicas vão para a disciplina de mesmo nome; básicas ficam', () => {
+    const spec = { subjects: [{ name: 'DIREITO TRIBUTÁRIO', topics: [{ text: '1. Competência Tributária.', page: 29 }] }, { name: 'Legislação Aduaneira', topics: [{ text: '1. Jurisdição Aduaneira.', page: 30 }] }, { name: 'Língua Portuguesa', topics: [{ text: 'Outra coisa.', page: 2 }] }] };
+    const m = mergeNoticeParts(main, spec);
+    expect(m.subjects.map((s) => [s.name, s.topics.map((t) => t.text)])).toEqual([
+      ['Língua Portuguesa', ['Ortografia.']], ['Direito Tributário', ['1. Competência Tributária.']], ['Legislação Aduaneira', ['1. Jurisdição Aduaneira.']],
+    ]);
+  });
+  it('específica que a leitura principal não listou entra no fim; parte vazia não apaga nada', () => {
+    const m = mergeNoticeParts(main, { subjects: [{ name: 'Direito Previdenciário', topics: [{ text: 'Seguridade.', page: 30 }] }] });
+    expect(m.subjects.at(-1)).toMatchObject({ name: 'Direito Previdenciário', core: true, topics: [{ text: 'Seguridade.' }] });
+    expect(mergeNoticeParts(main, { subjects: [] })).toEqual(main);
+  });
+  it('cada parte pede o seu pedaço', () => {
+    expect(noticePrompt('Auditor', false, undefined, 'general')).toContain('transcreva só as disciplinas de conhecimentos gerais/básicos');
+    expect(noticePrompt('Auditor', false, undefined, 'specific')).toContain('Liste só as disciplinas de conhecimentos específicos');
+    expect(noticePrompt('Auditor')).not.toContain('lido à parte');
+    expect(noticeSpecificJsonSchema()).toMatchObject({ required: ['subjects'] });
   });
 });

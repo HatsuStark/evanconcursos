@@ -1,8 +1,9 @@
 // Interpretação do edital: schema da resposta da IA, prompt versionado e verificações determinísticas.
 // Usado pela Edge Function notice-extract e pela avaliação (evals/run.ts).
 import { z } from 'zod';
+import { generateJson, type GeminiUsage } from './gemini.ts';
 
-export const NOTICE_PROMPT_VERSION = 'notice-v6';
+export const NOTICE_PROMPT_VERSION = 'notice-v8';
 
 // Mesmos valores do filtro nivel_escolaridade da Quest API; vazio se o edital não informar.
 export const EDUCATION_LEVELS = ['Fundamental', 'Médio', 'Superior'] as const;
@@ -113,7 +114,11 @@ export function uniqueRoles(roles: NoticeRole[]): NoticeRole[] {
 }
 
 // exact: cargo escolhido na lista do edital (nome literal), com os demais cargos para a IA não misturar.
-export function noticePrompt(roleHint: string, retry = false, exact?: { code?: string; otherRoles?: string[] }): string {
+// part: a leitura vai em duas chamadas paralelas (readNotice), porque transcrever o conteúdo de um edital grande numa
+// resposta só passa do limite de tempo da função (Receita Federal: 106 s de 130). 'general' traz tudo, com os tópicos só
+// das disciplinas básicas; 'specific' traz só os tópicos das específicas. 'all' = uma chamada só.
+export type NoticePart = 'all' | 'general' | 'specific';
+export function noticePrompt(roleHint: string, retry = false, exact?: { code?: string; otherRoles?: string[] }, part: NoticePart = 'all'): string {
   const role = roleHint.trim().slice(0, 160);
   const others = (exact?.otherRoles ?? []).filter((r) => normalizeText(r) !== normalizeText(role)).slice(0, 60);
   const cargo = !role
@@ -121,22 +126,77 @@ export function noticePrompt(roleHint: string, retry = false, exact?: { code?: s
     : exact
       ? `use exatamente o cargo "${role}"${exact.code ? ` (código ${exact.code})` : ''}, escolhido pelo candidato na lista de cargos do edital. Nunca troque por outro cargo de nome parecido ou que contenha estas palavras${others.length ? `; os outros cargos do edital são: ${others.map((o) => `"${o}"`).join(', ')}. Não use a prova, o conteúdo nem as atribuições deles` : ''}`
       : `use o cargo "${role}" (ou o mais próximo dele)`;
+  const scope = `- Considere somente a prova e o conteúdo programático do cargo escolhido.${exact && role ? `
+- Em quadros e anexos com vários cargos (provas, conteúdo programático, atribuições), use só o trecho cujo título traz este cargo${exact.code ? ` (código ${exact.code})` : ''}; o trecho do cargo vizinho, mesmo logo acima ou abaixo, é de outro cargo.${part === 'specific' ? '' : ` Em role, copie "${role}".`}` : ''}`;
+  const subjectsRule = '- subjects: uma entrada por disciplina. Quando um bloco agrupa várias disciplinas, cada disciplina com título próprio no conteúdo programático (inclusive títulos em MAIÚSCULAS como "ENGENHARIA DE SOFTWARE", "BANCOS DE DADOS") é uma entrada separada, com "block" indicando o bloco. Nunca crie uma disciplina com o nome do bloco (ex.: "Conhecimentos Específicos") quando o bloco tem títulos internos.';
+  // Tópico definido pelo conteúdo, não pela formatação: regras de corte por pontuação ("uma frase", "um item numerado")
+  // acertavam um formato e erravam outro (TRF3 em parágrafo corrido × Receita numerada em 1.1.1).
+  const topicsRule = `- topics: o conteúdo programático da disciplina dividido em tópicos de estudo, na ordem do edital. Um tópico é um assunto que se estuda de uma vez: um tema com os seus desdobramentos, ou uma lei com os artigos citados. Decida pelo sentido, não pela formatação: o edital pode vir em lista, em parágrafo corrido ou numerado em níveis (1., 1.1., 1.1.1.), e em qualquer caso:
+  - subitens e detalhes do mesmo tema ficam no mesmo tópico: "3. Imposto sobre a Propriedade Territorial Rural. 3.1. Princípios e regras constitucionais aplicáveis ao imposto. 3.2. Competência e sujeito ativo. 3.3. Fato gerador." é um tópico só; "4.3.1. Fato Gerador." nunca é tópico sozinho;
+  - temas diferentes ficam em tópicos separados, mesmo na mesma linha ou parágrafo: em "Responsabilidade civil. Direito das coisas: posse; propriedade.", "Responsabilidade civil." é um tópico e "Direito das coisas: posse; propriedade." é outro;
+  - tamanho: em geral uma a quatro linhas (até uns 800 caracteres); tema curto e autônomo ("Ortografia.", "Crase.") pode ser tópico sozinho; nunca a disciplina inteira num tópico.
+  Copie o texto do edital como está (mesmas palavras, numeração, leis e artigos), decidindo só onde um tópico termina e o próximo começa; não resuma, não reescreva, não acrescente nada e não prefixe com o nome da disciplina. page = página do PDF onde o tópico começa.`;
+  const retryRule = retry ? '\n- Em topics, quebre itens longos em entradas menores (cada entrada com no máximo 2000 caracteres), separadas nos pontos finais e, se preciso, nos pontos e vírgulas, e padronize a pontuação, sem mudar o sentido nem omitir leis e artigos.' : '';
+  if (part === 'specific') return `Você é especialista em editais de concursos públicos brasileiros. Leia o edital em anexo e transcreva o conteúdo programático das disciplinas de conhecimentos específicos do cargo (as próprias do cargo, não as de conhecimentos gerais/básicos).
+Cargo: ${cargo}.
+Regras:
+${scope}
+${subjectsRule.replace(', com "block" indicando o bloco', '')} Liste só as disciplinas de conhecimentos específicos, com o nome exatamente como no edital.
+${topicsRule}
+- Não invente: se o edital não separar conhecimentos específicos, devolva a lista vazia.${retryRule}`;
   return `Você é especialista em editais de concursos públicos brasileiros. Leia o edital em anexo e extraia os dados estruturados.
 Cargo: ${cargo}.
 Regras:
-- Considere somente a prova e o conteúdo programático do cargo escolhido.${exact && role ? `
-- Em quadros e anexos com vários cargos (provas, conteúdo programático, atribuições), use só o trecho cujo título traz este cargo${exact.code ? ` (código ${exact.code})` : ''}; o trecho do cargo vizinho, mesmo logo acima ou abaixo, é de outro cargo. Em role, copie "${role}".` : ''}
+${scope}
 - roleDuties: as atribuições do cargo escolhido, fiéis ao edital (normalmente num anexo "Atribuições dos cargos"), em frases curtas separadas por ponto e vírgula. Nunca misture com as de outro cargo, mesmo de nome parecido (ex.: "Agente Escolar" × "Agente de Segurança Escolar"). Vazio se o edital não trouxer.
 - educationLevel: escolaridade exigida para o cargo escolhido. Ensino técnico conta como "Médio"; graduação ou pós-graduação, como "Superior".
 - examDate: data prevista da prova objetiva. Se o texto remeter ao cronograma, procure a data no cronograma/anexo. Vazio se não houver.
 - blocks: os blocos/provas objetivas como o edital define (ex.: "Bloco I – Língua Portuguesa", "P1 – Conhecimentos Gerais"), com o número de questões e a regra mínima de aprovação.
-- subjects: uma entrada por disciplina. Quando um bloco agrupa várias disciplinas, cada disciplina com título próprio no conteúdo programático (inclusive títulos em MAIÚSCULAS como "ENGENHARIA DE SOFTWARE", "BANCOS DE DADOS") é uma entrada separada, com "block" indicando o bloco. Nunca crie uma disciplina com o nome do bloco (ex.: "Conhecimentos Específicos") quando o bloco tem títulos internos.
+${subjectsRule}
 - questions: o número de questões da disciplina quando o edital informar por disciplina; 0 quando só houver o total do bloco.
 - core: true para conhecimentos específicos do cargo; false para conhecimentos gerais/básicos.
-- topics: transcreva fielmente cada item do conteúdo programático da disciplina, um item por entrada, na ordem do edital, mantendo leis e artigos citados. Quando o conteúdo vier em parágrafo corrido, cada frase terminada em ponto (ex.: "Contratos: disposições gerais; compra e venda.") é um item; nunca ponha a disciplina inteira numa entrada só. Não resuma, não junte disciplinas, não acrescente nada e não prefixe o item com o nome da disciplina. page = página do PDF onde o item aparece.
+${topicsRule}${part === 'general' ? '\n- Em topics, transcreva só as disciplinas de conhecimentos gerais/básicos (core = false). As de conhecimentos específicos (core = true) entram em subjects normalmente, com topics vazio: o conteúdo delas é lido à parte.' : ''}
 - stages: as etapas do concurso (objetiva, discursiva, títulos, prática, física...).
 - notes: regras relevantes para o planejamento (nota mínima, critérios de eliminação, peso das provas, detalhes da discursiva), frases curtas.
-- Não invente: se uma informação não estiver no edital, deixe vazio ou 0.${retry ? '\n- Em topics, quebre itens longos em entradas menores (cada entrada com no máximo 2000 caracteres), separadas nos pontos finais e, se preciso, nos pontos e vírgulas, e padronize a pontuação, sem mudar o sentido nem omitir leis e artigos.' : ''}`;
+- Não invente: se uma informação não estiver no edital, deixe vazio ou 0.${retryRule}`;
+}
+
+// ---------- leitura em duas partes ----------
+export const NoticeSpecific = z.object({ subjects: z.array(z.object({ name: text(120).min(1), topics: z.array(NoticeTopic) })) });
+export type NoticeSpecific = z.infer<typeof NoticeSpecific>;
+export const noticeSpecificJsonSchema = () => z.toJSONSchema(NoticeSpecific, { target: 'draft-7' });
+
+// Os tópicos das específicas vão para a disciplina de mesmo nome (ou nome contido) da leitura principal; básica que já
+// tem tópicos fica como está. Específica que a leitura principal não listou entra no fim.
+export function mergeNoticeParts(main: NoticeExtraction, spec: NoticeSpecific): NoticeExtraction {
+  const key = (s: string) => comparableText(s) || normalizeText(s);
+  const same = (a: string, b: string) => !!a && !!b && (a === b || a.includes(b) || b.includes(a));
+  const used = new Set<number>();
+  const subjects = main.subjects.map((s) => {
+    const i = spec.subjects.findIndex((x, j) => !used.has(j) && same(key(x.name), key(s.name)));
+    if (i < 0) return s;
+    used.add(i);
+    const topics = spec.subjects[i]!.topics;
+    return topics.length && (s.core || !s.topics.length) ? { ...s, topics } : s;
+  });
+  spec.subjects.forEach((x, j) => {
+    if (!used.has(j) && x.topics.length) subjects.push({ name: x.name, block: '', questions: 0, core: true, topics: x.topics });
+  });
+  return { ...main, subjects };
+}
+
+// Leitura completa do edital: as duas partes em paralelo, juntas, com as novas tentativas de extractWithRetry.
+export async function readNotice(o: { apiKey: string; model: string; pdfBase64: string; roleHint: string; exact?: { code?: string; otherRoles?: string[] }; fetchImpl?: typeof fetch }) {
+  return extractWithRetry(async ({ temperature, retry, timeoutMs }) => {
+    const parts = (t: string) => [{ inline_data: { mime_type: 'application/pdf', data: o.pdfBase64 } }, { text: t }];
+    const common = { apiKey: o.apiKey, model: o.model, temperature, timeoutMs, thinkingLevel: NOTICE_THINKING, fetchImpl: o.fetchImpl };
+    const [a, b] = await Promise.all([
+      generateJson({ ...common, schema: NoticeExtraction, jsonSchema: noticeJsonSchema(), parts: parts(noticePrompt(o.roleHint, retry, o.exact, 'general')) }),
+      generateJson({ ...common, schema: NoticeSpecific, jsonSchema: noticeSpecificJsonSchema(), parts: parts(noticePrompt(o.roleHint, retry, o.exact, 'specific')) }),
+    ]);
+    const usage: GeminiUsage = { inputTokens: a.usage.inputTokens + b.usage.inputTokens, outputTokens: a.usage.outputTokens + b.usage.outputTokens, thinkingTokens: a.usage.thinkingTokens + b.usage.thinkingTokens };
+    return { data: mergeNoticeParts(a.data, b.data), raw: { main: a.raw, specific: b.raw }, usage, model: a.model, latencyMs: Math.max(a.latencyMs, b.latencyMs) };
+  });
 }
 
 // ---------- verificações determinísticas ----------
