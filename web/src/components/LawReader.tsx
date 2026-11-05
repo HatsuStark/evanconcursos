@@ -67,8 +67,10 @@ function LawBlock({ lawRef, own }: { lawRef: LawRef; own: LawEntry[] }) {
       )}
       {q.data && !q.data.norm.owner_id && (
         <footer className="faint small law-credit">
-          {law.pdf
-            ? <>Fonte: <a href={law.page ?? q.data.norm.source_url} target="_blank" rel="noopener noreferrer">texto oficial publicado pelo órgão <ExternalLink size={11} /></a> · lido em {new Date(q.data.norm.fetched_at).toLocaleDateString('pt-BR')}. Texto para estudo; vale o publicado no Diário Oficial.</>
+          {/ctresb/.test(q.data.norm.license ?? '')
+            ? <>Fonte: <a href={q.data.norm.source_url} target="_blank" rel="noopener noreferrer">{/\(normas\.leg\.br\)/.test(q.data.norm.license ?? '') ? 'normas.leg.br' : (q.data.norm.license ?? '').split(', via')[0]} <ExternalLink size={11} /></a>, convertido pelo acervo aberto <a href="https://github.com/ctresb/leis" target="_blank" rel="noopener noreferrer">ctresb/leis <ExternalLink size={11} /></a> (não oficial) · lido em {new Date(q.data.norm.fetched_at).toLocaleDateString('pt-BR')}. Confira no texto oficial se houver dúvida.</>
+            : law.pdf
+            ?<>Fonte: <a href={law.page ?? q.data.norm.source_url} target="_blank" rel="noopener noreferrer">texto oficial publicado pelo órgão <ExternalLink size={11} /></a> · lido em {new Date(q.data.norm.fetched_at).toLocaleDateString('pt-BR')}. Texto para estudo; vale o publicado no Diário Oficial.</>
             : <>Fonte: <a href={q.data.norm.source_url} target="_blank" rel="noopener noreferrer">normas.leg.br <ExternalLink size={11} /></a> (Congresso Nacional), licença CC BY 4.0 · atualizado em {new Date(q.data.norm.fetched_at).toLocaleDateString('pt-BR')}.
               Texto para estudo; o oficial é o publicado no Diário Oficial da União.</>}
         </footer>

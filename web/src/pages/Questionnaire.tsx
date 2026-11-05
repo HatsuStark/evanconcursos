@@ -9,7 +9,7 @@ import { isOpenEnded } from '../../../shared/domain/rounds.ts';
 import { LawUpload } from '../components/LawUpload.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { fmtDate, Steps, SubjectIcon } from '../components/ui.tsx';
-import { generatePlan, updatePlanFromNotice, useActivePlan, type GenProgress, type SubjectRow } from '../lib/plans.ts';
+import { generatePlan, resolveNoticeLaws, updatePlanFromNotice, useActivePlan, type GenProgress, type SubjectRow } from '../lib/plans.ts';
 import { useOwnLaws } from '../lib/legal.ts';
 import { supabase } from '../lib/supabase.ts';
 import { unlistedNorms } from '../../../shared/legal/norms.ts';
@@ -36,6 +36,16 @@ export function QuestionnairePage() {
   // Normas citadas no edital que o app não tem (nem no registro, nem enviadas): o estudante pode enviar o PDF antes de
   // montar o cronograma, para as sessões delas serem medidas e terem lei seca, apostila e questões com o texto.
   const own = useOwnLaws();
+  // Antes, o servidor busca sozinho o texto das normas citadas (federais e estaduais); só as que não achar pedem o PDF.
+  const lawSearch = useQuery({
+    queryKey: ['notice-laws', noticeId],
+    staleTime: Infinity, retry: false,
+    queryFn: async () => {
+      const r = await resolveNoticeLaws(noticeId!);
+      if (r.found.length) await qc.invalidateQueries({ queryKey: ['own-laws'] });
+      return r;
+    },
+  });
   const topicText = useQuery({
     queryKey: ['notice-topic-text', noticeId],
     queryFn: async () => {
@@ -44,7 +54,7 @@ export function QuestionnairePage() {
       return (data as { notice_topics: { text: string }[] }[]).flatMap((s) => s.notice_topics.map((t) => t.text)).join('\n');
     },
   });
-  const missingLaws = topicText.data && own.data ? unlistedNorms(topicText.data, own.data.entries) : [];
+  const missingLaws = topicText.data && own.data && !lawSearch.isLoading ? unlistedNorms(topicText.data, own.data.entries) : [];
   const notice = useQuery({
     queryKey: ['notice-exam-date', noticeId],
     queryFn: async () => {
@@ -185,6 +195,12 @@ export function QuestionnairePage() {
         ))}
       </div>
 
+      {lawSearch.isLoading && (
+        <p className="muted small" style={{ display: 'flex', gap: 8, alignItems: 'center' }}><span className="spinner" /> Buscando o texto das leis citadas no edital…</p>
+      )}
+      {!!lawSearch.data?.found.length && (
+        <p className="muted small">Texto encontrado para {lawSearch.data.found.join(', ')}: as sessões dessas normas terão lei seca, apostila e questões com os artigos.</p>
+      )}
       {missingLaws.length > 0 && (
         <>
           <div className="section-title"><h2>Normas do edital sem texto no app</h2></div>

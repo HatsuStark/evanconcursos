@@ -5,7 +5,7 @@ import { ownLawEntry, unlistedNorms, type OwnNormRow, type UnlistedNorm } from '
 import { lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
 import { supabase } from './supabase.ts';
 
-export interface Norm { id: string; law_key: string; name: string; short_name: string; source_url: string; version: 'Current' | 'Original'; fetched_at: string; owner_id?: string | null }
+export interface Norm { id: string; law_key: string; name: string; short_name: string; source_url: string; version: 'Current' | 'Original'; fetched_at: string; owner_id?: string | null; license?: string }
 export interface Article { id: string; ord: number; label: string; num: number; suffix: string; heading: string; text: string; notes: string[]; revoked: boolean }
 export interface Mark { id: string; article_id: string; color: string; note: string }
 
@@ -22,17 +22,20 @@ export function sessionLawRefs(title: string, topics: string[], subject: string,
 // edital fica de fora: ele junta normas de várias sessões, e pedir todas aqui confundiria.
 export const missingNorms = (title: string, own: LawEntry[]): UnlistedNorm[] => unlistedNorms(title, own);
 
-// Normas que o estudante enviou em PDF (só dele), como entradas de registro.
-export interface OwnNorm extends OwnNormRow { id: string; citation: string; articles_count: number; source_url: string; fetched_at: string }
+// Normas fora do registro, como entradas de registro: as que o estudante enviou em PDF (só dele; `rows`) e as achadas
+// nos editais (sem dono, para todos).
+export interface OwnNorm extends OwnNormRow { id: string; citation: string; articles_count: number; source_url: string; fetched_at: string; owner_id: string | null }
 export const useOwnLaws = () => useQuery({
   queryKey: ['own-laws'],
   staleTime: 5 * 60_000,
   queryFn: async () => {
     const { data: u } = await supabase.auth.getUser();
-    const { data, error } = await supabase.from('legal_norms').select('id, law_key, short_name, name, urn, match_pattern, citation, articles_count, source_url, fetched_at').eq('owner_id', u.user?.id ?? '').order('fetched_at');
+    const uid = u.user?.id ?? '';
+    const { data, error } = await supabase.from('legal_norms').select('id, law_key, short_name, name, urn, match_pattern, citation, articles_count, source_url, fetched_at, owner_id')
+      .or(`owner_id.eq.${uid},and(owner_id.is.null,match_pattern.not.is.null)`).order('fetched_at').limit(500);
     if (error) throw new Error(error.message);
-    const rows = data as OwnNorm[];
-    return { rows, entries: rows.map(ownLawEntry).filter((l): l is LawEntry => !!l) };
+    const all = data as OwnNorm[];
+    return { rows: all.filter((r) => r.owner_id === uid), entries: all.map(ownLawEntry).filter((l): l is LawEntry => !!l) };
   },
 });
 
@@ -71,9 +74,10 @@ export const useLawArticles = (ref: LawRef | null, own: LawEntry[] = []) => useQ
   queryFn: async (): Promise<{ norm: Norm; articles: Article[] }> => {
     const law = lawByKey(ref!.law, own);
     if (!law) throw new Error('Lei indisponível.');
-    const pick = async () => (await supabase.from('legal_norms').select('id, law_key, name, short_name, source_url, version, fetched_at, owner_id').eq('urn', law.urn).maybeSingle()).data as Norm | null;
+    const pick = async () => (await supabase.from('legal_norms').select('id, law_key, name, short_name, source_url, version, fetched_at, owner_id, license').eq('urn', law.urn).maybeSingle()).data as Norm | null;
     let norm = await pick();
     if (!norm && law.urn.startsWith('upload:')) throw new Error('Norma enviada não encontrada. Envie o PDF de novo.');
+    if (!norm && !law.urn.startsWith('urn:lex:')) throw new Error('Texto da norma indisponível.');
     if (!norm) {
       const { data, error } = await supabase.functions.invoke('legal-text', { body: { laws: [law.key] } });
       const err = (data as { norms?: { error?: string }[] } | null)?.norms?.[0]?.error;

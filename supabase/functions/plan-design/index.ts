@@ -1,5 +1,7 @@
 // Edge Function "plan-design": planejamento pedagógico com IA, em passos curtos e síncronos
 // (cada chamada fica bem abaixo do limite de tempo da função):
+//   {step:'laws', noticeId} → busca o texto das normas do edital fora do registro (federais no normas.leg.br, estaduais
+//     no acervo ctresb/leis) → {found, missing}. Sem IA; o app chama antes da estratégia.
 //   {step:'strategy', noticeId, inputs, weeks, hours} → prioridade (peso 1–5) e foco por matéria + orientações
 //   {step:'sessions', noticeId, subjectId, n, minutes, level, focus, profile} → n sessões da matéria, cobrindo todos os tópicos
 // O calendário é montado no app pelo scheduler determinístico e gravado por create_plan_version.
@@ -10,6 +12,8 @@ import { type LawSize, mergeShortLawSessions, PLAN_PROMPT_VERSION, PlanInputs, P
 import { isOpenEnded } from '../../../shared/domain/rounds.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { ensureLaw, ownLaws } from '../_shared/legal.ts';
+import { resolveCitedNorms } from '../_shared/resolve-laws.ts';
+import { localKey, localNormsCited, ufOf } from '../../../shared/legal/resolve.ts';
 
 const int = (v: unknown, min: number, max: number) => Math.max(min, Math.min(max, Math.round(Number(v) || 0)));
 
@@ -64,8 +68,16 @@ Deno.serve(async (req) => {
   let usage: GeminiUsage | null = null, latencyMs: number | null = null;
   try {
     // Edital e matérias lidos como o usuário: a RLS garante que são dele.
-    const { data: notice } = await auth.client.from('notices').select('id, role_name, role_duties, structure, board, exam_date, notes, status').eq('id', String(body.noticeId ?? '')).maybeSingle();
+    const { data: notice } = await auth.client.from('notices').select('id, organization, role_name, role_duties, structure, board, exam_date, notes, status').eq('id', String(body.noticeId ?? '')).maybeSingle();
     if (!notice || notice.status !== 'reviewed') return json(404, { error: 'Edital não encontrado ou ainda não conferido.' });
+
+    if (body.step === 'laws') {
+      const { data: subs } = await auth.client.from('notice_subjects').select('notice_topics(text)').eq('notice_id', notice.id);
+      const texts = (subs ?? []).flatMap((s) => (s.notice_topics as { text: string }[]).map((t) => t.text));
+      const org = notice.organization ?? '';
+      const r = await resolveCitedNorms(admin, texts, { org, uf: ufOf(org), known: await ownLaws(admin, auth.user.id), deadline: Date.now() + 100_000 });
+      return json(200, r);
+    }
 
     if (body.step === 'strategy') {
       const inputs = PlanInputs.safeParse(body.inputs);
@@ -96,15 +108,21 @@ Deno.serve(async (req) => {
         .eq('id', String(body.subjectId ?? '')).eq('notice_id', notice.id).maybeSingle();
       if (!subject) return json(404, { error: 'Matéria não encontrada.' });
       const topics = ((subject.notice_topics ?? []) as { text: string; position: number }[]).sort((a, b) => a.position - b.position).map((t) => t.text);
-      // Leis que a IA pode citar no campo laws: as do registro e as que o estudante enviou em PDF.
+      // Leis que a IA pode citar no campo laws: as do registro, as achadas nos editais e as que o estudante enviou em PDF.
+      // Norma da matéria que o passo "laws" não alcançou (prazo, rede) ganha mais uma tentativa curta aqui.
+      const org = notice.organization ?? '';
+      await resolveCitedNorms(admin, topics, { org, uf: ufOf(org), known: await ownLaws(admin, auth.user.id), deadline: Date.now() + 12_000 }).catch(() => null);
       const own = await ownLaws(admin, auth.user.id);
+      // "Constituição Estadual" e "Lei Orgânica Municipal", sem nome, são as do órgão do edital.
+      const local = new Set(localNormsCited(topics.join('\n'), org).filter((l) => l.generic).map(localKey));
       const r = await generateJson({
         apiKey, model, schema: SubjectSessions, jsonSchema: sessionsJsonSchema(), temperature: 0.3,
         parts: [{ text: sessionsPrompt({
           role: notice.role_name, board: notice.board, profile: String(body.profile ?? '').slice(0, 1500), subject: subject.name,
           level: int(body.level, 0, 3), questions: subject.questions, focus: String(body.focus ?? '').slice(0, 300), n,
           minutesPerSession: int(body.minutes, 15, 960), topics, duties: notice.role_duties ?? '', otherRoles: notice.structure?.otherRoles ?? [],
-          laws: [...LAWS, ...own].map((l) => ({ key: l.key, name: l.name })),
+          // Das normas achadas em editais (de todos), só as citadas nesta matéria; as enviadas pelo estudante, todas.
+          laws: [...LAWS, ...own.filter((l) => l.urn.startsWith('upload:') || local.has(l.key) || new RegExp(l.match.source, 'i').test(topics.join('\n')))].map((l) => ({ key: l.key, name: l.name })),
         }) }],
       });
       usage = r.usage; latencyMs = r.latencyMs;

@@ -43,7 +43,11 @@ async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>) {
   await Promise.all(Array.from({ length: Math.min(n, queue.length) }, async () => { while (queue.length) await fn(queue.shift()!); }));
 }
 
-export type GenProgress = { step: 'strategy' | 'sessions' | 'saving' | 'materials'; done: number; total: number };
+// Busca (no servidor) o texto das normas citadas no edital que o app ainda não tem: federais no normas.leg.br, estaduais
+// no acervo ctresb/leis. Rápida quando já foram achadas antes, por qualquer estudante.
+export const resolveNoticeLaws = (noticeId: string) => invoke<{ found: string[]; missing: string[] }>('plan-design', { step: 'laws', noticeId }, 1);
+
+export type GenProgress ={ step: 'strategy' | 'sessions' | 'saving' | 'materials'; done: number; total: number };
 
 // Gera e grava uma nova versão do cronograma. Se a IA falhar numa matéria, ela usa as sessões montadas
 // direto dos tópicos (o plano nunca fica pela metade) e isso fica registrado na estratégia.
@@ -64,6 +68,8 @@ export async function generatePlan(noticeId: string, inputs: PlanInputs, onProgr
   const cal = calendarSummary(base); // valida datas/horas antes de gastar IA
 
   onProgress({ step: 'strategy', done: 0, total: 1 });
+  // Texto das normas do edital fora do registro, para as sessões delas serem medidas. Falha não impede o plano.
+  await resolveNoticeLaws(noticeId).catch(() => null);
   let strategy: Strategy = { advice: [], subjects: base.subjects.map((s) => ({ subjectId: s.id, weight: s.weight, focus: '' })), fallbacks: [] };
   try {
     strategy = { ...(await invoke<{ strategy: Strategy }>('plan-design', { step: 'strategy', noticeId, inputs, weeks: cal.weeks, hours: cal.hours })).strategy, fallbacks: [] };
