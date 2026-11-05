@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
+import { genericSubject } from '../../../shared/qbank/materias.ts';
 import { dominantFormat, mapSession, mapSubject, newestPage, pickBoard, QMAP_PROMPT_VERSION, QUESTION_FORMATS, usefulNarrowing, type Incidence, type MapDeps, type SessionFilter } from '../../../shared/qbank/map.ts';
 
 export const plain = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
@@ -96,9 +97,14 @@ export function mapDeps(admin: SupabaseClient, quest: QuestClient, usage: Gemini
 // Matéria da disciplina (uma vez) e banca do edital. Os dados só são lidos se ainda não houver mapeamento.
 export async function ensureSubjectMap(admin: SupabaseClient, quest: QuestClient, deps: MapDeps, ownerId: string, subjectId: string, load: () => Promise<{ name: string; board: string; topics: string[]; organization: string }>) {
   const { data: sm } = await admin.from('qbank_subject_maps').select('materia, banca, banca_tipo, prompt_version').eq('subject_id', subjectId).maybeSingle();
-  // Disciplina que ficou sem matéria numa versão antiga do mapa é mapeada de novo; as que têm matéria ficam.
-  if (sm && (sm.materia || sm.prompt_version === QMAP_PROMPT_VERSION)) return sm as { materia: string | null; banca: string; banca_tipo: string | null };
+  if (sm && sm.prompt_version === QMAP_PROMPT_VERSION) return sm as { materia: string | null; banca: string; banca_tipo: string | null };
+  // Mapa de versão antiga: refaz o da disciplina que ficou sem matéria ou que tem nome genérico ("Conhecimentos
+  // Específicos" casava com "Conhecimentos Específicos das Regiões"); os outros só passam para a versão atual.
   const s = await load();
+  if (sm && sm.materia && !genericSubject(s.name)) {
+    await admin.from('qbank_subject_maps').update({ prompt_version: QMAP_PROMPT_VERSION }).eq('subject_id', subjectId);
+    return sm as { materia: string | null; banca: string; banca_tipo: string | null };
+  }
   const banca = s.board ? await pickBoard(s.board, (q) => quest.bancas(q)) : '';
   const r = await mapSubject(deps, { name: s.name, topics: s.topics, organization: s.organization });
   await admin.from('qbank_subject_maps').upsert({ subject_id: subjectId, owner_id: ownerId, materia: r.materia, banca, how: r.how, prompt_version: QMAP_PROMPT_VERSION });

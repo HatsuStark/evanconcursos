@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { rankMaterias, resolveMateria } from './materias.ts';
+import { genericSubject, rankMaterias, resolveMateria } from './materias.ts';
 
 describe('rankMaterias', () => {
   const api = ['Alfabeto português', 'Literatura portuguesa', 'Língua Portuguesa', 'Situação dos portugueses'];
@@ -52,5 +52,14 @@ describe('resolveMateria', () => {
     expect(resolveMateria('direito processual civil', ['Direito Processual Civil'])).toBe('Direito Processual Civil - CPC 2015');
     expect(resolveMateria('Atualidades', [])).toBe('Atualidades e Conhecimentos Gerais');
     expect(resolveMateria('Direito Processual Civil - CPC 1973', ['Direito Processual Civil - CPC 1973'])).toBe('Direito Processual Civil - CPC 1973');
+  });
+});
+
+describe('genericSubject', () => {
+  it('nome que não diz o assunto fica sem matéria', () => {
+    for (const n of ['Conhecimentos Específicos', 'CONHECIMENTOS ESPECÍFICOS', 'Conhecimentos Gerais', 'Conhecimentos Específicos do Cargo', 'Legislação Específica', 'Noções Básicas', 'Específicos'])
+      expect(genericSubject(n), n).toBe(true);
+    for (const n of ['Conhecimentos Bancários', 'Legislação Tributária', 'Economia e Finanças públicas', 'Conhecimentos Pedagógicos', 'Noções de Informática'])
+      expect(genericSubject(n), n).toBe(false);
   });
 });

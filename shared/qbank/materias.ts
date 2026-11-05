@@ -27,6 +27,12 @@ const SUBJECT_NAMES: Record<string, string> = {
   'raciocinio logico matematico': 'Raciocínio Lógico', 'raciocinio logico e matematico': 'Raciocínio Lógico', 'raciocinio logico e matematica': 'Raciocínio Lógico',
   'matematica e raciocinio logico': 'Raciocínio Lógico',
 };
+// Nome de disciplina que não diz o assunto ("Conhecimentos Específicos", "Conhecimentos Gerais", "Legislação Específica"):
+// casar pelo nome dá matéria errada ("Conhecimentos Específicos das Regiões"). A disciplina fica sem matéria e cada
+// sessão acha a sua pelo tema.
+export const genericSubject = (subject: string) =>
+  /^(conhecimentos|nocoes|parte|prova) (especific[oa]s?|gera(l|is)|basic[oa]s?|complementares)( (do cargo|da area|da funcao|do emprego))?$|^legislacao (especifica|aplicada)$|^especific[oa]s?$/.test(normalizeText(subject));
+
 export const subjectMateria = (subject: string): string | undefined => SUBJECT_NAMES[normalizeText(subject).replace(/^(nocoes|conhecimentos) (de|do|da|dos|das|basicos de) /, '')];
 
 const tokens = (s: string) => normalizeText(s).split(' ').filter(Boolean);

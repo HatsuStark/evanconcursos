@@ -9,6 +9,7 @@
 import type { GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
+import { genericSubject } from '../../../shared/qbank/materias.ts';
 import { interleave, mapSubject, MEDIUM_OR_HARD, pickBoard, QMAP_PROMPT_VERSION, SESSION_DIFFICULTIES } from '../../../shared/qbank/map.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { activePlan, cacheQuestions, fromCache, mapDeps, publicQuestion, questFailure, recordAnswer, takeNewest, withStatus, type PublicQuestion } from '../_shared/qbank.ts';
@@ -145,7 +146,7 @@ Deno.serve(async (req) => {
           for (const s of inBlock) {
             const n = s.questions || Math.max(1, Math.round(Math.max(0, g.questions - fixed) / Math.max(1, loose.length)));
             let { data: sm } = await admin.from('qbank_subject_maps').select('materia, prompt_version').eq('subject_id', s.id).maybeSingle();
-            if (!sm || (!sm.materia && sm.prompt_version !== QMAP_PROMPT_VERSION)) {
+            if (!sm || (sm.prompt_version !== QMAP_PROMPT_VERSION && (!sm.materia || genericSubject(s.name)))) {
               const r = await mapSubject(deps, { name: s.name, topics: (s.notice_topics ?? []).map((t) => t.text), organization: String(notice?.organization ?? '') });
               sm = { materia: r.materia, prompt_version: QMAP_PROMPT_VERSION };
               await admin.from('qbank_subject_maps').upsert({ subject_id: s.id, owner_id: auth.user.id, materia: r.materia, banca, how: r.how, prompt_version: QMAP_PROMPT_VERSION });

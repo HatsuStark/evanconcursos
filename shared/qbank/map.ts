@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { normalizeText } from '../ai/notice.ts';
 import { findLawRefs } from '../legal/refs.ts';
 import { lawByKey } from '../legal/registry.ts';
-import { fullMaterias, subjectMateria } from './materias.ts';
+import { fullMaterias, genericSubject, subjectMateria } from './materias.ts';
 import { organSearch, placeFilter } from './places.ts';
 
 // qmap-v4: o tema da sessão é o foco; o item do edital é só contexto (um item longo, como "Classes de palavras: substantivo,
@@ -13,7 +13,7 @@ import { organSearch, placeFilter } from './places.ts';
 // qmap-v5: assunto com o nome do tema ("Competência" numa sessão de competência) não conta como genérico.
 // qmap-v6: até 8 assuntos em ordem de relevância; a medição fica com os 5 primeiros que têm questões. A IA prefere nomes que
 // parecem específicos ("Conceito, Princípios e Regras de Competência", 2 questões) aos que têm volume ("Competência", 159).
-export const QMAP_PROMPT_VERSION = 'qmap-v7';
+export const QMAP_PROMPT_VERSION = 'qmap-v8';
 export const SESSION_ASSUNTOS = 5, ASSUNTO_CANDIDATES = 8;
 
 const STOP = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'a', 'o', 'as', 'os', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'ao', 'aos', 'art', 'arts', 'lei', 'nocoes', 'noções']);
@@ -115,6 +115,7 @@ async function candidates(d: MapDeps, q: string) {
 export async function mapSubject(d: MapDeps, subject: { name: string; topics: string[]; organization?: string }): Promise<{ materia: string | null; how: string }> {
   const known = subjectMateria(subject.name);
   if (known) return { materia: known, how: 'nome' };
+  if (genericSubject(subject.name)) return { materia: null, how: 'nome genérico: matéria por sessão' };
   const q = subject.name.replace(/^(noções|nocoes) (de|do|da|dos|das) /i, '');
   const fits = placeFilter([subject.organization ?? '', subject.name, ...subject.topics].join(' | '));
   const cands = (await candidates(d, q)).filter(fits);

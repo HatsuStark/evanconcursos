@@ -309,3 +309,10 @@ describe('disciplina com nome composto (qmap-v7)', () => {
     expect(r).toMatchObject({ materia: 'Microeconomia', how: 'matéria pela sessão' });
   });
 });
+
+describe('disciplina de nome genérico (qmap-v8)', () => {
+  it('"Conhecimentos Específicos" não casa com "Conhecimentos Específicos das Regiões": a sessão escolhe a matéria', async () => {
+    const deps: MapDeps = { materias: async () => ['Conhecimentos Específicos das Regiões'], assuntosOf: async () => ['a'], ai: (async () => ({ materia: '' })) as MapDeps['ai'] };
+    expect(await mapSubject(deps, { name: 'Conhecimentos Específicos', topics: ['Higienização e limpeza.'] })).toEqual({ materia: null, how: 'nome genérico: matéria por sessão' });
+  });
+});
