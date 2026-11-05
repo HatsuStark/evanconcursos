@@ -27,6 +27,15 @@ describe('extractWithRetry', () => {
     const e = await extractWithRetry(vi.fn().mockRejectedValue(recitation)).catch((x: Error) => x) as Error;
     expect(e.message).toContain('recusou transcrever');
   });
+  it('tópico acima do limite (parágrafo corrido) tenta de novo pedindo para quebrar os itens', async () => {
+    const long = new Error('A resposta do Gemini não segue o schema: subjects.4.topics.0.text: Too big: expected string to have <=2000 characters');
+    const attempt = vi.fn().mockRejectedValueOnce(long).mockResolvedValueOnce('ok');
+    expect(await extractWithRetry(attempt)).toBe('ok');
+    expect(attempt.mock.calls[1]![0]).toMatchObject({ temperature: 0.2, retry: true });
+    const e = await extractWithRetry(vi.fn().mockRejectedValue(long)).catch((x: Error) => x) as Error;
+    expect(e.message).toContain('não separou os itens');
+    expect(e.cause).toBe(long);
+  });
   it('outro erro não gasta nova tentativa', async () => {
     const boom = new Error('rede'), attempt = vi.fn().mockRejectedValue(boom);
     await expect(extractWithRetry(attempt)).rejects.toBe(boom);

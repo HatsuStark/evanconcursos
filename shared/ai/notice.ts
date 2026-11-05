@@ -2,7 +2,7 @@
 // Usado pela Edge Function notice-extract e pela avaliação (evals/run.ts).
 import { z } from 'zod';
 
-export const NOTICE_PROMPT_VERSION = 'notice-v5';
+export const NOTICE_PROMPT_VERSION = 'notice-v6';
 
 // Mesmos valores do filtro nivel_escolaridade da Quest API; vazio se o edital não informar.
 export const EDUCATION_LEVELS = ['Fundamental', 'Médio', 'Superior'] as const;
@@ -59,19 +59,26 @@ export const NOTICE_THINKING = 'low' as const;
 
 // O filtro RECITATION do Gemini recusa saída parecida demais com um texto conhecido, e a transcrição do edital às vezes
 // cai nele. É uma recusa instável: vale outra tentativa, com mais variação e itens quebrados, se ainda houver tempo.
+// Tópico acima do limite (conteúdo em parágrafo corrido, como no TRF3, devolvido como um item só) também ganha outra
+// tentativa, com o pedido explícito de quebrar os itens.
+const isRecitation = (err: unknown) => (err as { finishReason?: string }).finishReason === 'RECITATION';
+const isLongTopic = (err: unknown) => err instanceof Error && /topics\.\d+\.text: Too big/.test(err.message);
+
 export async function extractWithRetry<T>(attempt: (o: { temperature: number; retry: boolean; timeoutMs: number }) => Promise<T>, now: () => number = Date.now): Promise<T> {
   const deadline = now() + NOTICE_DEADLINE_MS;
   try {
     return await attempt({ temperature: 0.2, retry: false, timeoutMs: NOTICE_DEADLINE_MS });
   } catch (err) {
     const left = deadline - now();
-    if ((err as { finishReason?: string }).finishReason !== 'RECITATION' || left < RETRY_MIN_MS) throw friendlyRecitation(err);
-    return await attempt({ temperature: 0.7, retry: true, timeoutMs: left }).catch((e: unknown) => { throw friendlyRecitation(e); });
+    if (!(isRecitation(err) || isLongTopic(err)) || left < RETRY_MIN_MS) throw friendlyError(err);
+    return await attempt({ temperature: isRecitation(err) ? 0.7 : 0.2, retry: true, timeoutMs: left }).catch((e: unknown) => { throw friendlyError(e); });
   }
 }
-const friendlyRecitation = (err: unknown) => (err as { finishReason?: string }).finishReason === 'RECITATION'
+const friendlyError = (err: unknown) => isRecitation(err)
   ? new Error('A IA recusou transcrever este edital (filtro de texto reproduzido). Tente de novo; se repetir, avise o suporte.', { cause: err })
-  : err;
+  : isLongTopic(err)
+    ? new Error('A IA não separou os itens do conteúdo programático deste edital (texto em parágrafo corrido). Tente de novo; se repetir, avise o suporte.', { cause: err })
+    : err;
 
 // ---------- lista de cargos (antes da leitura completa) ----------
 // O candidato escolhe o cargo numa lista tirada do edital, em vez de digitar: com texto livre e "o mais próximo",
@@ -126,10 +133,10 @@ Regras:
 - subjects: uma entrada por disciplina. Quando um bloco agrupa várias disciplinas, cada disciplina com título próprio no conteúdo programático (inclusive títulos em MAIÚSCULAS como "ENGENHARIA DE SOFTWARE", "BANCOS DE DADOS") é uma entrada separada, com "block" indicando o bloco. Nunca crie uma disciplina com o nome do bloco (ex.: "Conhecimentos Específicos") quando o bloco tem títulos internos.
 - questions: o número de questões da disciplina quando o edital informar por disciplina; 0 quando só houver o total do bloco.
 - core: true para conhecimentos específicos do cargo; false para conhecimentos gerais/básicos.
-- topics: transcreva fielmente cada item do conteúdo programático da disciplina, um item por entrada, na ordem do edital, mantendo leis e artigos citados. Não resuma, não junte disciplinas, não acrescente nada e não prefixe o item com o nome da disciplina. page = página do PDF onde o item aparece.
+- topics: transcreva fielmente cada item do conteúdo programático da disciplina, um item por entrada, na ordem do edital, mantendo leis e artigos citados. Quando o conteúdo vier em parágrafo corrido, cada frase terminada em ponto (ex.: "Contratos: disposições gerais; compra e venda.") é um item; nunca ponha a disciplina inteira numa entrada só. Não resuma, não junte disciplinas, não acrescente nada e não prefixe o item com o nome da disciplina. page = página do PDF onde o item aparece.
 - stages: as etapas do concurso (objetiva, discursiva, títulos, prática, física...).
 - notes: regras relevantes para o planejamento (nota mínima, critérios de eliminação, peso das provas, detalhes da discursiva), frases curtas.
-- Não invente: se uma informação não estiver no edital, deixe vazio ou 0.${retry ? '\n- Em topics, quebre itens longos em entradas menores, separadas nos pontos e vírgulas, e padronize a pontuação, sem mudar o sentido nem omitir leis e artigos.' : ''}`;
+- Não invente: se uma informação não estiver no edital, deixe vazio ou 0.${retry ? '\n- Em topics, quebre itens longos em entradas menores (cada entrada com no máximo 2000 caracteres), separadas nos pontos finais e, se preciso, nos pontos e vírgulas, e padronize a pontuação, sem mudar o sentido nem omitir leis e artigos.' : ''}`;
 }
 
 // ---------- verificações determinísticas ----------
