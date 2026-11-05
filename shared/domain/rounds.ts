@@ -3,7 +3,7 @@
 // cada matéria, vêm primeiro as sessões mais fracas e há mais tempo sem ver.
 import { DAY_MS, parseYmd, ymd } from './dates.ts';
 import { apportion, interleave, splitDay, theoryGoal } from './scheduler.ts';
-import { subjectWeakness, type NewTask, type ReplanAttempt, type ReplanSubject, type ReplanTask } from './replan.ts';
+import { movedGoal, overdueTasks, subjectWeakness, type NewTask, type ReplanAttempt, type ReplanSubject, type ReplanTask } from './replan.ts';
 
 const REFILL_BELOW = 3; // tarefas pendentes que disparam a próxima rodada
 const ROUND_DAYS = 14;
@@ -149,4 +149,28 @@ export function nextRound(p: { tasks: ReplanTask[]; subjects: ReplanSubject[]; a
     .map((w) => ({ subjectId: w.subjectId, rate: Math.round(w.rate * 100) }));
   const summary: RoundSummary = { weakest, simulado, tasks: out.length };
   return { supersede: [] as string[], tasks: out, summary: { round: summary } };
+}
+
+// Agenda sem prazo: atraso não aperta nada. Da primeira tarefa atrasada em diante, as pendentes andam para a frente os dias
+// de estudo perdidos, na mesma ordem; o tempo de cada uma segue as horas do novo dia, e a meta acompanha.
+export interface ShiftSummary { overdue: number; days: number }
+export function shiftOverdue(tasks: ReplanTask[], hours: number[], today: string) {
+  const minutesOn = (d: Date) => Math.round((hours[(d.getDay() + 6) % 7] ?? 0) * 60);
+  const overdue = overdueTasks(tasks, today);
+  if (!overdue.length || !hours.some((h) => h > 0)) return null;
+  const from = overdue.map((t) => t.date).sort()[0]!, end = parseYmd(today)!;
+  let days = 0;
+  for (const d = parseYmd(from)!; d < end; d.setDate(d.getDate() + 1)) if (minutesOn(d) > 0) days++;
+  const nextStudyDay = (d: Date) => { do d.setDate(d.getDate() + 1); while (minutesOn(d) <= 0); };
+  const moving = tasks.filter((t) => !t.done_at && t.kind !== 'exam' && t.date >= from);
+  const out: NewTask[] = moving.map((t) => {
+    const d = parseYmd(t.date)!, before = minutesOn(d);
+    for (let i = 0; i < Math.max(1, days); i++) nextStudyDay(d);
+    while (d < end) nextStudyDay(d);
+    const after = minutesOn(d), minutes = before > 0 ? Math.max(15, Math.round((t.minutes * after) / before)) : t.minutes;
+    const goal = minutes !== t.minutes && ['theory', 'consolidation'].includes(t.kind) ? movedGoal(t, minutes) : t.goal_questions;
+    return { date: ymd(d), position: t.position ?? 0, minutes, kind: t.kind, subjectId: t.subject_id, sessionId: t.session_id, title: t.title, keyword: t.keyword, goal, fromTaskId: t.id };
+  });
+  const shift: ShiftSummary = { overdue: overdue.length, days: Math.max(1, days) };
+  return { supersede: moving.map((t) => t.id), tasks: out, shift };
 }

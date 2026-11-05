@@ -97,7 +97,8 @@ export function SchedulePage() {
     const queue = cycleQueue(tasks), pace = cycleProgress(tasks, today());
     return (
       <Shell title="Cronograma" subtitle={[notice.role_name, notice.board].filter(Boolean).join(' · ')} rail={rail}>
-        {openEnded ? <OpenPlanCard active={active.data} /> : <PacingSwitch planId={plan.id} pacing={plan.pacing} />}
+        <OpenPlanCard active={active.data} />
+        <PacingSwitch planId={plan.id} pacing={plan.pacing} openEnded={openEnded} />
         <div className="section-title"><h2>{openEnded ? 'Sua fila' : 'Fila do ciclo'}</h2><span className="badge cyan">{queue.length} {queue.length === 1 ? 'pendente' : 'pendentes'}</span></div>
         {!openEnded && !!pace.behind && <p className="muted small" style={{ margin: '0 0 12px' }}>{pace.behind} {pace.behind === 1 ? 'tarefa' : 'tarefas'} atrás do ritmo para terminar antes da prova.</p>}
         {queue.length ? <div className="grid" style={{ gap: 12 }}>{queue.slice(0, queueShown).map((t) => <TaskCard key={t.id} task={t} subjects={subjects} />)}</div>
@@ -116,7 +117,8 @@ export function SchedulePage() {
           <button className="icon-btn" onClick={() => shift(1)} aria-label="Próximo mês"><ChevronRight size={18} /></button>
         </div>
       }>
-      <PacingSwitch planId={plan.id} pacing={plan.pacing} />
+      <OpenPlanCard active={active.data} />
+      <PacingSwitch planId={plan.id} pacing={plan.pacing} openEnded={openEnded} />
       <ReplanBanner active={active.data} />
       <CoverageBanner active={active.data} />
       <div className="calendar glass" role="grid" aria-label="Calendário de estudos">

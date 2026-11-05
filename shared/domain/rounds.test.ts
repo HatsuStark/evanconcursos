@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { generateSchedule } from './scheduler.ts';
-import { firstPassWeeks, isOpenEnded, masteryPercent, needsRound, nextRound, openEndDate, type RoundAttempt } from './rounds.ts';
+import { firstPassWeeks, isOpenEnded, masteryPercent, needsRound, nextRound, openEndDate, shiftOverdue, type RoundAttempt } from './rounds.ts';
 import type { ReplanTask } from './replan.ts';
 
 const TODAY = '2026-11-02', NOW = new Date('2026-11-02T12:00:00Z').getTime(); // segunda-feira
@@ -178,5 +178,28 @@ describe('masteryPercent', () => {
   it('reforço não conta como sessão nova no total', () => {
     const extra = done('a1', 'adm', 1, { id: 'r', kind: 'consolidation' });
     expect(masteryPercent([...tasks, extra], two, answers('p1', 'pt', 10, 0), NOW)).toBe(25);
+  });
+});
+
+describe('shiftOverdue', () => {
+  const t = (id: string, date: string, over: Partial<ReplanTask> = {}): ReplanTask => ({
+    id, date, minutes: 120, kind: 'theory', subject_id: 'adm', session_id: id, title: id, keyword: '', goal_questions: 10, done_at: null, ...over,
+  });
+
+  it('empurra as pendentes os dias de estudo perdidos, na mesma ordem, com o tempo do novo dia', () => {
+    const tasks = [
+      t('qui', '2026-10-29'), t('sex', '2026-10-30'), t('sab', '2026-10-31', { minutes: 240, done_at: daysAgo(2) }),
+      t('seg', '2026-11-02'), t('qua', '2026-11-04'), t('prova', '2026-12-01', { kind: 'exam' }),
+    ];
+    const r = shiftOverdue(tasks, hours, TODAY)!;
+    expect(r.shift).toEqual({ overdue: 2, days: 3 });
+    expect(r.supersede).toEqual(['qui', 'sex', 'seg', 'qua']);
+    expect(r.tasks.map((x) => [x.fromTaskId, x.date, x.minutes, x.goal])).toEqual([
+      ['qui', '2026-11-02', 120, 10], ['sex', '2026-11-03', 120, 10], ['seg', '2026-11-05', 120, 10], ['qua', '2026-11-07', 240, 20],
+    ]);
+  });
+
+  it('sem atraso, nada muda', () => {
+    expect(shiftOverdue([t('seg', TODAY)], hours, TODAY)).toBeNull();
   });
 });

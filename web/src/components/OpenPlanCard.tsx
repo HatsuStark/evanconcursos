@@ -37,7 +37,7 @@ export function OpenPlanCard({ active }: { active: ActivePlan }) {
       <InfinityIcon size={20} style={{ color: 'var(--cyan)', flex: 'none' }} />
       <div style={{ flex: 1, minWidth: 220 }}>
         <strong>Plano sem prazo</strong>
-        <p className="muted small" style={{ margin: '4px 0 0' }}>{notice.exam_date ? `Este edital não está aberto: a prova foi em ${fmtDate(notice.exam_date)}.` : 'Este edital não informa a data da prova.'} Seu plano se adapta ao seu desempenho, com mais tempo no que está fraco. Não há data final nem tarefa atrasada.</p>
+        <p className="muted small" style={{ margin: '4px 0 0' }}>{notice.exam_date ? `Este edital não está aberto: a prova foi em ${fmtDate(notice.exam_date)}.` : 'Este edital não informa a data da prova.'} Seu plano se adapta ao seu desempenho, com mais tempo no que está fraco. Não há data final{plan.pacing === 'ciclo' ? ' nem tarefa atrasada' : ': o que atrasar passa para os próximos dias'}.</p>
         <p className="small" style={{ margin: '6px 0 0' }}>{status}</p>
         {error && <p className="error small" style={{ margin: '6px 0 0' }} role="alert">Não foi possível montar a próxima rodada: {error}</p>}
         <Link className="btn ghost sm" style={{ marginTop: 10 }} to={`/concursos/novo?atualizar=${notice.id}`}><FileUp size={15} /> Saiu novo edital?</Link>

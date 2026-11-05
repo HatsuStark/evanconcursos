@@ -2,13 +2,13 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { setPacing, type Pacing } from '../lib/plans.ts';
 
-const OPTIONS: { key: Pacing; label: string; hint: string }[] = [
-  { key: 'agenda', label: 'Agenda', hint: 'Cada tarefa tem um dia no calendário.' },
-  { key: 'ciclo', label: 'Ciclo', hint: 'Sem dias fixos: você segue a fila na ordem do plano, no seu ritmo. As datas só medem o ritmo até a prova.' },
+const OPTIONS: { key: Pacing; label: string; hint: string; open: string }[] = [
+  { key: 'agenda', label: 'Agenda', hint: 'Cada tarefa tem um dia no calendário.', open: 'Cada tarefa tem um dia no calendário, para você ter a meta de cada dia. Se atrasar, as pendentes passam para os próximos dias.' },
+  { key: 'ciclo', label: 'Ciclo', hint: 'Sem dias fixos: você segue a fila na ordem do plano, no seu ritmo. As datas só medem o ritmo até a prova.', open: 'Sem dias fixos: você segue a fila na ordem do plano, no seu ritmo, sem tarefa atrasada.' },
 ];
 
 // Troca entre agenda e ciclo sem refazer o plano: as tarefas e o que já foi feito continuam iguais.
-export function PacingSwitch({ planId, pacing }: { planId: string; pacing: Pacing }) {
+export function PacingSwitch({ planId, pacing, openEnded = false }: { planId: string; pacing: Pacing; openEnded?: boolean }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -25,7 +25,7 @@ export function PacingSwitch({ planId, pacing }: { planId: string; pacing: Pacin
       <div className="segmented">
         {OPTIONS.map((o) => <button key={o.key} className={pacing === o.key ? 'on' : ''} disabled={busy} aria-pressed={pacing === o.key} onClick={() => { if (pacing !== o.key) void change(o.key); }}>{o.label}</button>)}
       </div>
-      <p className="muted small" style={{ margin: '8px 0 0' }}>{OPTIONS.find((o) => o.key === pacing)!.hint}</p>
+      <p className="muted small" style={{ margin: '8px 0 0' }}>{OPTIONS.find((o) => o.key === pacing)![openEnded ? 'open' : 'hint']}</p>
       {error && <p className="error small" style={{ margin: '6px 0 0' }}>{error}</p>}
     </div>
   );

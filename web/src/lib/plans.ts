@@ -5,7 +5,7 @@ import { ymd } from '../../../shared/domain/dates.ts';
 import { prioritize, RUSH_WEEKS } from '../../../shared/domain/priority.ts';
 import type { PrioritizeSummary } from '../../../shared/domain/coverage.ts';
 import type { RebalanceSummary, Replan } from '../../../shared/domain/replan.ts';
-import { isOpenEnded, openEndDate, type RoundAttempt, type RoundSummary } from '../../../shared/domain/rounds.ts';
+import { isOpenEnded, openEndDate, type RoundAttempt, type RoundSummary, type ShiftSummary } from '../../../shared/domain/rounds.ts';
 import { buildPlanPayload, calendarSummary, carryOverSessions, GENERATOR_VERSION, theoryPlan, type PlanBase } from '../../../shared/ai/plan-build.ts';
 import { fallbackSessions, PLAN_PROMPT_VERSION, type PlanInputs, type Session } from '../../../shared/ai/plan.ts';
 import { remapMaterial, type Material } from './materials.ts';
@@ -117,8 +117,6 @@ export async function generatePlan(noticeId: string, inputs: PlanInputs, onProgr
     p_data: { name: notice.title, from: ymd(new Date()), inputs, strategy, summary: { ...payload.summary, openEnded }, generatorVersion: GENERATOR_VERSION, promptVersion: PLAN_PROMPT_VERSION, sessions: payload.sessions, tasks: payload.tasks },
   });
   if (error) throw new Error(error.message);
-  // Sem prazo, as tarefas são uma fila: não há dia fixo nem atraso.
-  if (openEnded) must(await supabase.from('study_plans').update({ pacing: 'ciclo' }).eq('notice_id', noticeId));
   return data as string;
 }
 
@@ -144,7 +142,7 @@ export type Pacing = 'agenda' | 'ciclo';
 export interface ActivePlan {
   plan: { id: string; name: string; notice_id: string; active_version_id: string | null; pacing: Pacing };
   notice: { id: string; role_name: string; organization: string; board: string; exam_date: string | null; total_questions: number; education_level: Draft['educationLevel']; cutoff_pct: number | null; role_duties: string; structure: { blocks?: { name: string; rule: string }[] } | null };
-  version: { id: string; number: number; reason: string; inputs: PlanInputs; strategy: Strategy; summary: { weeks?: number; hours?: number; perSubject?: { subjectId: string; name: string; days: number }[]; replan?: { round?: RoundSummary } & (Partial<RebalanceSummary> | Partial<PrioritizeSummary>); openEnded?: boolean }; created_at: string } | null;
+  version: { id: string; number: number; reason: string; inputs: PlanInputs; strategy: Strategy; summary: { weeks?: number; hours?: number; perSubject?: { subjectId: string; name: string; days: number }[]; replan?: { round?: RoundSummary; shift?: ShiftSummary } & (Partial<RebalanceSummary> | Partial<PrioritizeSummary>); openEnded?: boolean }; created_at: string } | null;
   subjects: SubjectRow[];
   tasks: TaskRow[];
   openEnded: boolean; // prova já realizada: plano sem prazo, que se adapta ao desempenho
@@ -176,7 +174,7 @@ export const useActivePlan = (noticeId?: string) => useQuery({
     ]);
     const noticeRow = must(notice) as ActivePlan['notice'], versionRow = must(version) as ActivePlan['version'];
     const openEnded = isOpenEnded(noticeRow.exam_date, ymd(new Date())) || (!noticeRow.exam_date && !!versionRow?.summary.openEnded);
-    return { plan: openEnded ? { ...plan, pacing: 'ciclo' } : plan, notice: noticeRow, version: versionRow, subjects: must(subjects) as SubjectRow[], tasks: must(tasks) as TaskRow[], openEnded };
+    return { plan, notice: noticeRow, version: versionRow, subjects: must(subjects) as SubjectRow[], tasks: must(tasks) as TaskRow[], openEnded };
   },
 });
 
