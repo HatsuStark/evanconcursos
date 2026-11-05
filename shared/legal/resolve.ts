@@ -8,7 +8,7 @@
 //   Normativas da Receita, resoluções de CONAMA, CONTRAN, ANVISA etc., como saíram no Diário Oficial).
 // - Emendas Constitucionais e Medidas Provisórias federais: pelo mesmo caminho das leis.
 import { kindName, normPattern, type UnlistedNorm } from './norms.ts';
-import type { LegalArticle } from './parse.ts';
+import { decodeEntities, type LegalArticle, parseLawHtml } from './parse.ts';
 
 export const SENADO_TYPE: Record<string, string> = { lei: 'LEI', lc: 'LCP', dl: 'DEL', dec: 'DEC', ec: 'EMC', mp: 'MPV' };
 const URN_KIND: Record<string, string> = { lei: 'lei', lc: 'lei.complementar', dl: 'decreto.lei', dec: 'decreto', ec: 'emenda.constitucional', mp: 'medida.provisoria' };
@@ -54,6 +54,34 @@ export function pickInfraFiles(names: string[], kind: string, num: string) {
   const numRe = num.length > 3 ? `${num.slice(0, -3)}\\.?${num.slice(-3)}` : num;
   const re = new RegExp(`^${INFRA_FILE[kind]}(?:-[a-z0-9]+)*?-n[ºo]?-${numRe}-de-`);
   return names.filter((n) => re.test(n));
+}
+
+// ---------- atos do CNJ (atos.cnj.jus.br, texto compilado oficial) ----------
+// O acervo quase não tem atos do CNJ (saem no DJe do CNJ, não no Diário Oficial da União); o portal do CNJ tem todos,
+// com a redação antiga tachada (<s>) e a nova seguida de "(redação dada pela ...)".
+export const CNJ_ATOS = 'https://atos.cnj.jus.br';
+const CNJ_TIPO: Record<string, number> = { res: 7, port: 9, prov: 20, in: 8 };
+export const cnjSearchUrl = (kind: string, num: string, year: string) =>
+  CNJ_TIPO[kind] ? `${CNJ_ATOS}/atos?atos=sim&tipoAto%5B%5D=${CNJ_TIPO[kind]}&numero=${num}&ano=${year}` : null;
+export const cnjIds = (html: string) => [...new Set([...html.matchAll(/atos\/detalhar\/(\d+)/g)].map((m) => m[1]!))];
+const CNJ_KIND: Record<string, RegExp> = { res: /^Resolu[çc][ãa]o$/i, port: /^Portaria$/i, prov: /^Provimento$/i, in: /^Instru[çc][ãa]o Normativa$/i };
+// Página do ato: confere tipo, número e ano na identificação e separa o texto vigente em artigos.
+export function parseCnjAct(html: string, kind: string, num: string, year: string) {
+  const field = (label: string) => {
+    const i = html.indexOf(`identificacao">${label}</div>`);
+    if (i < 0) return '';
+    const m = /dsc_conteudo[^>]*>([\s\S]*?)<\/div>\s*<\/div>/.exec(html.slice(i));
+    return m ? decodeEntities(m[1]!.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim() : '';
+  };
+  const id = /^(.+?)\s+N[º°o.]*\s*([\d.]+)\s+de\s+\d{2}\/\d{2}\/(\d{4})/i.exec(field('Identificação'));
+  if (!id || !CNJ_KIND[kind]?.test(id[1]!.trim()) || id[2]!.replace(/\./g, '') !== num || id[3] !== year) return null;
+  const start = html.indexOf('identificacao">Texto</div>');
+  if (start < 0) return null;
+  const body = html.slice(start)
+    .replace(/<s>[\s\S]*?<\/s>/gi, '') // redação revogada
+    .replace(/<a\b[^>]*>\s*(\([^<]*\))\s*<\/a>/gi, '<span class="Hyperlink">$1</span>'); // nota de alteração
+  const articles = parseLawHtml(body).filter((a) => a.text.replace(/^Art\.\s*\S+\s*/, '').trim() || a.notes.length);
+  return { articles, ementa: field('Ementa'), situacao: field('Situação') };
 }
 
 // Federais pelo Senado; atos de órgão só com o órgão reconhecido. O resto (Resolução sem órgão, estadual...) pede o PDF.

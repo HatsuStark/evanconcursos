@@ -53,7 +53,7 @@ export function unlistedNorms(text: string, extra: LawEntry[] = []): UnlistedNor
     const key = `${kind.slug}-${acr ? acr.toLowerCase() + '-' : ''}${num}${year ? '-' + year : ''}`;
     const pattern = normPattern(kind.slug, num, acr);
     const org = (m[7] ?? '').trim();
-    const citation = `${kind.name} ${num.length > 3 ? Number(num).toLocaleString('pt-BR').replace(/\s/g, '.') : num}${year ? '/' + year : ''}${org ? ' ' + org : ''}`;
+    const citation = `${kind.name}${acr ? ' ' + acr : ''} ${num.length > 3 ? Number(num).toLocaleString('pt-BR').replace(/\s/g, '.') : num}${year ? '/' + year : ''}${org ? ' ' + org : ''}`;
     // A mesma norma citada com e sem ano: fica a com ano (chave mais específica).
     const twin = [...out.values()].find((u) => u.pattern === pattern);
     if (twin && (twin.key.split('-').length >= key.split('-').length)) continue;

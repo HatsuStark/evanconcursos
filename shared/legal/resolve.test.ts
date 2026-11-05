@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { findLawRefs } from './refs.ts';
 import { ownLawEntry, unlistedNorms } from './norms.ts';
 import {
-  cityOf, ctresbDir, federalUrn, infraFolder, localEntry, localNormsCited, orgOf, parseLawMarkdown, pickCtresbFile, pickInfraFiles, pickSenado, resolvable,
+  cityOf, cnjIds, cnjSearchUrl, ctresbDir, federalUrn, infraFolder, localEntry, localNormsCited, orgOf, parseLawMarkdown, pickCtresbFile, pickInfraFiles, pickSenado, parseCnjAct, resolvable,
   resolvedNorm, textVersion, ufOf,
 } from './resolve.ts';
 
@@ -193,5 +193,37 @@ describe('Constituição Estadual e Lei Orgânica do Município', () => {
     const { articles } = parseLawMarkdown(md);
     expect(articles[0]!).toMatchObject({ text: 'Art. 10. A Assembleia funcionará em sessões públicas. (NR)', notes: ['"Caput" com redação dada pela Emenda Constitucional n° 36, de 17/05/2012.'], revoked: false });
     expect(articles[1]!).toMatchObject({ revoked: true });
+  });
+});
+
+describe('atos do CNJ (atos.cnj.jus.br)', () => {
+  const page = `<div class="row"><div class="col-2 identificacao">Identificação</div>
+                <div class="col-10 dsc_conteudo">Resolução Nº 351 de 28/10/2020</div>
+            </div>
+            <div class="row"><div class="col-2 identificacao">Ementa</div>
+            <div class="col-10 dsc_conteudo"><p>Institui a Pol&iacute;tica de Preven&ccedil;&atilde;o do Ass&eacute;dio.</p></div>
+            </div>
+            <div class="row"><div class="col-2 identificacao">Texto</div><div class="col-10 dsc_conteudo">
+<p style="text-align:center">CAPÍTULO I</p>
+<p style="text-align:center">DA FINALIDADE</p>
+<p style="text-align:justify"><s>Art. 1&ordm;&nbsp;Instituir a Política de Prevenção e Combate.</s></p>
+<p style="text-align:justify">Art. 1&ordm; Instituir a Política de Prevenção e Enfrentamento. <a href="https://atos.cnj.jus.br/atos/detalhar/5242">(redação dada pela Resolução n. 518, de 31.8.2023)</a></p>
+<p style="text-align:justify">Art. 18-A. Os tribunais criarão comissões.</p>
+</div></div>`;
+  it('busca por tipo, número e ano; ids dos resultados', () => {
+    expect(cnjSearchUrl('res', '351', '2020')).toBe('https://atos.cnj.jus.br/atos?atos=sim&tipoAto%5B%5D=7&numero=351&ano=2020');
+    expect(cnjSearchUrl('ec', '1', '2020')).toBeNull();
+    expect(cnjIds('<a href="https://atos.cnj.jus.br/atos/detalhar/3557">x</a><a href="atos/detalhar/3557">y</a><a href="atos/detalhar/9">')).toEqual(['3557', '9']);
+  });
+  it('texto vigente sem a redação tachada, com nota e capítulo; outro número não serve', () => {
+    const r = parseCnjAct(page, 'res', '351', '2020')!;
+    expect(r.ementa).toBe('Institui a Política de Prevenção do Assédio.');
+    expect(r.articles.map((a) => a.label)).toEqual(['1', '18-A']);
+    expect(r.articles[0]).toMatchObject({ text: 'Art. 1º Instituir a Política de Prevenção e Enfrentamento.', notes: ['(redação dada pela Resolução n. 518, de 31.8.2023)'], heading: 'CAPÍTULO I – DA FINALIDADE' });
+    expect(parseCnjAct(page, 'res', '352', '2020')).toBeNull();
+    expect(parseCnjAct(page, 'port', '351', '2020')).toBeNull();
+  });
+  it('a citação mostra a sigla do órgão', () => {
+    expect(unlistedNorms('Resolução CNJ nº 351/2020; Portaria PRES nº 4.657/2026').map((n) => n.citation)).toEqual(['Resolução CNJ 351/2020', 'Portaria PRES 4.657/2026']);
   });
 });

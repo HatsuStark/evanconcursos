@@ -14,9 +14,12 @@ export interface LegalArticle {
 }
 
 const ENTITIES: Record<string, string> = { nbsp: ' ', amp: '&', quot: '"', lt: '<', gt: '>', ordm: 'º', ordf: 'ª', deg: '°', sect: '§', ndash: '–', mdash: '—', ldquo: '“', rdquo: '”', lsquo: '‘', rsquo: '’', hellip: '…', apos: "'" };
+// Letras acentuadas ("&iacute;", "&Ccedil;", "&atilde;"): letra + acento combinado, normalizado.
+const MARKS: Record<string, string> = { acute: '́', grave: '̀', circ: '̂', tilde: '̃', cedil: '̧', uml: '̈' };
 export const decodeEntities = (s: string) => s
   .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
   .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+  .replace(/&([a-zA-Z])(acute|grave|circ|tilde|cedil|uml);/g, (_, c, m) => (c + MARKS[m]).normalize('NFC'))
   .replace(/&([a-z]+);/gi, (m, n) => ENTITIES[n.toLowerCase()] ?? m);
 
 const clean = (s: string) => decodeEntities(s.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();

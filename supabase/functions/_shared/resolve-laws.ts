@@ -7,7 +7,7 @@ import { type UnlistedNorm, unlistedNorms } from '../../../shared/legal/norms.ts
 import type { LegalArticle } from '../../../shared/legal/parse.ts';
 import type { LawEntry } from '../../../shared/legal/registry.ts';
 import {
-  CTRESB_RAW, ctresbDir, federalUrn, infraFolder, type LocalNorm, localEntry, localNormsCited, orgOf, parseLawMarkdown, pickCtresbFile,
+  CNJ_ATOS, cnjIds, cnjSearchUrl, parseCnjAct, CTRESB_RAW, ctresbDir, federalUrn, infraFolder, type LocalNorm, localEntry, localNormsCited, orgOf, parseLawMarkdown, pickCtresbFile,
   pickInfraFiles, pickSenado, resolvable, resolvedNorm, SENADO_TYPE, type SenadoHit, slugOf, stateUrn, textVersion,
 } from '../../../shared/legal/resolve.ts';
 import { ingestLaw, MAX_AGE_MS, saveNorm } from './legal.ts';
@@ -15,6 +15,8 @@ import { ingestLaw, MAX_AGE_MS, saveNorm } from './legal.ts';
 const SENADO = 'https://legis.senado.leg.br/dadosabertos/legislacao/lista';
 const GITHUB_TREES = 'https://api.github.com/repos/ctresb/leis/git/trees/main:';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// Quando uma fonte nova entra, atualize: buscas que falharam antes disso são refeitas.
+const SOURCES_CHANGED_AT = Date.parse('2026-11-05T04:00:00Z');
 
 async function getJson(url: string, headers: Record<string, string> = {}) {
   const res = await fetch(url, { headers: { Accept: 'application/json', ...headers }, signal: AbortSignal.timeout(15_000) });
@@ -101,10 +103,38 @@ async function resolveState(admin: SupabaseClient, n: UnlistedNorm, uf: string):
   return { normId, short: r.short };
 }
 
+// Ato do CNJ no portal do CNJ (texto compilado oficial). Null se não achou: segue para o acervo.
+async function fromCnj(admin: SupabaseClient, n: UnlistedNorm, org: NonNullable<ReturnType<typeof orgOf>>): Promise<Outcome | null> {
+  const url = cnjSearchUrl(n.kind, n.num, n.year);
+  if (!url) return null;
+  const get = async (u: string) => {
+    const res = await fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; EvanConcursos)' }, signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) throw new Error(`atos.cnj.jus.br respondeu ${res.status}`);
+    return res.text();
+  };
+  for (const id of cnjIds(await get(url)).slice(0, 3)) {
+    const page = `${CNJ_ATOS}/atos/detalhar/${id}`;
+    const act = parseCnjAct(await get(page), n.kind, n.num, n.year);
+    if (!act?.articles.length) continue;
+    const r = resolvedNorm(n, n.year, null, `cnj:${n.kind}:${n.num}:${n.year}`, act.ementa, org);
+    const normId = await saveNorm(admin, {
+      urn: r.urn, law_key: r.key, name: r.name, short_name: r.short, citation: r.citation, match_pattern: r.pattern,
+      source_url: page, content_url: page, version: 'Current', license: 'Conselho Nacional de Justiça (atos.cnj.jus.br)',
+    }, act.articles, r.short);
+    return { normId, short: r.short };
+  }
+  return null;
+}
+
 // Ato de órgão federal (IN RFB, Resolução CONAMA...): reguladores/<órgão>[/<tipo>]/<ano>, como saiu no Diário Oficial.
+// CNJ: primeiro o portal do CNJ.
 async function resolveInfra(admin: SupabaseClient, n: UnlistedNorm): Promise<Outcome> {
   const org = orgOf(n.org);
   if (!org || !n.year) return { normId: null, detail: n.year ? 'órgão desconhecido' : 'citação sem ano' };
+  if (org.acr === 'CNJ') {
+    const cnj = await fromCnj(admin, n, org);
+    if (cnj) return cnj;
+  }
   const base = `reguladores/${org.folder}`, sub = infraFolder(await ctresbList(base), n.kind);
   if (sub === undefined) return { normId: null, detail: `${org.acr} sem pasta deste tipo no acervo` };
   // O arquivo fica no ano da publicação: a norma de dezembro pode sair em janeiro.
@@ -159,7 +189,8 @@ async function cached(admin: SupabaseClient, key: string, run: () => Promise<Out
   const { data: prev } = await admin.from('legal_lookups').select('found, norm_id, checked_at').eq('key', key).maybeSingle();
   const fresh = prev && Date.now() - new Date(prev.checked_at).getTime() < MAX_AGE_MS;
   if (fresh && prev.found && prev.norm_id) return prev.norm_id as string;
-  if (fresh && !prev.found) return null;
+  // Falha anterior à última fonte nova (ex.: portal do CNJ) é refeita já, sem esperar os 30 dias.
+  if (fresh && !prev.found && new Date(prev.checked_at).getTime() > SOURCES_CHANGED_AT) return null;
   let out: Outcome;
   try { out = await run(); } catch (e) { console.error('resolve-laws:', key, e); return undefined; }
   await admin.from('legal_lookups').upsert({ key, found: !!out.normId, norm_id: out.normId, detail: (out.normId ? out.short : out.detail).slice(0, 500), checked_at: new Date().toISOString() });
