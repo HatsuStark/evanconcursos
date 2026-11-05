@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { theoryGoal } from '../domain/scheduler.ts';
-import { assuntoTerms, dominantFormat, localPlace, materiaQueries, orgaoKeyword, pickBoard, stem, equalIncidence, interleave, inTurn, assuntoPrompt, prefilterAssuntos, mapSession, mapSubject, measureIncidence, newestPage, usefulNarrowing, planPicks, roleKeyword, searchFilters, type MapDeps } from './map.ts';
+import { assuntoTerms, carreiraPrompt, CARREIRA_MIN, usefulCarreira, dominantFormat, localPlace, materiaQueries, orgaoKeyword, pickBoard, stem, equalIncidence, interleave, inTurn, assuntoPrompt, prefilterAssuntos, mapSession, mapSubject, measureIncidence, newestPage, usefulNarrowing, planPicks, roleKeyword, searchFilters, type MapDeps } from './map.ts';
 
 const tally = (picks: string[]) => picks.reduce<Record<string, number>>((m, a) => ({ ...m, [a]: (m[a] ?? 0) + 1 }), {});
 
@@ -421,5 +421,24 @@ describe('provas do mesmo órgão primeiro', () => {
     const fs = searchFilters({ materia: 'Direito Penal', assuntos: ['Peculato'], how: '' }, 'VUNESP', { orgao: 'TJ SP', level: 'Médio', difficulties: ['3'] });
     expect(fs[0]!.params).toMatchObject({ orgao: 'TJ SP', banca: 'VUNESP', materia: 'Direito Penal', assunto: 'Peculato' });
     expect(fs.findIndex((f) => f.params.nivel_escolaridade)).toBeGreaterThan(fs.findIndex((f) => f.params.orgao && !f.params.banca));
+  });
+});
+
+describe('carreira do edital', () => {
+  it('etapa entre cargo e escolaridade', () => {
+    const fs = searchFilters({ materia: 'Direito Penal', assuntos: ['Peculato'], how: '' }, '', { orgao: 'TJ SP', role: 'Oficial de Justiça', carreiras: ['Tribunais / Justiça Comum', 'Tribunais'], level: 'Médio', difficulties: ['3'] });
+    const order = fs.filter((f) => f.key.endsWith('|*:Peculato:d3') || f.key === '*:Peculato:d3').map((f) => f.key.split(':')[0]);
+    expect(order).toEqual(['o', 'c', 'k', 'k', 'Médio|*', '*']);
+    expect(fs.filter((f) => f.key.startsWith('k:') && f.key.endsWith('|*:Peculato:d3')).map((f) => f.params.carreira)).toEqual(['Tribunais / Justiça Comum', 'Tribunais']);
+  });
+  it('só estreita quando rende e não é quase toda a matéria', () => {
+    expect(usefulCarreira(1000, CARREIRA_MIN - 1)).toBe(false);
+    expect(usefulCarreira(1000, 300)).toBe(true);
+    expect(usefulCarreira(1000, 950)).toBe(false);
+  });
+  it('o prompt pede a específica e depois a geral', () => {
+    const p = carreiraPrompt({ organization: 'TJSP', role: 'Oficial de Justiça', duties: '', level: 'Médio', candidates: ['Tribunais', 'Fiscal'] });
+    expect(p).toMatch(/mais específica.*em seguida, a carreira geral/s);
+    expect(p).toContain('- Tribunais\n- Fiscal');
   });
 });

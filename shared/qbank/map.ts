@@ -338,9 +338,10 @@ export function roleKeyword(role: string) {
   return head.length >= 4 ? head : '';
 }
 
-// Busca da mais à menos específica: provas do mesmo órgão, mesmo cargo, depois escolaridade do edital, depois qualquer uma; em cada etapa, a banca e
+// Busca da mais à menos específica: provas do mesmo órgão, mesmo cargo, mesma carreira (a específica, depois a geral), depois
+// escolaridade do edital, depois qualquer uma; em cada etapa, a banca e
 // depois as outras no formato dela. Nunca solta a dificuldade.
-export function searchFilters(f: SessionFilter, banca: string, o: { level?: string; role?: string; orgao?: string; format?: string; difficulties?: string[] } = {}, now = new Date()): SearchFilter[] {
+export function searchFilters(f: SessionFilter, banca: string, o: { level?: string; role?: string; orgao?: string; carreiras?: string[]; format?: string; difficulties?: string[] } = {}, now = new Date()): SearchFilter[] {
   if (!f.materia || !f.assuntos.length) return [];
   const m = f.materia, format: Record<string, string> = o.format ? { tipo: o.format } : {};
   const places: { tag: string; board: boolean; params: Record<string, string> }[] = /atualidade/i.test(m)
@@ -350,6 +351,7 @@ export function searchFilters(f: SessionFilter, banca: string, o: { level?: stri
   const tiers = [
     ...(o.orgao ? narrowed(`o:${o.orgao}`, { orgao: o.orgao }) : []),
     ...(o.role ? narrowed(`c:${o.role}`, { cargo: o.role }) : []),
+    ...(o.carreiras ?? []).flatMap((carreira) => narrowed(`k:${carreira}`, { carreira })),
     ...(o.level ? narrowed(o.level, { nivel_escolaridade: o.level }) : []),
     ...places,
   ];
@@ -403,6 +405,24 @@ export async function measureIncidence(count: (params: Record<string, string>) =
 export const NARROW_MIN = 500, NARROW_MAX_SHARE = 0.9;
 // Órgão: só entra na busca da disciplina se as provas dele têm ao menos esse tanto de questões na matéria.
 export const ORGAO_MIN = 10;
+// Carreira: entra com ao menos tantas questões na matéria e sem ser quase toda ela (aí não estreita nada).
+export const CARREIRA_MIN = 30;
+export const usefulCarreira = (materiaTotal: number, inCareer: number) => inCareer >= CARREIRA_MIN && inCareer <= materiaTotal * NARROW_MAX_SHARE;
+
+// Carreiras do banco de questões para o edital: a mais específica primeiro e a geral dela depois (uma vez por edital).
+export const CarreiraChoice = z.object({
+  carreiras: z.array(z.string()).describe('Até 2 carreiras da lista, exatamente como escritas: a mais específica primeiro, depois a geral dela; lista vazia se nenhuma serve.'),
+});
+export const carreiraJsonSchema = () => z.toJSONSchema(CarreiraChoice, { target: 'draft-7' });
+export function carreiraPrompt(p: { organization: string; role: string; duties: string; level: string; candidates: string[] }) {
+  return `Estamos filtrando um banco de questões de concursos pela carreira do candidato.
+Órgão do concurso: ${p.organization || '—'}
+Cargo: ${p.role || '—'}${p.level ? ` (nível ${p.level})` : ''}
+Atribuições: ${p.duties.slice(0, 600) || '—'}
+Carreiras do banco (escolha somente desta lista, exatamente como escritas):
+${p.candidates.map((c) => `- ${c}`).join('\n')}
+Escolha a carreira mais específica que corresponde a este órgão e cargo e, em seguida, a carreira geral da qual ela faz parte (ex.: "Tribunais / Justiça Comum Federal e Estadual (STF, STJ, CNJ, TRFs e TJ’s)" e depois "Tribunais"). Se só houver a geral, devolva só ela. Não escolha carreira de outro tipo de órgão nem de outra área de atuação. Se nenhuma servir, devolva lista vazia.`;
+}
 export const usefulNarrowing = (materiaTotal: number, narrowed: number) => narrowed >= NARROW_MIN && narrowed <= materiaTotal * NARROW_MAX_SHARE;
 
 // Quais assuntos recebem as próximas n questões: primeiro todos passam pela sessão, do mais ao menos cobrado;

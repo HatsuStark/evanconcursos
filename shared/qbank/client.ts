@@ -9,7 +9,7 @@ export interface QuestQuestion {
   gabarito: string | null;
   provas: { orgao: string; cargo: string; ano: number; banca: string }[];
   classificacao: { materia: string; assunto: string };
-  textos_associados: string[]; anexos: string[];
+  textos_associados: string[]; anexos: string[]; carreiras?: string[];
 }
 type Page<T> = { items: T[]; total?: number; has_more?: boolean; next_cursor?: string | null };
 
@@ -45,6 +45,16 @@ export class QuestClient {
   async geral() { return this.get<Record<string, unknown>>('/filtros', {}); }
   async bancas(q: string) { return (await this.get<Page<string>>('/filtros/bancas', { q, per_page: 20 })).items; }
   async materias(q: string, limit = 12) { return (await this.get<{ items: string[] }>('/filtros/materias', { q, limit })).items; }
+  // Carreiras da API (gratuito; ~140, em duas páginas), para o filtro `carreira` das questões.
+  async carreiras() {
+    const out: string[] = [];
+    for (let page = 1; page <= 5; page++) {
+      const r = await this.get<Page<string>>('/filtros/carreiras', { page, per_page: 100 });
+      out.push(...r.items);
+      if (!r.has_more || !r.items.length) break;
+    }
+    return out;
+  }
   // Assuntos da matéria que contêm o trecho (busca parcial da API; gratuito): acha "Elasticidades" por "elasticidade" sem
   // baixar a lista inteira, que passa de mil em matérias grandes.
   async assuntosMatching(materia: string, q: string) { return (await this.get<Page<string>>('/filtros/assuntos', { materia, q, per_page: 50 })).items; }

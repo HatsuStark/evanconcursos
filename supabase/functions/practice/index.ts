@@ -12,7 +12,7 @@ import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts
 import { genericSubject } from '../../../shared/qbank/materias.ts';
 import { interleave, mapSubject, MEDIUM_OR_HARD, pickBoard, QMAP_PROMPT_VERSION, SESSION_DIFFICULTIES } from '../../../shared/qbank/map.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-import { activePlan, cacheQuestions, fromCache, mapDeps, publicQuestion, questFailure, recordAnswer, takeNewest, withStatus, type PublicQuestion } from '../_shared/qbank.ts';
+import { activePlan, cacheQuestions, ensureCarreiras, fromCache, mapDeps, publicQuestion, questFailure, recordAnswer, takeNewest, withStatus, type PublicQuestion } from '../_shared/qbank.ts';
 
 const str = (v: unknown, n = 160) => String(v ?? '').trim().slice(0, n);
 const hash = (s: string) => { let h = 0; for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) >>> 0; return h.toString(36); };
@@ -123,7 +123,7 @@ Deno.serve(async (req) => {
     if (body.action === 'simulado_create') {
       const tipo = str(body.tipo, 60);
       const blocks: { name: string; minPct: number; subjects: { name: string; materia: string | null; count: number }[] }[] = [];
-      let banca = str(body.banca, 80), planId: string | null = null, title = 'Simulado', level = '';
+      let banca = str(body.banca, 80), planId: string | null = null, title = 'Simulado', level = '', carreiras: string[] = [];
       if (body.kind === 'concurso') {
         // Estrutura da prova do edital: blocos (com nota mínima) e questões por disciplina.
         const { data: plan } = await auth.client.from('study_plans').select('id, notice_id').eq('id', str(body.planId, 40)).maybeSingle();
@@ -133,6 +133,7 @@ Deno.serve(async (req) => {
         level = String(notice?.education_level ?? '');
         const { data: subs } = await auth.client.from('notice_subjects').select('id, name, block, questions, weight, notice_topics(text)').eq('notice_id', plan.notice_id).order('position');
         const deps = mapDeps(admin, quest, usage);
+        carreiras = await ensureCarreiras(admin, quest, deps, plan.notice_id);
         if (!banca && notice?.board) banca = await pickBoard(String(notice.board), (q) => quest.bancas(q));
         title = `Simulado ${body.size === 'reduzido' ? 'reduzido' : 'completo'} · ${notice?.role_name ?? ''}`.trim();
         const structure = (notice?.structure ?? {}) as { blocks?: { name: string; questions: number; rule: string }[] };
@@ -167,7 +168,8 @@ Deno.serve(async (req) => {
       }
       const totalQ = blocks.reduce((a, b) => a + b.subjects.reduce((x, s) => x + s.count, 0), 0);
       if (totalQ > 120) return json(400, { error: 'Simulado limitado a 120 questões.' });
-      // Sorteio de questões inéditas: escolaridade do edital e banca primeiro; completa com outras bancas e, faltando, outras escolaridades.
+      // Sorteio de questões inéditas: carreira do edital (a específica e depois a geral), escolaridade e banca primeiro; completa
+      // com outras bancas e, faltando, outras escolaridades. Busca vazia não gasta créditos.
       // A dificuldade fica livre, para o simulado ter a mistura de uma prova real.
       const seen = await seenQids(), chosen: { qid: string; block: string; subject: string }[] = [];
       const missing: string[] = [];
@@ -175,7 +177,7 @@ Deno.serve(async (req) => {
         if (!s.materia) { missing.push(s.name); continue; }
         const base: Record<string, string> = { materia: s.materia, ...(tipo ? { tipo } : {}), ...('assunto' in s && (s as { assunto?: string }).assunto ? { assunto: (s as { assunto: string }).assunto } : {}) };
         const places = banca ? [{ ...base, banca }, base] : [base];
-        const steps = level ? [...places.map((p) => ({ ...p, nivel_escolaridade: level })), ...places] : places;
+        const steps = [...carreiras.flatMap((carreira) => places.map((p) => ({ ...p, carreira }))), ...(level ? places.map((p) => ({ ...p, nivel_escolaridade: level })) : []), ...places];
         let got: QuestQuestion[] = [];
         for (const params of steps) {
           if (got.length >= s.count) break;

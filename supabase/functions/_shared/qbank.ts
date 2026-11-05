@@ -5,7 +5,7 @@ import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { genericSubject } from '../../../shared/qbank/materias.ts';
-import { dominantFormat, ORGAO_MIN, mapSession, mapSubject, newestPage, pickBoard, QMAP_PROMPT_VERSION, QUESTION_FORMATS, usefulNarrowing, type Incidence, type MapDeps, type SessionFilter } from '../../../shared/qbank/map.ts';
+import { CarreiraChoice, carreiraJsonSchema, carreiraPrompt, dominantFormat, ORGAO_MIN, mapSession, usefulCarreira, mapSubject, newestPage, pickBoard, QMAP_PROMPT_VERSION, QUESTION_FORMATS, usefulNarrowing, type Incidence, type MapDeps, type SessionFilter } from '../../../shared/qbank/map.ts';
 
 export const plain = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -17,6 +17,7 @@ export function publicQuestion(q: QuestQuestion) {
     textos: q.textos_associados ?? [], anexos: q.anexos ?? [],
     prova: p ? { banca: p.banca, ano: p.ano, orgao: p.orgao, cargo: p.cargo } : null,
     materia: q.classificacao?.materia ?? '', assunto: q.classificacao?.assunto ?? '',
+    carreiras: q.carreiras ?? [],
   };
 }
 // warmupOf: questão de aquecimento, da sessão anterior (a resposta conta para ela).
@@ -37,7 +38,7 @@ export const questFailure = (message: string, fallback: string) => (/Quest API .
 // Questões já compradas (cache) que servem ao filtro e o estudante ainda não viu: não gastam créditos. Antes de buscar na
 // API, usa estas: lotes buscados adiantados e amostras das apostilas ficavam pagos e nunca apareciam. Primeiro as da
 // banca (`preferBanca`), depois as provas mais recentes.
-export interface CacheFilter { materia: string; assunto?: string; dificuldades?: string[]; banca?: string; preferBanca?: string; preferOrgao?: string; tipo?: string; ano?: string; orgao?: string; cargo?: string }
+export interface CacheFilter { materia: string; assunto?: string; dificuldades?: string[]; banca?: string; preferBanca?: string; preferOrgao?: string; preferCarreiras?: string[]; tipo?: string; ano?: string; orgao?: string; cargo?: string }
 export async function fromCache(admin: SupabaseClient, f: CacheFilter, want: number, isNew: (qid: string) => boolean): Promise<PublicQuestion[]> {
   if (want <= 0 || !f.materia) return [];
   let q = admin.from('qbank_questions').select('qid, payload').eq('materia', f.materia);
@@ -50,12 +51,14 @@ export async function fromCache(admin: SupabaseClient, f: CacheFilter, want: num
   if (f.cargo) q = q.ilike('payload->prova->>cargo', `%${f.cargo}%`);
   const { data, error } = await q.limit(300);
   if (error) return [];
-  const board = normalizeText(f.preferBanca ?? ''), organ = normalizeText(f.preferOrgao ?? '');
-  // Provas do mesmo órgão primeiro, depois a banca, depois as mais recentes.
+  const board = normalizeText(f.preferBanca ?? ''), organ = normalizeText(f.preferOrgao ?? ''), careers = new Set(f.preferCarreiras ?? []);
+  // Provas do mesmo órgão primeiro, depois as da mesma carreira (só as compradas depois de o cache guardar a carreira), a
+  // banca e as mais recentes.
   const sameOrgan = (p: PublicQuestion) => Number(!!organ && normalizeText(p.prova?.orgao ?? '').includes(organ));
+  const sameCareer = (p: PublicQuestion) => Number((p.carreiras ?? []).some((c) => careers.has(c)));
   const sameBoard = (p: PublicQuestion) => Number(!!board && normalizeText(p.prova?.banca ?? '') === board);
   return (data ?? []).map((r) => r.payload as PublicQuestion).filter((p) => isNew(p.qid))
-    .sort((a, b) => sameOrgan(b) - sameOrgan(a) || sameBoard(b) - sameBoard(a) || (b.prova?.ano ?? 0) - (a.prova?.ano ?? 0))
+    .sort((a, b) => sameOrgan(b) - sameOrgan(a) || sameCareer(b) - sameCareer(a) || sameBoard(b) - sameBoard(a) || (b.prova?.ano ?? 0) - (a.prova?.ano ?? 0))
     .slice(0, want);
 }
 
@@ -127,22 +130,44 @@ export async function ensureBoardFormat(admin: SupabaseClient, quest: QuestClien
   } catch { return ''; }
 }
 
-// Órgão, cargo e escolaridade que valem a pena na busca desta disciplina, medidos uma vez: até 4 buscas (3 créditos cada).
-// O órgão entra com ORGAO_MIN questões na matéria; cargo e escolaridade, pelo usefulNarrowing. Muda algum deles no edital,
-// mede de novo. Se a medição falhar, busca com cargo e escolaridade, como antes, e sem o órgão.
-export async function ensureNarrowing(admin: SupabaseClient, quest: QuestClient, subjectId: string, materia: string | null, role: string, level: string, orgao = '') {
-  if (!materia || (!role && !level && !orgao)) return { role, level, orgao: '' };
+// Carreiras do edital no banco de questões (a específica e a geral), escolhidas uma vez pela IA, com raciocínio baixo, e
+// guardadas no edital. Se a escolha falhar, segue sem carreira e tenta de novo na próxima busca.
+export async function ensureCarreiras(admin: SupabaseClient, quest: QuestClient, deps: MapDeps, noticeId: string): Promise<string[]> {
+  const { data: n } = await admin.from('notices').select('organization, role_name, role_duties, education_level, qbank_carreiras').eq('id', noticeId).maybeSingle();
+  if (!n) return [];
+  if (Array.isArray(n.qbank_carreiras)) return n.qbank_carreiras as string[];
+  try {
+    const candidates = await quest.carreiras();
+    if (!candidates.length) return [];
+    const r = await deps.ai(CarreiraChoice, carreiraJsonSchema(), carreiraPrompt({ organization: String(n.organization ?? ''), role: String(n.role_name ?? ''), duties: String(n.role_duties ?? ''), level: String(n.education_level ?? ''), candidates }), { quick: true });
+    const chosen = [...new Set(r.carreiras.filter((c) => candidates.includes(c)))].slice(0, 2);
+    await admin.from('notices').update({ qbank_carreiras: chosen }).eq('id', noticeId);
+    return chosen;
+  } catch (e) { console.error('carreiras:', e); return []; }
+}
+
+// Órgão, cargo, carreiras e escolaridade que valem a pena na busca desta disciplina, medidos uma vez: até 6 buscas (3
+// créditos cada). O órgão entra com ORGAO_MIN questões na matéria; cada carreira do edital, se rende (usefulCarreira), na
+// ordem dela (a específica, que pode ter poucas questões, e depois a geral); cargo e escolaridade, pelo usefulNarrowing. Muda algum deles no edital,
+// mede de novo. Se a medição falhar, busca com cargo e escolaridade, como antes, sem órgão nem carreira.
+export async function ensureNarrowing(admin: SupabaseClient, quest: QuestClient, subjectId: string, materia: string | null, role: string, level: string, orgao = '', carreiras: string[] = []) {
+  if (!materia || (!role && !level && !orgao && !carreiras.length)) return { role, level, orgao: '', carreiras: [] as string[] };
+  const careers = carreiras.join('|');
   const { data } = await admin.from('qbank_subject_maps').select('narrowing').eq('subject_id', subjectId).maybeSingle();
-  const n = data?.narrowing as { role: string; level: string; orgao?: string; useRole: boolean; useLevel: boolean; useOrgao?: boolean } | null;
-  if (n && n.role === role && n.level === level && (n.orgao ?? '') === orgao) return { role: n.useRole ? role : '', level: n.useLevel ? level : '', orgao: n.useOrgao ? orgao : '' };
+  const n = data?.narrowing as { role: string; level: string; orgao?: string; careers?: string; useRole: boolean; useLevel: boolean; useOrgao?: boolean; useCareers?: string[] } | null;
+  if (n && n.role === role && n.level === level && (n.orgao ?? '') === orgao && (n.careers ?? '') === careers) {
+    return { role: n.useRole ? role : '', level: n.useLevel ? level : '', orgao: n.useOrgao ? orgao : '', carreiras: n.useCareers ?? [] };
+  }
   try {
     const total = await quest.usableTotal({ materia });
     const useRole = !!role && usefulNarrowing(total, await quest.usableTotal({ materia, cargo: role }));
     const useLevel = !!level && usefulNarrowing(total, await quest.usableTotal({ materia, nivel_escolaridade: level }));
     const useOrgao = !!orgao && (await quest.usableTotal({ materia, orgao })) >= ORGAO_MIN;
-    await admin.from('qbank_subject_maps').update({ narrowing: { role, level, orgao, useRole, useLevel, useOrgao } }).eq('subject_id', subjectId);
-    return { role: useRole ? role : '', level: useLevel ? level : '', orgao: useOrgao ? orgao : '' };
-  } catch { return { role, level, orgao: '' }; }
+    const useCareers: string[] = [];
+    for (const c of carreiras) if (usefulCarreira(total, await quest.usableTotal({ materia, carreira: c }))) useCareers.push(c);
+    await admin.from('qbank_subject_maps').update({ narrowing: { role, level, orgao, careers, useRole, useLevel, useOrgao, useCareers } }).eq('subject_id', subjectId);
+    return { role: useRole ? role : '', level: useLevel ? level : '', orgao: useOrgao ? orgao : '', carreiras: useCareers };
+  } catch { return { role, level, orgao: '', carreiras: [] as string[] }; }
 }
 
 // Assuntos da sessão (uma vez por sessão e versão do prompt). Mapa de versão antiga é refeito na próxima abertura; a
