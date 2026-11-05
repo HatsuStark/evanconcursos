@@ -1,4 +1,4 @@
-/* Evan Concursos · temas pensados para leitura longa e conforto visual (astigmatismo, visão embaçada).
+/* Evan Concursos · temas pensados para leitura longa e acessibilidade (contraste, tamanho e peso da letra).
    Superfícies sólidas, sem vidro, sem brilho neon e sem gradiente atrás do texto. O tema vem resolvido em
    <html data-theme="dark|light"> (web/src/lib/appearance.ts); "Leitura reforçada" (data-reading="strong") aumenta letra,
    peso, bordas e contraste; "Fundo de papel" (data-paper="on") deixa apostila, lei seca e questões em tom de papel. */

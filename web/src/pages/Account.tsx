@@ -56,7 +56,7 @@ export function FirstPasswordPage() {
 
 const THEMES: { key: ThemeChoice; label: string }[] = [{ key: 'system', label: 'Sistema' }, { key: 'light', label: 'Claro' }, { key: 'dark', label: 'Escuro' }];
 
-// Aparência deste aparelho: tema e ajustes para leitura longa e conforto visual.
+// Aparência deste aparelho: tema e ajustes de acessibilidade para leitura longa.
 function AppearanceForm() {
   const [a, set] = useAppearance();
   return (
@@ -67,11 +67,11 @@ function AppearanceForm() {
         <div className="segmented" role="group" aria-labelledby="theme-label">
           {THEMES.map((t) => <button key={t.key} type="button" className={a.theme === t.key ? 'on' : ''} aria-pressed={a.theme === t.key} onClick={() => set({ theme: t.key })}>{t.label}</button>)}
         </div>
-        <p className="muted small" style={{ margin: 0 }}>Com astigmatismo, o tema claro costuma deixar o texto mais nítido. O escuro é melhor para quem tem sensibilidade à luz.</p>
+        <p className="muted small" style={{ margin: 0 }}>Escolha o que for mais confortável para ler. Sistema acompanha o modo claro ou escuro do aparelho.</p>
       </div>
       <label className="check" style={{ alignItems: 'flex-start' }}>
         <input type="checkbox" checked={a.strong} onChange={(e) => set({ strong: e.target.checked })} style={{ marginTop: 4 }} />
-        <span><strong style={{ color: 'var(--text)' }}>Leitura reforçada</strong><br />Letra maior nas apostilas, questões e lei seca, texto mais grosso, bordas firmes e mais contraste. Ajuda com visão embaçada.</span>
+        <span><strong style={{ color: 'var(--text)' }}>Leitura reforçada</strong><br />Letra maior nas apostilas, questões e lei seca, texto mais grosso, bordas firmes e mais contraste.</span>
       </label>
       <label className="check" style={{ alignItems: 'flex-start' }}>
         <input type="checkbox" checked={a.paper} onChange={(e) => set({ paper: e.target.checked })} style={{ marginTop: 4 }} />
