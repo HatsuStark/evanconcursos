@@ -23,7 +23,7 @@ import {
 } from '../../../shared/qbank/map.ts';
 import { conceptKey, MNEMONIC_PROMPT_VERSION, MnemonicChoice, mnemonicJsonSchema, mnemonicPrompt, pickExisting } from '../../../shared/qbank/mnemonic.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-import { activePlan, ensureBoardFormat, ensureNarrowing, fromCache, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, questFailure, recordAnswer, takeNewest, upsertFlashcard, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
+import { activePlan, ensureBoardFormat, ensureNarrowing, fromCache, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, questFailure, recordAnswer, takeNewest, upsertFlashcard, withStatus, type PublicQuestion } from '../_shared/qbank.ts';
 
 // Com alguma questão pronta, não faz o estudante esperar por mais; sem nenhuma, desiste antes do limite da função.
 const SOFT_LIMIT_MS = 15_000, HARD_LIMIT_MS = 90_000;
@@ -164,7 +164,7 @@ Deno.serve(async (req) => {
       const ids = (due ?? []).map((d) => d.qid as string).filter((id) => !exclude.includes(id)).slice(0, count);
       const { data: rows } = ids.length ? await admin.from('qbank_questions').select('qid, payload').in('qid', ids) : { data: [] };
       const byId = new Map((rows ?? []).map((r) => [r.qid as string, r.payload as PublicQuestion]));
-      const questions = await withMnemo(admin, ids.map((id) => byId.get(id)).filter((q): q is PublicQuestion => !!q));
+      const questions = await withStatus(admin, auth.user.id, ids.map((id) => byId.get(id)).filter((q): q is PublicQuestion => !!q));
       return json(200, { questions, reason: questions.length ? null : exclude.length ? 'fim-revisao' : 'sem-erros' });
     }
     if (!subject) return json(200, { questions: [], reason: 'sem-materia' });
@@ -229,8 +229,13 @@ Deno.serve(async (req) => {
     const measured = new Set((incidence ?? []).map((i) => normalizeText(i.assunto)));
     const filters = allFilters.filter((f) => measured.has(normalizeText(f.assunto)));
 
-    // Pula o que o estudante já respondeu; o que ele respondeu nesta sessão define a vez de cada assunto.
-    const { data: done } = await admin.from('question_attempts').select('qid, assunto, session_id').eq('owner_id', auth.user.id).eq('subject_id', subject.id).limit(5000);
+    // Pula o que o estudante já respondeu neste concurso, em qualquer lugar (cronograma, aba Questões, simulado); as erradas
+    // só voltam nos momentos delas (aquecimento, aprofundamento, revisão semanal). O que ele respondeu nesta sessão define a
+    // vez de cada assunto.
+    const [{ data: done }, { data: inPlan }] = await Promise.all([
+      admin.from('question_attempts').select('qid, assunto, session_id').eq('owner_id', auth.user.id).eq('subject_id', subject.id).limit(5000),
+      admin.from('question_attempts').select('qid').eq('owner_id', auth.user.id).eq('plan_id', task.plan_id).limit(20000),
+    ]);
     // Triagem de relevância da sessão: o que já foi julgado não é julgado de novo, e o que ficou fora do tema nunca volta.
     const judged = new Set<string>(), rejected = new Set<string>(), verdicts: { assunto: string; relevant: boolean }[] = [];
     const { data: sess } = sid ? await auth.client.from('study_sessions').select('title, keyword, law_refs').eq('id', sid).maybeSingle() : { data: null };
@@ -239,7 +244,7 @@ Deno.serve(async (req) => {
       for (const r of rel ?? []) { judged.add(r.qid); verdicts.push({ assunto: r.assunto, relevant: r.relevant }); if (!r.relevant) rejected.add(r.qid); }
     }
     // Também as que já estão na tela, ainda sem resposta (o app manda em `exclude`).
-    const seen = new Set([...(done ?? []).map((d) => d.qid as string), ...(Array.isArray(body.exclude) ? (body.exclude as unknown[]).map(String).slice(0, 500) : []), ...rejected]);
+    const seen = new Set([...(done ?? []).map((d) => d.qid as string), ...(inPlan ?? []).map((d) => d.qid as string), ...(Array.isArray(body.exclude) ? (body.exclude as unknown[]).map(String).slice(0, 500) : []), ...rejected]);
     const served = new Map<string, number>();
     for (const d of done ?? []) if (sid && d.session_id === sid) served.set(normalizeText(d.assunto), (served.get(normalizeText(d.assunto)) ?? 0) + 1);
     // Uma chamada à IA por lote, com raciocínio baixo. Se falhar, as questões passam: o estudo não para por causa da triagem.
@@ -414,7 +419,7 @@ Deno.serve(async (req) => {
     // Plano B: sem questão real no tema, questões inéditas da IA, reaproveitadas entre estudantes com o mesmo tema.
     if (sess && result.length < count && Date.now() - started < GENERATE_BEFORE_MS) result.push(...await generated(count - result.length));
     await log('qbank_fetch', 'ok');
-    const batch = await withMnemo(admin, result.slice(0, count));
+    const batch = await withStatus(admin, auth.user.id, result.slice(0, count));
     return json(200, { questions: batch, filter: { materia: filter.materia, assuntos: filter.assuntos, how: filter.how }, reason: batch.length ? null : timedOut ? 'demorou' : 'esgotado-dificeis' });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

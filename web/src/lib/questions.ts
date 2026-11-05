@@ -9,6 +9,7 @@ export interface Question {
   materia: string; assunto: string;
   mnemo?: 'yes' | 'no' | 'maybe';   // mnemônico já existe, foi descartado ou ainda não avaliado
   warmupOf?: string;                // aquecimento: questão da sessão anterior (a resposta conta para ela)
+  prev?: { ok: boolean; at: string; n: number }; // já resolvida: última resposta, quando e quantas vezes
 }
 export interface Explanation { resumo: string; alternativas: { letra: string; comentario: string }[]; artigos: string[]; dica: string; fontes: string[]; geradoEm: string }
 export interface NextResult { questions: Question[]; filter?: { materia: string | null; assuntos: string[]; how: string }; reason: 'sem-materia' | 'sem-assunto' | 'esgotado' | 'esgotado-dificeis' | 'demorou' | 'sem-erros' | 'fim-revisao' | null }

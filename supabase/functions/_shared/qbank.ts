@@ -171,11 +171,24 @@ export async function activePlan(admin: SupabaseClient, ownerId: string): Promis
   return (data as string | null) ?? null;
 }
 
-// Situação do mnemônico de cada questão (uma consulta por lote): 'yes' já existe, 'no' a IA já disse que não
-// cabe, 'maybe' ainda não avaliada. O app só mostra a aba quando faz sentido (sem gastar IA para decidir).
-export async function withMnemo(admin: SupabaseClient, qs: PublicQuestion[]) {
+// Situação de cada questão no lote (duas consultas):
+// - mnemo: 'yes' o mnemônico já existe, 'no' a IA já disse que não cabe, 'maybe' ainda não avaliada. O app só mostra a
+//   aba quando faz sentido (sem gastar IA para decidir).
+// - prev: o que o estudante já fez nela, em qualquer concurso (última resposta, quando e quantas vezes), para o selo
+//   "Resolvi certo/errado". Sem tentativa, não vem.
+export async function withStatus(admin: SupabaseClient, ownerId: string, qs: PublicQuestion[]) {
   if (!qs.length) return qs;
-  const { data } = await admin.from('qbank_questions').select('qid, mnemonic_checked, mnemonic_id').in('qid', qs.map((q) => q.qid));
+  const ids = qs.map((q) => q.qid);
+  const [{ data }, { data: tries }] = await Promise.all([
+    admin.from('qbank_questions').select('qid, mnemonic_checked, mnemonic_id').in('qid', ids),
+    admin.from('question_attempts').select('qid, correct, created_at').eq('owner_id', ownerId).in('qid', ids).order('created_at', { ascending: false }).limit(2000),
+  ]);
   const status = new Map((data ?? []).map((r) => [r.qid as string, r.mnemonic_id ? 'yes' : r.mnemonic_checked ? 'no' : 'maybe']));
-  return qs.map((q) => ({ ...q, mnemo: status.get(q.qid) ?? 'maybe' }));
+  const prev = new Map<string, { ok: boolean; at: string; n: number }>();
+  for (const t of tries ?? []) {
+    const p = prev.get(t.qid);
+    if (p) p.n++;
+    else prev.set(t.qid, { ok: !!t.correct, at: String(t.created_at), n: 1 });
+  }
+  return qs.map((q) => ({ ...q, mnemo: status.get(q.qid) ?? 'maybe', ...(prev.has(q.qid) ? { prev: prev.get(q.qid) } : {}) }));
 }

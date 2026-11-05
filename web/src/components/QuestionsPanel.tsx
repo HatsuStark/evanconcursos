@@ -222,6 +222,12 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
       <article className="glass q-card">
         {source.kind === 'review' && <span className="badge orange" style={{ justifySelf: 'start' }}><RotateCcw size={12} /> Revisão do caderno de erros</span>}
         {q.warmupOf && <span className="badge cyan" style={{ justifySelf: 'start' }}><RotateCcw size={12} /> Aquecimento: da sessão anterior</span>}
+        {q.prev && (
+          <span className={'badge ' + (q.prev.ok ? 'ok' : 'bad')} style={{ justifySelf: 'start' }} title={`Última resposta em ${new Date(q.prev.at).toLocaleDateString('pt-BR')}${q.prev.n > 1 ? ` · resolvida ${q.prev.n} vezes` : ''}`}>
+            {q.prev.ok ? <CheckCircle2 size={12} /> : <XCircle size={12} />} {q.prev.ok ? 'Resolvi certo' : 'Resolvi errado'}
+            <span style={{ fontWeight: 500, opacity: .8 }}>· {new Date(q.prev.at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}{q.prev.n > 1 ? ` · ${q.prev.n}x` : ''}</span>
+          </span>
+        )}
         <QuestionBody q={q} number={number} chosen={st.chosen} struck={st.struck} gabarito={st.result?.gabarito ?? null} locked={!!st.result} onSelect={select} onStrike={strike} />
 
         {st.result ? (

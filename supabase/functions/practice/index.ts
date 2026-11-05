@@ -11,7 +11,7 @@ import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import { interleave, mapSubject, MEDIUM_OR_HARD, pickBoard, QMAP_PROMPT_VERSION, SESSION_DIFFICULTIES } from '../../../shared/qbank/map.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-import { activePlan, cacheQuestions, fromCache, mapDeps, publicQuestion, questFailure, recordAnswer, takeNewest, withMnemo, type PublicQuestion } from '../_shared/qbank.ts';
+import { activePlan, cacheQuestions, fromCache, mapDeps, publicQuestion, questFailure, recordAnswer, takeNewest, withStatus, type PublicQuestion } from '../_shared/qbank.ts';
 
 const str = (v: unknown, n = 160) => String(v ?? '').trim().slice(0, n);
 const hash = (s: string) => { let h = 0; for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) >>> 0; return h.toString(36); };
@@ -89,21 +89,21 @@ Deno.serve(async (req) => {
       } else items = await fetchFresh('free', params, toBuy, seen);
       await log('qbank_free', 'ok');
       const questions = [...cached, ...items.map(publicQuestion)];
-      return json(200, { questions: await withMnemo(admin, questions), reason: questions.length ? null : 'esgotado' });
+      return json(200, { questions: await withStatus(admin, auth.user.id, questions), reason: questions.length ? null : 'esgotado' });
     }
 
     if (body.action === 'by_id') {
       const qid = str(body.qid, 40);
       if (!/^[\w-]+$/.test(qid)) return json(200, { questions: [], reason: 'id-inexistente' });
       const { data: cached } = await admin.from('qbank_questions').select('payload').eq('qid', qid).maybeSingle();
-      if (cached) return json(200, { questions: await withMnemo(admin, [cached.payload as PublicQuestion]), reason: null });
+      if (cached) return json(200, { questions: await withStatus(admin, auth.user.id, [cached.payload as PublicQuestion]), reason: null });
       const q = await quest.questao(qid);
       await log('qbank_free', 'ok');
       if (!q) return json(200, { questions: [], reason: 'id-inexistente' });
       // Sem gabarito não há como corrigir; anulada fica de fora como nas demais buscas.
       if (!q.gabarito || q.anulada) return json(200, { questions: [], reason: 'id-indisponivel' });
       await cacheQuestions(admin, [q]);
-      return json(200, { questions: await withMnemo(admin, [publicQuestion(q)]), reason: null });
+      return json(200, { questions: await withStatus(admin, auth.user.id, [publicQuestion(q)]), reason: null });
     }
 
     if (body.action === 'review') {
@@ -116,7 +116,7 @@ Deno.serve(async (req) => {
       const qids = (due ?? []).map((d) => d.qid);
       const { data: qs } = qids.length ? await admin.from('qbank_questions').select('qid, payload').in('qid', qids) : { data: [] };
       const byId = new Map((qs ?? []).map((q) => [q.qid, q.payload as PublicQuestion]));
-      return json(200, { questions: await withMnemo(admin, qids.map((id) => byId.get(id)).filter((q): q is PublicQuestion => !!q)), stages: Object.fromEntries((due ?? []).map((d) => [d.qid, { stage: d.stage, wrong: d.wrong_count }])) });
+      return json(200, { questions: await withStatus(admin, auth.user.id, qids.map((id) => byId.get(id)).filter((q): q is PublicQuestion => !!q)), stages: Object.fromEntries((due ?? []).map((d) => [d.qid, { stage: d.stage, wrong: d.wrong_count }])) });
     }
 
     if (body.action === 'simulado_create') {
