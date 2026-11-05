@@ -13,7 +13,7 @@ import { organSearch, placeFilter } from './places.ts';
 // qmap-v5: assunto com o nome do tema ("Competência" numa sessão de competência) não conta como genérico.
 // qmap-v6: até 8 assuntos em ordem de relevância; a medição fica com os 5 primeiros que têm questões. A IA prefere nomes que
 // parecem específicos ("Conceito, Princípios e Regras de Competência", 2 questões) aos que têm volume ("Competência", 159).
-export const QMAP_PROMPT_VERSION = 'qmap-v9';
+export const QMAP_PROMPT_VERSION = 'qmap-v10';
 export const SESSION_ASSUNTOS = 5, ASSUNTO_CANDIDATES = 8;
 // Matérias achadas pelo tema que concorrem com a da disciplina, e o tamanho mínimo da lista de assuntos para concorrer.
 const SESSION_CANDIDATES = 3, HOLLOW_ASSUNTOS = 2;
@@ -42,10 +42,14 @@ export function pickMateria(subject: string, candidates: string[]) {
 
 // Pré-filtro de assuntos pela sobreposição de palavras com a sessão (a lista de algumas matérias passa de mil).
 // focus: tema e palavra-chave da sessão (pesam o dobro); context: item do edital.
-export function prefilterAssuntos(assuntos: string[], focus: string, max = 120, context = '') {
-  const ft = new Set(tokens(focus)), ct = new Set(tokens(context));
+// Singular aproximado, para "Elasticidades" casar com "elasticidade" e "funções" com "função" (texto já sem acento).
+export const stem = (w: string) => w.replace(/coes$/, 'cao').replace(/oes$/, 'ao').replace(/ais$/, 'al').replace(/eis$/, 'el').replace(/(?<=.{3})s$/, '');
+const stems = (s: string) => tokens(s).map(stem);
+export const PREFILTER_MAX = 120;
+export function prefilterAssuntos(assuntos: string[], focus: string, max = PREFILTER_MAX, context = '') {
+  const ft = new Set(stems(focus)), ct = new Set(stems(context));
   if ((!ft.size && !ct.size) || assuntos.length <= max) return assuntos.slice(0, max);
-  return assuntos.map((a, i) => ({ a, i, s: tokens(a).reduce((n, t) => n + (ft.has(t) ? 2 : ct.has(t) ? 1 : 0), 0) }))
+  return assuntos.map((a, i) => ({ a, i, s: stems(a).reduce((n, t) => n + (ft.has(t) ? 2 : ct.has(t) ? 1 : 0), 0) }))
     .sort((x, y) => y.s - x.s || x.i - y.i).slice(0, max).map((x) => x.a);
 }
 
@@ -115,6 +119,8 @@ export interface MapDeps {
   assuntosOf: (materia: string) => Promise<string[]>;
   // quick: escolha simples (qual matéria), com raciocínio baixo; a escolha de assuntos usa o raciocínio normal.
   ai: <T>(schema: z.ZodType<T>, jsonSchema: unknown, prompt: string, opts?: { quick?: boolean }) => Promise<T>;
+  // Busca parcial de assuntos dentro da matéria (opcional; sem ela, só o pré-filtro local).
+  assuntosMatching?: (materia: string, q: string) => Promise<string[]>;
 }
 // materiaOf: assuntos que vieram de uma segunda matéria (assunto → matéria); os outros são da principal.
 export interface SessionFilter { materia: string | null; assuntos: string[]; how: string; materiaOf?: Record<string, string> | null }
@@ -137,6 +143,16 @@ async function candidates(d: MapDeps, q: string) {
 // Matéria da disciplina: pontuação pelo nome, mas matéria "vazia" (≤ 2 assuntos) perde para a versão cheia
 // (ex.: "Direito Processual Civil" × "Direito Processual Civil - CPC 2015"). IA só nos casos ambíguos.
 // Matérias de outro estado, município ou órgão ficam de fora (`placeFilter`), com o órgão do edital como referência.
+// Trechos do tema para a busca parcial de assuntos da API: palavras longas do título e da palavra-chave, no singular e com
+// acento (a API compara o texto), as mais longas primeiro.
+export function assuntoTerms(title: string, keyword: string, max = 4) {
+  const head = title.split(':')[0]!.replace(/\(.*?\)/g, ' ');
+  const words = `${head} ${keyword}`.toLowerCase().split(/[^\p{L}\d-]+/u)
+    .filter((w) => w.length >= 5 && !STOP.has(normalizeText(w)) && !GENERIC_WORDS.has(normalizeText(w)))
+    .map((w) => w.replace(/ções$/, 'ção').replace(/ões$/, 'ão').replace(/ais$/, 'al').replace(/(?<=.{3})s$/, ''));
+  return [...new Set(words)].sort((a, b) => b.length - a.length).slice(0, max);
+}
+
 export async function mapSubject(d: MapDeps, subject: { name: string; topics: string[]; organization?: string }): Promise<{ materia: string | null; how: string }> {
   const known = subjectMateria(subject.name);
   if (known) return { materia: known, how: 'nome' };
@@ -183,6 +199,16 @@ export function localPlace(organization: string) {
   return m ? m[1]!.replace(/\s*[-–/(,].*$/, '').trim() : '';
 }
 
+// Órgão do edital como a API escreve nas provas ("TJ SP", "TRF 3", "Prefeitura de Suzano"), para o filtro `orgao` (busca
+// parcial): provas anteriores do mesmo órgão são as que mais se parecem com a próxima. Sem forma conhecida, fica vazio.
+export function orgaoKeyword(organization: string) {
+  const organ = organSearch(organization).queries[0];
+  if (organ) return organ;
+  const city = localPlace(organization);
+  if (!city) return '';
+  return /^\s*c[aâ]mara/i.test(organization) ? `Câmara de ${city}` : /^\s*prefeitura/i.test(organization) ? `Prefeitura de ${city}` : '';
+}
+
 // Assuntos da sessão: primeiro na matéria da disciplina; sem assunto, procura outra matéria pela
 // palavra-chave/título da sessão (ex.: Estatuto da PCD dentro de "Atualidades"). Sem nada, fica vazio.
 // Sessão sobre o município do edital usa só matéria dele ("Município de Suzano - Legislação Aplicada"): as genéricas de
@@ -220,7 +246,12 @@ export async function mapSession(d: MapDeps, subjectMateria: string | null,
   const tryMateria = async (materia: string, quick = false) => {
     const lista = fits(materia) ? (await d.assuntosOf(materia)).filter(fits) : [];
     if (!lista.length) return [];
-    const r = await d.ai(AssuntoChoice, assuntoJsonSchema(), assuntoPrompt({ subject: s.subject, materia, title: s.title, keyword: s.keyword, topics: s.topics, assuntos: prefilterAssuntos(lista, [s.title, s.keyword].join(' '), 120, s.topics.join(' ')) }), quick ? { quick } : undefined);
+    // Lista grande: os assuntos que a busca parcial da API acha pelos trechos do tema entram primeiro, antes do pré-filtro
+    // local, para o assunto certo não ficar de fora do corte de 120.
+    const hits: string[] = [];
+    if (lista.length > PREFILTER_MAX && d.assuntosMatching) for (const t of assuntoTerms(s.title, s.keyword)) hits.push(...await d.assuntosMatching(materia, t));
+    const shown = [...new Set([...keepValid(hits, lista, 60), ...prefilterAssuntos(lista, [s.title, s.keyword].join(' '), PREFILTER_MAX, s.topics.join(' '))])].slice(0, PREFILTER_MAX);
+    const r = await d.ai(AssuntoChoice, assuntoJsonSchema(), assuntoPrompt({ subject: s.subject, materia, title: s.title, keyword: s.keyword, topics: s.topics, assuntos: shown }), quick ? { quick } : undefined);
     return keepValid(r.assuntos, lista, ASSUNTO_CANDIDATES);
   };
   // Até 2 matérias por sessão: a da disciplina (quando rende assunto do tema) e uma achada pelo tema da sessão, se a IA
@@ -307,9 +338,9 @@ export function roleKeyword(role: string) {
   return head.length >= 4 ? head : '';
 }
 
-// Busca da mais à menos específica: mesmo cargo, depois escolaridade do edital, depois qualquer uma; em cada etapa, a banca e
+// Busca da mais à menos específica: provas do mesmo órgão, mesmo cargo, depois escolaridade do edital, depois qualquer uma; em cada etapa, a banca e
 // depois as outras no formato dela. Nunca solta a dificuldade.
-export function searchFilters(f: SessionFilter, banca: string, o: { level?: string; role?: string; format?: string; difficulties?: string[] } = {}, now = new Date()): SearchFilter[] {
+export function searchFilters(f: SessionFilter, banca: string, o: { level?: string; role?: string; orgao?: string; format?: string; difficulties?: string[] } = {}, now = new Date()): SearchFilter[] {
   if (!f.materia || !f.assuntos.length) return [];
   const m = f.materia, format: Record<string, string> = o.format ? { tipo: o.format } : {};
   const places: { tag: string; board: boolean; params: Record<string, string> }[] = /atualidade/i.test(m)
@@ -317,6 +348,7 @@ export function searchFilters(f: SessionFilter, banca: string, o: { level?: stri
     : [{ tag: 'b', board: !!banca, params: { banca } }, { tag: '*', board: false, params: format }];
   const narrowed = (tag: string, extra: Record<string, string>) => places.map((p) => ({ tag: `${tag}|${p.tag}`, board: p.board, params: { ...p.params, ...extra } }));
   const tiers = [
+    ...(o.orgao ? narrowed(`o:${o.orgao}`, { orgao: o.orgao }) : []),
     ...(o.role ? narrowed(`c:${o.role}`, { cargo: o.role }) : []),
     ...(o.level ? narrowed(o.level, { nivel_escolaridade: o.level }) : []),
     ...places,
@@ -369,6 +401,8 @@ export async function measureIncidence(count: (params: Record<string, string>) =
 // 178 no CPC), quase todo assunto volta vazio; com mais de 90% dela (nível superior, 97% no CPC), repetem a busca sem filtro.
 // Cada nível inútil custa 3 buscas por assunto (uma por dificuldade), ~1,1 s cada pelo limite da API.
 export const NARROW_MIN = 500, NARROW_MAX_SHARE = 0.9;
+// Órgão: só entra na busca da disciplina se as provas dele têm ao menos esse tanto de questões na matéria.
+export const ORGAO_MIN = 10;
 export const usefulNarrowing = (materiaTotal: number, narrowed: number) => narrowed >= NARROW_MIN && narrowed <= materiaTotal * NARROW_MAX_SHARE;
 
 // Quais assuntos recebem as próximas n questões: primeiro todos passam pela sessão, do mais ao menos cobrado;

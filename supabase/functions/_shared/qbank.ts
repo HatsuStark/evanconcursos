@@ -5,7 +5,7 @@ import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { genericSubject } from '../../../shared/qbank/materias.ts';
-import { dominantFormat, mapSession, mapSubject, newestPage, pickBoard, QMAP_PROMPT_VERSION, QUESTION_FORMATS, usefulNarrowing, type Incidence, type MapDeps, type SessionFilter } from '../../../shared/qbank/map.ts';
+import { dominantFormat, ORGAO_MIN, mapSession, mapSubject, newestPage, pickBoard, QMAP_PROMPT_VERSION, QUESTION_FORMATS, usefulNarrowing, type Incidence, type MapDeps, type SessionFilter } from '../../../shared/qbank/map.ts';
 
 export const plain = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -37,7 +37,7 @@ export const questFailure = (message: string, fallback: string) => (/Quest API .
 // Questões já compradas (cache) que servem ao filtro e o estudante ainda não viu: não gastam créditos. Antes de buscar na
 // API, usa estas: lotes buscados adiantados e amostras das apostilas ficavam pagos e nunca apareciam. Primeiro as da
 // banca (`preferBanca`), depois as provas mais recentes.
-export interface CacheFilter { materia: string; assunto?: string; dificuldades?: string[]; banca?: string; preferBanca?: string; tipo?: string; ano?: string; orgao?: string; cargo?: string }
+export interface CacheFilter { materia: string; assunto?: string; dificuldades?: string[]; banca?: string; preferBanca?: string; preferOrgao?: string; tipo?: string; ano?: string; orgao?: string; cargo?: string }
 export async function fromCache(admin: SupabaseClient, f: CacheFilter, want: number, isNew: (qid: string) => boolean): Promise<PublicQuestion[]> {
   if (want <= 0 || !f.materia) return [];
   let q = admin.from('qbank_questions').select('qid, payload').eq('materia', f.materia);
@@ -50,9 +50,12 @@ export async function fromCache(admin: SupabaseClient, f: CacheFilter, want: num
   if (f.cargo) q = q.ilike('payload->prova->>cargo', `%${f.cargo}%`);
   const { data, error } = await q.limit(300);
   if (error) return [];
-  const board = normalizeText(f.preferBanca ?? '');
+  const board = normalizeText(f.preferBanca ?? ''), organ = normalizeText(f.preferOrgao ?? '');
+  // Provas do mesmo órgão primeiro, depois a banca, depois as mais recentes.
+  const sameOrgan = (p: PublicQuestion) => Number(!!organ && normalizeText(p.prova?.orgao ?? '').includes(organ));
+  const sameBoard = (p: PublicQuestion) => Number(!!board && normalizeText(p.prova?.banca ?? '') === board);
   return (data ?? []).map((r) => r.payload as PublicQuestion).filter((p) => isNew(p.qid))
-    .sort((a, b) => Number(!!board && normalizeText(b.prova?.banca ?? '') === board) - Number(!!board && normalizeText(a.prova?.banca ?? '') === board) || (b.prova?.ano ?? 0) - (a.prova?.ano ?? 0))
+    .sort((a, b) => sameOrgan(b) - sameOrgan(a) || sameBoard(b) - sameBoard(a) || (b.prova?.ano ?? 0) - (a.prova?.ano ?? 0))
     .slice(0, want);
 }
 
@@ -79,6 +82,7 @@ export function mapDeps(admin: SupabaseClient, quest: QuestClient, usage: Gemini
   const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash', apiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
   return {
     materias: (q) => quest.materias(q),
+    assuntosMatching: (materia, q) => quest.assuntosMatching(materia, q),
     assuntosOf: async (materia) => {
       const { data } = await admin.from('qbank_assunto_lists').select('assuntos, fetched_at').eq('materia', materia).maybeSingle();
       if (data && Date.now() - new Date(data.fetched_at).getTime() < 30 * 864e5) return data.assuntos as string[];
@@ -123,20 +127,22 @@ export async function ensureBoardFormat(admin: SupabaseClient, quest: QuestClien
   } catch { return ''; }
 }
 
-// Cargo e escolaridade que valem a pena na busca desta disciplina (usefulNarrowing), medidos uma vez: 3 buscas, ~4 s.
-// Muda o cargo ou a escolaridade do edital, mede de novo. Se a medição falhar, busca com os dois, como antes.
-export async function ensureNarrowing(admin: SupabaseClient, quest: QuestClient, subjectId: string, materia: string | null, role: string, level: string) {
-  if (!materia || (!role && !level)) return { role, level };
+// Órgão, cargo e escolaridade que valem a pena na busca desta disciplina, medidos uma vez: até 4 buscas (3 créditos cada).
+// O órgão entra com ORGAO_MIN questões na matéria; cargo e escolaridade, pelo usefulNarrowing. Muda algum deles no edital,
+// mede de novo. Se a medição falhar, busca com cargo e escolaridade, como antes, e sem o órgão.
+export async function ensureNarrowing(admin: SupabaseClient, quest: QuestClient, subjectId: string, materia: string | null, role: string, level: string, orgao = '') {
+  if (!materia || (!role && !level && !orgao)) return { role, level, orgao: '' };
   const { data } = await admin.from('qbank_subject_maps').select('narrowing').eq('subject_id', subjectId).maybeSingle();
-  const n = data?.narrowing as { role: string; level: string; useRole: boolean; useLevel: boolean } | null;
-  if (n && n.role === role && n.level === level) return { role: n.useRole ? role : '', level: n.useLevel ? level : '' };
+  const n = data?.narrowing as { role: string; level: string; orgao?: string; useRole: boolean; useLevel: boolean; useOrgao?: boolean } | null;
+  if (n && n.role === role && n.level === level && (n.orgao ?? '') === orgao) return { role: n.useRole ? role : '', level: n.useLevel ? level : '', orgao: n.useOrgao ? orgao : '' };
   try {
     const total = await quest.usableTotal({ materia });
     const useRole = !!role && usefulNarrowing(total, await quest.usableTotal({ materia, cargo: role }));
     const useLevel = !!level && usefulNarrowing(total, await quest.usableTotal({ materia, nivel_escolaridade: level }));
-    await admin.from('qbank_subject_maps').update({ narrowing: { role, level, useRole, useLevel } }).eq('subject_id', subjectId);
-    return { role: useRole ? role : '', level: useLevel ? level : '' };
-  } catch { return { role, level }; }
+    const useOrgao = !!orgao && (await quest.usableTotal({ materia, orgao })) >= ORGAO_MIN;
+    await admin.from('qbank_subject_maps').update({ narrowing: { role, level, orgao, useRole, useLevel, useOrgao } }).eq('subject_id', subjectId);
+    return { role: useRole ? role : '', level: useLevel ? level : '', orgao: useOrgao ? orgao : '' };
+  } catch { return { role, level, orgao: '' }; }
 }
 
 // Assuntos da sessão (uma vez por sessão e versão do prompt). Mapa de versão antiga é refeito na próxima abertura; a

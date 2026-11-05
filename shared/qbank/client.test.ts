@@ -28,3 +28,21 @@ describe('QuestClient.questao', () => {
     await expect(new QuestClient('k', 0).questao('1')).rejects.toThrow('500');
   });
 });
+
+describe('limite de requisições', () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+  it('no 429, espera o Retry-After e tenta de novo', async () => {
+    vi.useFakeTimers();
+    const f = vi.fn()
+      .mockResolvedValueOnce(new Response('{}', { status: 429, headers: { 'Retry-After': '2' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { items: ['Crase'] } }), { status: 200 }));
+    vi.stubGlobal('fetch', f);
+    const p = new QuestClient('k', 0).assuntosMatching('Língua Portuguesa', 'crase');
+    await vi.advanceTimersByTimeAsync(1900);
+    expect(f).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(await p).toEqual(['Crase']);
+    const url = new URL(String(f.mock.calls[1]![0]));
+    expect([url.pathname, url.searchParams.get('q')]).toEqual(['/v2/filtros/assuntos', 'crase']);
+  });
+});

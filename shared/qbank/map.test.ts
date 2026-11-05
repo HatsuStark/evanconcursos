@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { theoryGoal } from '../domain/scheduler.ts';
-import { dominantFormat, localPlace, materiaQueries, pickBoard, equalIncidence, interleave, inTurn, assuntoPrompt, prefilterAssuntos, mapSession, mapSubject, measureIncidence, newestPage, usefulNarrowing, planPicks, roleKeyword, searchFilters, type MapDeps } from './map.ts';
+import { assuntoTerms, dominantFormat, localPlace, materiaQueries, orgaoKeyword, pickBoard, stem, equalIncidence, interleave, inTurn, assuntoPrompt, prefilterAssuntos, mapSession, mapSubject, measureIncidence, newestPage, usefulNarrowing, planPicks, roleKeyword, searchFilters, type MapDeps } from './map.ts';
 
 const tally = (picks: string[]) => picks.reduce<Record<string, number>>((m, a) => ({ ...m, [a]: (m[a] ?? 0) + 1 }), {});
 
@@ -380,5 +380,46 @@ describe('matéria da sessão: comparação e até 2 matérias (qmap-v9)', () =>
   it('a IA recusa as candidatas: a matéria da disciplina continua', async () => {
     const d = deps({ microeconomia: ['Dados Abertos'] }, [], { 'Economia e Finanças': ['Elasticidades'] });
     expect((await mapSession(d, 'Economia e Finanças', micro)).materia).toBe('Economia e Finanças');
+  });
+});
+
+describe('busca parcial de assuntos e plural (qmap-v10)', () => {
+  it('singular aproximado no pré-filtro', () => {
+    expect(['elasticidades', 'funcoes', 'acoes', 'gerais', 'crase'].map(stem)).toEqual(['elasticidade', 'funcao', 'acao', 'geral', 'crase']);
+    const lista = [...Array.from({ length: 200 }, (_, i) => `Assunto ${i}`), 'Elasticidades'];
+    expect(prefilterAssuntos(lista, 'Elasticidade preço da demanda', 3)[0]).toBe('Elasticidades');
+  });
+  it('trechos do tema para a busca: palavras longas, no singular, sem as genéricas', () => {
+    expect(assuntoTerms('Introdução à Microeconomia e Mercados: fluxo circular', 'elasticidades')).toEqual(['microeconomia', 'elasticidade', 'mercado']);
+    expect(assuntoTerms('Crase: casos obrigatórios', 'crase')).toEqual(['crase']);
+  });
+  it('lista grande: o que a busca parcial acha entra antes do corte do pré-filtro', async () => {
+    // "Acento grave" não tem a palavra do tema: sem a busca da API, o pré-filtro o deixaria fora dos 120.
+    const lista = [...Array.from({ length: 300 }, (_, i) => `Tópico ${i}`), 'Acento grave'];
+    const shown: string[] = [];
+    const d = (matching: boolean): MapDeps => ({
+      materias: async () => [], assuntosOf: async () => lista,
+      ...(matching ? { assuntosMatching: async (_m: string, q: string) => (q === 'crase' ? ['Acento grave', 'Inexistente'] : []) } : {}),
+      ai: (async (_s: unknown, _j: unknown, p: string) => { shown.push(p); return { assuntos: ['Acento grave'] }; }) as MapDeps['ai'],
+    });
+    const session = { subject: 'Língua Portuguesa', title: 'Crase', keyword: 'crase', topics: [] };
+    expect((await mapSession(d(true), 'Língua Portuguesa', session)).assuntos).toEqual(['Acento grave']);
+    expect(shown[0]).toContain('- Acento grave');
+    await mapSession(d(false), 'Língua Portuguesa', session);
+    expect(shown[1]).not.toContain('- Acento grave');
+  });
+});
+
+describe('provas do mesmo órgão primeiro', () => {
+  it('nome do órgão como a API escreve', () => {
+    expect(orgaoKeyword('Tribunal de Justiça do Estado de São Paulo')).toBe('TJ SP');
+    expect(orgaoKeyword('Prefeitura Municipal de Suzano')).toBe('Prefeitura de Suzano');
+    expect(orgaoKeyword('Câmara Municipal de Cotia')).toBe('Câmara de Cotia');
+    expect(orgaoKeyword('Receita Federal do Brasil')).toBe('');
+  });
+  it('o órgão vira a primeira etapa da busca', () => {
+    const fs = searchFilters({ materia: 'Direito Penal', assuntos: ['Peculato'], how: '' }, 'VUNESP', { orgao: 'TJ SP', level: 'Médio', difficulties: ['3'] });
+    expect(fs[0]!.params).toMatchObject({ orgao: 'TJ SP', banca: 'VUNESP', materia: 'Direito Penal', assunto: 'Peculato' });
+    expect(fs.findIndex((f) => f.params.nivel_escolaridade)).toBeGreaterThan(fs.findIndex((f) => f.params.orgao && !f.params.banca));
   });
 });

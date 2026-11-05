@@ -1,5 +1,7 @@
 // Cliente da Quest API (banco de questões). Roda no Deno (Edge Functions) e no Node (avaliações).
-// Respeita o limite de requisições (intervalo mínimo entre chamadas + nova tentativa no 429).
+// Respeita o limite de requisições: o plano permite 500 por minuto (X-RateLimit-Limit), e 40 chamadas seguidas, a ~6 por
+// segundo, passaram sem 429. Um intervalo de 200 ms (~300 por minuto) deixa folga para vários pedidos ao mesmo tempo com a
+// mesma chave; no 429, espera o Retry-After. O X-RateLimit-Remaining não diminui a cada chamada, então não serve de guia.
 // Custos (docs): /questoes = 3 créditos por questão, 6 com gabarito; /filtros* gratuito.
 export interface QuestQuestion {
   id: string; numero?: number; enunciado: string; dificuldade: number; tipo: string; anulada: boolean;
@@ -18,7 +20,7 @@ export class QuestClient {
   private readonly minIntervalMs: number;
   private readonly base: string;
   credits = 0;
-  constructor(key: string, minIntervalMs = 1100, base = 'https://api.quest.api.br/v2') {
+  constructor(key: string, minIntervalMs = 200, base = 'https://api.quest.api.br/v2') {
     this.key = key; this.minIntervalMs = minIntervalMs; this.base = base;
   }
 
@@ -29,7 +31,11 @@ export class QuestClient {
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     this.last = Date.now();
     const res = await fetch(url, { headers: { 'X-API-Key': this.key } });
-    if (res.status === 429 && attempt < 4) { await new Promise((r) => setTimeout(r, 10000 * attempt)); return this.get<T>(path, params, attempt + 1); }
+    if (res.status === 429 && attempt < 4) {
+      const after = Number(res.headers.get('retry-after'));
+      await new Promise((r) => setTimeout(r, after > 0 ? Math.min(after, 60) * 1000 : 5000 * attempt));
+      return this.get<T>(path, params, attempt + 1);
+    }
     const body = await res.json().catch(() => ({})) as { data?: T; message?: string };
     if (!res.ok) throw new Error(`Quest API ${path}: ${res.status} ${body.message ?? ''}`.trim());
     return body.data as T;
@@ -39,7 +45,10 @@ export class QuestClient {
   async geral() { return this.get<Record<string, unknown>>('/filtros', {}); }
   async bancas(q: string) { return (await this.get<Page<string>>('/filtros/bancas', { q, per_page: 20 })).items; }
   async materias(q: string, limit = 12) { return (await this.get<{ items: string[] }>('/filtros/materias', { q, limit })).items; }
-  // Todos os assuntos de uma matéria (paginado; gratuito). Limite de páginas para matérias enormes.
+  // Assuntos da matéria que contêm o trecho (busca parcial da API; gratuito): acha "Elasticidades" por "elasticidade" sem
+  // baixar a lista inteira, que passa de mil em matérias grandes.
+  async assuntosMatching(materia: string, q: string) { return (await this.get<Page<string>>('/filtros/assuntos', { materia, q, per_page: 50 })).items; }
+  // Todos os assuntos de uma matéria (paginado; gratuito), os mais cobrados primeiro. Limite de páginas para matérias enormes.
   async assuntos(materia: string, maxPages = 25) {
     const out: string[] = [];
     for (let page = 1; page <= maxPages; page++) {

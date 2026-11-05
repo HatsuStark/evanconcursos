@@ -19,7 +19,7 @@ import { lawByKey } from '../../../shared/legal/registry.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import {
   equalIncidence, EXPLAIN_PROMPT_VERSION, Explanation, explainPrompt, explanationJsonSchema, inTurn, measureIncidence, planPicks,
-  DEEP_DIFFICULTIES, materiaOf, QMAP_PROMPT_VERSION, roleKeyword, searchFilters, SESSION_ASSUNTOS, SESSION_DIFFICULTIES, type Incidence, type SessionFilter,
+  DEEP_DIFFICULTIES, materiaOf, orgaoKeyword, QMAP_PROMPT_VERSION, roleKeyword, searchFilters, SESSION_ASSUNTOS, SESSION_DIFFICULTIES, type Incidence, type SessionFilter,
 } from '../../../shared/qbank/map.ts';
 import { conceptKey, MNEMONIC_PROMPT_VERSION, MnemonicChoice, mnemonicJsonSchema, mnemonicPrompt, pickExisting } from '../../../shared/qbank/mnemonic.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
@@ -208,10 +208,10 @@ Deno.serve(async (req) => {
       }
       filter = { materia: sm.materia, assuntos: weak, how: 'reforço' };
     }
-    const { data: notice } = await auth.client.from('notices').select('education_level, role_name').eq('id', subject.notice_id).single();
+    const { data: notice } = await auth.client.from('notices').select('education_level, role_name, organization').eq('id', subject.notice_id).single();
     const format = await ensureBoardFormat(admin, quest, subject.id, sm);
-    // Cargo e escolaridade só entram na busca se rendem nesta matéria (sem eles, cada assunto passa por 2 níveis, não 6).
-    const narrow = await ensureNarrowing(admin, quest, subject.id, sm.materia, roleKeyword(String(notice?.role_name ?? '')), String(notice?.education_level ?? ''));
+    // Órgão, cargo e escolaridade só entram na busca se rendem nesta matéria (sem eles, cada assunto passa por 2 níveis, não 8).
+    const narrow = await ensureNarrowing(admin, quest, subject.id, sm.materia, roleKeyword(String(notice?.role_name ?? '')), String(notice?.education_level ?? ''), orgaoKeyword(String(notice?.organization ?? '')));
     const allFilters = searchFilters(filter, sm.banca, { ...narrow, format, difficulties: diffs });
     // Sessão sem assunto no banco de questões vai direto para as questões inéditas da IA.
     if (!allFilters.length && !sid) { await log('qbank_fetch', 'ok'); return json(200, { questions: [], reason: 'sem-assunto' }); }
@@ -391,7 +391,7 @@ Deno.serve(async (req) => {
       for (const board of [true, false]) {
         for (const [assunto, n] of wanted) {
           if (n <= 0 || timedOut) continue;
-          const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, dificuldades: diffs, tipo: format, ...(board ? { banca: sm.banca } : { preferBanca: sm.banca }) }, n, isNewCached);
+          const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, dificuldades: diffs, tipo: format, preferOrgao: narrow.orgao, ...(board ? { banca: sm.banca } : { preferBanca: sm.banca }) }, n, isNewCached);
           cached.push(...got);
           let left = n - got.length;
           const fs = live.filter((x) => x.assunto === assunto && x.board === board);
