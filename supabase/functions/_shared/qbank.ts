@@ -86,8 +86,8 @@ export function mapDeps(admin: SupabaseClient, quest: QuestClient, usage: Gemini
       await admin.from('qbank_assunto_lists').upsert({ materia, assuntos: list, fetched_at: new Date().toISOString() });
       return list;
     },
-    ai: async (schema, jsonSchema, prompt) => {
-      const r = await generateJson({ apiKey, model, schema, jsonSchema, parts: [{ text: prompt }] });
+    ai: async (schema, jsonSchema, prompt, opts) => {
+      const r = await generateJson({ apiKey, model, schema, jsonSchema, parts: [{ text: prompt }], ...(opts?.quick ? { thinkingLevel: 'low' as const } : {}) });
       usage.inputTokens += r.usage.inputTokens; usage.outputTokens += r.usage.outputTokens; usage.thinkingTokens += r.usage.thinkingTokens;
       return r.data;
     },
@@ -142,12 +142,13 @@ export async function ensureNarrowing(admin: SupabaseClient, quest: QuestClient,
 // Assuntos da sessão (uma vez por sessão e versão do prompt). Mapa de versão antiga é refeito na próxima abertura; a
 // incidência (3 créditos por assunto) só é medida de novo se os assuntos mudaram.
 export async function ensureSessionMap(admin: SupabaseClient, deps: MapDeps, ownerId: string, sessionId: string, materia: string | null, load: () => Promise<{ subject: string; title: string; keyword: string; topics: string[]; organization: string }>) {
-  const { data: m } = await admin.from('qbank_session_maps').select('materia, assuntos, how, incidence, prompt_version').eq('session_id', sessionId).maybeSingle();
-  if (m && m.prompt_version === QMAP_PROMPT_VERSION) return m as SessionFilter & { incidence: Incidence[] | null };
+  const { data: m } = await admin.from('qbank_session_maps').select('materia, assuntos, how, incidence, prompt_version, materia_of').eq('session_id', sessionId).maybeSingle();
+  if (m && m.prompt_version === QMAP_PROMPT_VERSION) return { ...m, materiaOf: m.materia_of } as SessionFilter & { incidence: Incidence[] | null };
   const filter = await mapSession(deps, materia, await load());
-  const same = !!m && m.materia === filter.materia && [...((m.assuntos ?? []) as string[])].sort().join('|') === [...filter.assuntos].sort().join('|');
+  const key = (f: { materia: string | null; assuntos: string[]; materiaOf?: Record<string, string> | null }) => `${f.materia}|${f.assuntos.map((a) => `${f.materiaOf?.[a] ?? ''}>${a}`).sort().join('|')}`;
+  const same = !!m && key({ materia: m.materia, assuntos: m.assuntos ?? [], materiaOf: m.materia_of }) === key(filter);
   const incidence = same ? (m!.incidence as Incidence[] | null) : null;
-  await admin.from('qbank_session_maps').upsert({ session_id: sessionId, owner_id: ownerId, materia: filter.materia, assuntos: filter.assuntos, how: filter.how, incidence, prompt_version: QMAP_PROMPT_VERSION });
+  await admin.from('qbank_session_maps').upsert({ session_id: sessionId, owner_id: ownerId, materia: filter.materia, assuntos: filter.assuntos, materia_of: filter.materiaOf ?? null, how: filter.how, incidence, prompt_version: QMAP_PROMPT_VERSION });
   return { ...filter, incidence };
 }
 

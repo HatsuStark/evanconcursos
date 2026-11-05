@@ -13,8 +13,10 @@ import { organSearch, placeFilter } from './places.ts';
 // qmap-v5: assunto com o nome do tema ("Competência" numa sessão de competência) não conta como genérico.
 // qmap-v6: até 8 assuntos em ordem de relevância; a medição fica com os 5 primeiros que têm questões. A IA prefere nomes que
 // parecem específicos ("Conceito, Princípios e Regras de Competência", 2 questões) aos que têm volume ("Competência", 159).
-export const QMAP_PROMPT_VERSION = 'qmap-v8';
+export const QMAP_PROMPT_VERSION = 'qmap-v9';
 export const SESSION_ASSUNTOS = 5, ASSUNTO_CANDIDATES = 8;
+// Matérias achadas pelo tema que concorrem com a da disciplina, e o tamanho mínimo da lista de assuntos para concorrer.
+const SESSION_CANDIDATES = 3, HOLLOW_ASSUNTOS = 2;
 
 const STOP = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'a', 'o', 'as', 'os', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'ao', 'aos', 'art', 'arts', 'lei', 'nocoes', 'noções']);
 // Palavras de título que não nomeiam matéria: a busca por elas traz matérias de qualquer assunto.
@@ -86,14 +88,37 @@ export function keepValid(chosen: string[], list: string[], max = 5) {
   return [...new Set(chosen.map((c) => byNorm.get(normalizeText(c))).filter((x): x is string => !!x))].slice(0, max);
 }
 
+// Até 2 matérias para a sessão: a da disciplina e as achadas pelo tema da sessão concorrem, e a IA escolhe.
+export const MateriasChoice = z.object({
+  materias: z.array(z.string()).describe('Até 2 matérias candidatas, exatamente como escritas, a principal primeiro; lista vazia se nenhuma serve.'),
+});
+export const materiasJsonSchema = () => z.toJSONSchema(MateriasChoice, { target: 'draft-7' });
+export function materiasPrompt(p: { subject: string; title: string; keyword: string; topics: string[]; preferred: string | null; candidates: string[] }) {
+  return `Estamos escolhendo de que matérias de um banco de questões virão as questões de uma sessão de estudo para concurso.
+Disciplina do edital: ${p.subject}
+Tema da sessão (o foco): ${p.title}
+Palavra-chave: ${p.keyword || '—'}
+Item do edital (só contexto): ${p.topics.join(' | ').slice(0, 900) || '—'}
+Matérias do banco de questões (escolha somente desta lista, exatamente como escritas):
+${p.candidates.map((c) => `- ${c}${c === p.preferred ? ' (matéria da disciplina)' : ''}`).join('\n')}
+Escolha a matéria cujas questões melhor treinam o TEMA da sessão, e uma segunda só quando ela acrescenta questões do tema:
+- o tema junta partes que ficam em matérias diferentes (ex.: "Ética e relações interpessoais" → "Ética" e "Relações Humanas");
+- uma matéria específica do tema completa a geral (ex.: sessão de microeconomia → "Microeconomia" e "Economia").
+${p.preferred ? `- "${p.preferred}" é a matéria da disciplina e já está escolhida: devolva-a primeiro e acrescente outra só se ela trouxer questões do tema que a da disciplina não tem.\n` : ''}- Não escolha matéria de outro assunto só porque o nome parece (ex.: "Dados Abertos" para estatística), nem de outro estado, município ou órgão.
+- Se nenhuma servir, devolva lista vazia.`;
+}
+
 // ---------- orquestração (mesma lógica na Edge Function e na avaliação) ----------
 // `ai` chama o Gemini com um schema; `assuntosOf` devolve (com cache) a lista oficial de assuntos da matéria.
 export interface MapDeps {
   materias: (q: string) => Promise<string[]>;
   assuntosOf: (materia: string) => Promise<string[]>;
-  ai: <T>(schema: z.ZodType<T>, jsonSchema: unknown, prompt: string) => Promise<T>;
+  // quick: escolha simples (qual matéria), com raciocínio baixo; a escolha de assuntos usa o raciocínio normal.
+  ai: <T>(schema: z.ZodType<T>, jsonSchema: unknown, prompt: string, opts?: { quick?: boolean }) => Promise<T>;
 }
-export interface SessionFilter { materia: string | null; assuntos: string[]; how: string }
+// materiaOf: assuntos que vieram de uma segunda matéria (assunto → matéria); os outros são da principal.
+export interface SessionFilter { materia: string | null; assuntos: string[]; how: string; materiaOf?: Record<string, string> | null }
+export const materiaOf = (f: SessionFilter, assunto: string) => f.materiaOf?.[assunto] ?? f.materia;
 
 // Buscas de matéria para um nome: o nome inteiro, cada parte de um nome composto ("Economia e Finanças públicas" →
 // "Economia", "Finanças públicas") e a última palavra. A API busca pelo trecho, então o nome composto inteiro não acha nada.
@@ -192,31 +217,58 @@ export async function mapSession(d: MapDeps, subjectMateria: string | null,
       if (materia && assuntos.length) return { materia, assuntos, how: 'matéria do órgão' };
     }
   }
-  const tryMateria = async (materia: string) => {
+  const tryMateria = async (materia: string, quick = false) => {
     const lista = fits(materia) ? (await d.assuntosOf(materia)).filter(fits) : [];
     if (!lista.length) return [];
-    const r = await d.ai(AssuntoChoice, assuntoJsonSchema(), assuntoPrompt({ subject: s.subject, materia, title: s.title, keyword: s.keyword, topics: s.topics, assuntos: prefilterAssuntos(lista, [s.title, s.keyword].join(' '), 120, s.topics.join(' ')) }));
+    const r = await d.ai(AssuntoChoice, assuntoJsonSchema(), assuntoPrompt({ subject: s.subject, materia, title: s.title, keyword: s.keyword, topics: s.topics, assuntos: prefilterAssuntos(lista, [s.title, s.keyword].join(' '), 120, s.topics.join(' ')) }), quick ? { quick } : undefined);
     return keepValid(r.assuntos, lista, ASSUNTO_CANDIDATES);
   };
-  if (subjectMateria) {
-    const a = await tryMateria(subjectMateria);
-    if (a.length) return { materia: subjectMateria, assuntos: a, how: 'matéria da disciplina' };
-  }
+  // Até 2 matérias por sessão: a da disciplina (quando rende assunto do tema) e uma achada pelo tema da sessão, se a IA
+  // julgar que ela acrescenta questões do tema; sem a da disciplina, as achadas pelo tema concorrem entre si.
   const head = s.title.split(':')[0]!.replace(/\(.*?\)/g, '').trim();
   // Palavras longas do título também viram busca: "Introdução à Microeconomia e Mercados" não acha nada inteira, "Microeconomia" acha.
   const words = tokens(head).length > 1 ? head.split(/[\s,;/]+/).filter((w) => normalizeText(w).length >= 6 && tokens(w).length && !GENERIC_WORDS.has(normalizeText(w)))
     .sort((a, b) => b.length - a.length).slice(0, 2) : [];
   // Também pelo nome das leis citadas ("Lei 13.146" → "Estatuto da Pessoa com Deficiência"): siglas não são achadas na busca.
   const laws = findLawRefs(text, s.subject).map((r) => lawByKey(r.law)?.name).filter((n): n is string => !!n);
+  const own = subjectMateria && fits(subjectMateria) ? subjectMateria : null;
+  // A escolha dos assuntos da matéria da disciplina (IA) corre junto com as buscas de matéria (API, uma por vez).
+  const ownPending = own ? tryMateria(own) : Promise.resolve([] as string[]);
   const found: string[] = [];
-  for (const q of [...new Set([s.keyword, head, ...laws, ...words].filter(Boolean))].slice(0, 6)) found.push(...(await d.materias(q)));
-  const cands = fullMaterias(found).filter((c) => c !== subjectMateria && fits(c)).slice(0, 12);
-  if (!cands.length) return { materia: null, assuntos: [], how: 'sem matéria' };
-  const pick = await d.ai(MateriaChoice, materiaJsonSchema(), materiaPrompt(`${s.subject} — sessão "${s.title}"`, s.topics, cands));
-  const materia = cands.find((c) => normalizeText(c) === normalizeText(pick.materia));
-  if (!materia) return { materia: null, assuntos: [], how: 'sem matéria' };
-  const a = await tryMateria(materia);
-  return a.length ? { materia, assuntos: a, how: 'matéria pela sessão' } : { materia: null, assuntos: [], how: 'sem assunto' };
+  try {
+    for (const q of [...new Set([s.keyword, head, ...laws, ...words].filter(Boolean))].slice(0, 5)) found.push(...(await d.materias(q)));
+  } catch (e) { await ownPending.catch(() => null); throw e; }
+  const lists: { materia: string; assuntos: string[] }[] = [];
+  const ownAssuntos = await ownPending;
+  if (own && ownAssuntos.length) lists.push({ materia: own, assuntos: ownAssuntos });
+  // Concorrem só matérias "cheias" e parecidas com o tema: a API tem muitas matérias que são um assunto só ("Crase",
+  // "Introdução à Microeconomia"), e elas tirariam da sessão a matéria grande, com mais questões da banca.
+  const theme = [head, s.keyword].join(' ');
+  const ranked = fullMaterias(found).filter((c) => c !== subjectMateria && fits(c))
+    .map((c) => ({ c, s: scoreMateria(theme, c) })).sort((a, b) => b.s - a.s).slice(0, SESSION_CANDIDATES).map((x) => x.c);
+  const others: string[] = [];
+  for (const c of ranked) if ((await d.assuntosOf(c)).length > HOLLOW_ASSUNTOS) others.push(c);
+  if (others.length) {
+    // A da disciplina, quando rende assunto, já está garantida: a IA escolhe se outra acrescenta questões do tema.
+    const keep = lists.length ? own : null;
+    const pick = await d.ai(MateriasChoice, materiasJsonSchema(), materiasPrompt({ subject: s.subject, title: s.title, keyword: s.keyword, topics: s.topics, preferred: keep, candidates: keep ? [keep, ...others] : others }), { quick: true });
+    for (const materia of keepValid(pick.materias, others, 2)) {
+      if (lists.length >= 2) break;
+      // A segunda matéria só complementa: escolha de assuntos com raciocínio baixo (a triagem filtra o que fugir do tema).
+      const a = await tryMateria(materia, lists.length > 0);
+      if (a.length) lists.push({ materia, assuntos: a });
+    }
+  }
+  if (!lists.length) return { materia: null, assuntos: [], how: found.length || own ? 'sem assunto' : 'sem matéria' };
+  // Assuntos das duas matérias intercalados (a principal primeiro), sem repetir nome.
+  const main = lists[0]!.materia, assuntos: string[] = [], second: Record<string, string> = {}, names = new Set<string>();
+  for (const [materia, assunto] of interleave(lists.map((l) => l.assuntos.map((a) => [l.materia, a] as const)))) {
+    if (assuntos.length >= ASSUNTO_CANDIDATES || names.has(normalizeText(assunto))) continue;
+    names.add(normalizeText(assunto)); assuntos.push(assunto);
+    if (materia !== main) second[assunto] = materia;
+  }
+  const how = lists.length > 1 ? 'duas matérias' : main === subjectMateria ? 'matéria da disciplina' : 'matéria pela sessão';
+  return { materia: main, assuntos, how, ...(Object.keys(second).length ? { materiaOf: second } : {}) };
 }
 
 // Ordem de busca: banca nos assuntos (do mais relevante) e, se esgotar, os mesmos assuntos em outras bancas.
@@ -270,7 +322,7 @@ export function searchFilters(f: SessionFilter, banca: string, o: { level?: stri
     ...places,
   ];
   return tiers.flatMap((t, tier) => f.assuntos.flatMap((assunto) => (o.difficulties ?? SESSION_DIFFICULTIES).map((dificuldade, turn) => ({
-    key: `${t.tag}:${assunto}:d${dificuldade}`, assunto, tier, turn, board: t.board, params: { ...t.params, materia: m, assunto, dificuldade },
+    key: `${t.tag}:${f.materiaOf?.[assunto] ? `${f.materiaOf[assunto]}>` : ''}${assunto}:d${dificuldade}`, assunto, tier, turn, board: t.board, params: { ...t.params, materia: materiaOf(f, assunto)!, assunto, dificuldade },
   }))));
 }
 
@@ -303,9 +355,10 @@ export async function measureIncidence(count: (params: Record<string, string>) =
   const out: { assunto: string; total: number; all: number }[] = [];
   for (const assunto of f.assuntos) {
     if (out.length >= max) break;
-    const inBoard = banca ? await count({ banca, materia: f.materia, assunto }) : 0;
+    const materia = materiaOf(f, assunto)!;
+    const inBoard = banca ? await count({ banca, materia, assunto }) : 0;
     if (inBoard > 0) { out.push({ assunto, total: inBoard, all: inBoard }); continue; }
-    const all = await count({ materia: f.materia, assunto });
+    const all = await count({ materia, assunto });
     if (all >= MIN_ASSUNTO_QUESTIONS) out.push({ assunto, total: 0, all });
   }
   const board = out.some((i) => i.total > 0);

@@ -92,7 +92,7 @@ describe('matéria quase vazia', () => {
   const deps = (found: string[], pick = ''): MapDeps => ({
     materias: async () => found,
     assuntosOf: async (m) => (m === 'Atualidades' ? ['a', 'b', 'c', 'd', 'e'] : Array.from({ length: 200 }, (_, i) => `${m} ${i}`)),
-    ai: (async () => ({ materia: pick, assuntos: ['Atualidades e Conhecimentos Gerais 1'] })) as MapDeps['ai'],
+    ai: (async () => ({ materia: pick, materias: [pick], assuntos: ['Atualidades e Conhecimentos Gerais 1'] })) as MapDeps['ai'],
   });
   it('a disciplina fica com a versão cheia, mesmo com o nome igual ao da vazia', async () => {
     const r = await mapSubject(deps(['Atualidades', 'Atualidades do Mercado Financeiro', 'Atualidades e Conhecimentos Gerais']), { name: 'Atualidades', topics: [] });
@@ -285,7 +285,7 @@ describe('disciplina com nome composto (qmap-v7)', () => {
   const deps = (pick: string): MapDeps => ({
     materias: async (q) => { searched.push(q); return api[q] ?? []; },
     assuntosOf: async (m) => Array.from({ length: 30 }, (_, i) => `${m} ${i}`),
-    ai: (async (_s: unknown, _j: unknown, prompt: string) => (prompt.includes('Escolha a matéria') ? { materia: pick } : { assuntos: ['Microeconomia 1', 'Microeconomia 2'] })) as MapDeps['ai'],
+    ai: (async (_s: unknown, _j: unknown, prompt: string) => (prompt.includes('Escolha a matéria') ? { materia: pick, materias: [pick] } : { assuntos: ['Microeconomia 1', 'Microeconomia 2'] })) as MapDeps['ai'],
   });
 
   it('busca cada parte do nome', () => {
@@ -314,5 +314,71 @@ describe('disciplina de nome genérico (qmap-v8)', () => {
   it('"Conhecimentos Específicos" não casa com "Conhecimentos Específicos das Regiões": a sessão escolhe a matéria', async () => {
     const deps: MapDeps = { materias: async () => ['Conhecimentos Específicos das Regiões'], assuntosOf: async () => ['a'], ai: (async () => ({ materia: '' })) as MapDeps['ai'] };
     expect(await mapSubject(deps, { name: 'Conhecimentos Específicos', topics: ['Higienização e limpeza.'] })).toEqual({ materia: null, how: 'nome genérico: matéria por sessão' });
+  });
+});
+
+describe('matéria da sessão: comparação e até 2 matérias (qmap-v9)', () => {
+  const lists: Record<string, string[]> = {
+    'Economia e Finanças': ['Política Fiscal', 'Elasticidades', 'Modelo de Oferta e Demanda'],
+    Microeconomia: ['Elasticidades', 'Curva da Demanda', 'Bens Inferiores e Bens de Giffen'],
+    Ética: ['Ética Profissional', 'Ética no Serviço Público'],
+    'Relações Humanas': ['Competência Interpessoal', 'Trabalho em equipe', 'Relações humanas no trabalho'],
+  };
+  const deps = (found: Record<string, string[]>, materias: string[], assuntos: Record<string, string[]>): MapDeps => ({
+    materias: async (q) => found[q] ?? [],
+    assuntosOf: async (m) => lists[m] ?? [],
+    ai: (async (_s: unknown, _j: unknown, prompt: string) => {
+      if (prompt.includes('uma segunda só quando')) return { materias };
+      const m = /no banco de questões: (.+)\)/.exec(prompt)![1]!;
+      return { assuntos: assuntos[m] ?? [] };
+    }) as MapDeps['ai'],
+  });
+  const micro = { subject: 'Economia e Finanças públicas', title: 'Microeconomia: demanda, oferta e elasticidades', keyword: 'microeconomia', topics: [] };
+
+  it('a matéria da disciplina fica, a do tema acrescenta, e os assuntos das duas se intercalam', async () => {
+    const d = deps({ microeconomia: ['Microeconomia'], Microeconomia: ['Microeconomia'] }, ['Microeconomia', 'Economia e Finanças'],
+      { Microeconomia: ['Elasticidades', 'Curva da Demanda'], 'Economia e Finanças': ['Modelo de Oferta e Demanda', 'Elasticidades'] });
+    const r = await mapSession(d, 'Economia e Finanças', micro);
+    expect(r).toEqual({
+      materia: 'Economia e Finanças', assuntos: ['Modelo de Oferta e Demanda', 'Elasticidades', 'Curva da Demanda'], how: 'duas matérias',
+      materiaOf: { Elasticidades: 'Microeconomia', 'Curva da Demanda': 'Microeconomia' },
+    });
+    // A busca e a medição usam a matéria de cada assunto; a chave da principal não muda (as posições salvas continuam valendo).
+    const fs = searchFilters(r, '', { difficulties: ['3'] });
+    expect(fs.filter((f) => f.key.startsWith('*:')).map((f) => [f.key, f.params.materia])).toEqual([
+      ['*:Modelo de Oferta e Demanda:d3', 'Economia e Finanças'], ['*:Microeconomia>Elasticidades:d3', 'Microeconomia'], ['*:Microeconomia>Curva da Demanda:d3', 'Microeconomia'],
+    ]);
+    const asked: string[] = [];
+    await measureIncidence(async (p) => { asked.push(`${p.materia}/${p.assunto}`); return 10; }, r, '');
+    expect(asked).toContain('Microeconomia/Curva da Demanda');
+  });
+
+  it('sem outra matéria no tema, fica a da disciplina sem chamar a IA de matérias', async () => {
+    const d = deps({}, ['Microeconomia'], { 'Economia e Finanças': ['Política Fiscal'] });
+    expect(await mapSession(d, 'Economia e Finanças', { ...micro, title: 'Política fiscal', keyword: 'política fiscal' })).toEqual({ materia: 'Economia e Finanças', assuntos: ['Política Fiscal'], how: 'matéria da disciplina' });
+  });
+
+  it('tema com partes em matérias diferentes junta as duas', async () => {
+    const d = deps({ 'relações interpessoais': [], 'Ética e Relações Interpessoais': [], Interpessoais: [], Relações: ['Relações Humanas'] }, ['Relações Humanas', 'Ética'],
+      { 'Relações Humanas': ['Competência Interpessoal'], Ética: ['Ética Profissional'] });
+    const r = await mapSession(d, 'Ética', { subject: 'Conhecimentos Específicos', title: 'Ética e Relações Interpessoais: convivência e atendimento', keyword: 'relações interpessoais', topics: [] });
+    expect(r.how).toBe('duas matérias');
+    expect(r.materia).toBe('Ética');
+    expect(r.materiaOf).toEqual({ 'Competência Interpessoal': 'Relações Humanas' });
+  });
+
+  it('matéria de um assunto só não concorre: a sessão de crase fica em Língua Portuguesa', async () => {
+    const asked: string[] = [];
+    const d: MapDeps = {
+      materias: async () => ['Crase'], assuntosOf: async (m) => (m === 'Crase' ? ['Emprego do sinal indicativo de crase'] : ['Crase', 'Pontuação', 'Regência']),
+      ai: (async (_s: unknown, _j: unknown, p: string) => { asked.push(p.includes('uma segunda só quando') ? 'materias' : 'assuntos'); return { materias: ['Crase'], assuntos: ['Crase'] }; }) as MapDeps['ai'],
+    };
+    expect(await mapSession(d, 'Língua Portuguesa', { subject: 'Língua Portuguesa', title: 'Crase: casos obrigatórios e proibidos', keyword: 'crase', topics: [] })).toEqual({ materia: 'Língua Portuguesa', assuntos: ['Crase'], how: 'matéria da disciplina' });
+    expect(asked).toEqual(['assuntos']);
+  });
+
+  it('a IA recusa as candidatas: a matéria da disciplina continua', async () => {
+    const d = deps({ microeconomia: ['Dados Abertos'] }, [], { 'Economia e Finanças': ['Elasticidades'] });
+    expect((await mapSession(d, 'Economia e Finanças', micro)).materia).toBe('Economia e Finanças');
   });
 });

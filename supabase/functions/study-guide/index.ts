@@ -10,7 +10,7 @@ import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/
 import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide, guideCacheKey, guidePracticeJsonSchema, GuidePractice, GuideText, guideTextJsonSchema, guideVersion, guideJsonSchema, guidePrompt, mergeGuide, partialGuide, lawKeys, pickSimilarGuide, topicKeys, trimReview, unlistedLaws, verifyGuide, type BoardQuestion, type GuideDepth } from '../../../shared/ai/guide.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient } from '../../../shared/qbank/client.ts';
-import { measureIncidence, QMAP_PROMPT_VERSION } from '../../../shared/qbank/map.ts';
+import { materiaOf, measureIncidence, QMAP_PROMPT_VERSION } from '../../../shared/qbank/map.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { loadLawSources } from '../_shared/law.ts';
 import { cacheQuestions, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, type PublicQuestion } from '../_shared/qbank.ts';
@@ -103,14 +103,14 @@ async function boardEvidence(admin: Admin, ownerId: string, ctx: GuideContext): 
     }
     // Atualidades envelhece rápido, e sem banca identificada não há o que observar.
     if (!sm.banca || !filter.materia || !filter.assuntos.length || /atualidade/i.test(filter.materia)) return [];
-    const { data: cached } = await admin.from('qbank_questions').select('payload').eq('materia', filter.materia).in('assunto', filter.assuntos).limit(300);
+    const { data: cached } = await admin.from('qbank_questions').select('payload').in('materia', [...new Set(filter.assuntos.map((a) => materiaOf(filter, a)!))]).in('assunto', filter.assuntos).limit(300);
     const found = (cached ?? []).map((c) => c.payload as PublicQuestion).filter((q) => normalizeText(q.prova?.banca ?? '') === normalizeText(sm.banca));
     const perAssunto = Math.ceil(BOARD_SAMPLE_MAX / filter.assuntos.length);
     for (const assunto of filter.assuntos) {
       if (found.length >= BOARD_SAMPLE_MAX) break;
       const missing = perAssunto - found.filter((q) => q.assunto === assunto).length;
       if (missing <= 0) continue;
-      const r = await quest.questoes({ banca: sm.banca, materia: filter.materia, assunto }, Math.min(missing, BOARD_SAMPLE_MAX - found.length));
+      const r = await quest.questoes({ banca: sm.banca, materia: materiaOf(filter, assunto)!, assunto }, Math.min(missing, BOARD_SAMPLE_MAX - found.length));
       await cacheQuestions(admin, r.items);
       for (const q of r.items.map(publicQuestion)) if (!found.some((f) => f.qid === q.qid)) found.push(q);
     }
