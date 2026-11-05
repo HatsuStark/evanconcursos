@@ -82,12 +82,15 @@ Deno.serve(async (req) => {
     if (body.step === 'strategy') {
       const inputs = PlanInputs.safeParse(body.inputs);
       if (!inputs.success) return json(400, { error: 'Respostas do questionário inválidas.' });
-      const { data: subs } = await auth.client.from('notice_subjects').select('id, name, is_core, questions, weight, notice_topics(count)').eq('notice_id', notice.id).order('position');
+      const { data: subs } = await auth.client.from('notice_subjects').select('id, name, is_core, questions, weight, notice_topics(text)').eq('notice_id', notice.id).order('position');
       if (!subs?.length) return json(400, { error: 'Edital sem matérias.' });
-      const refs = subs.map((s, i) => ({
-        ref: `S${i + 1}`, id: s.id as string, name: s.name as string, core: s.is_core as boolean, questions: s.questions as number, weight: s.weight as number,
-        level: inputs.data.levels[s.id as string] ?? 1, topics: (s.notice_topics as unknown as { count: number }[])[0]?.count ?? 0,
-      }));
+      const refs = subs.map((s, i) => {
+        const topics = (s.notice_topics ?? []) as { text: string }[];
+        return {
+          ref: `S${i + 1}`, id: s.id as string, name: s.name as string, core: s.is_core as boolean, questions: s.questions as number, weight: s.weight as number,
+          level: inputs.data.levels[s.id as string] ?? 1, topics: topics.length, chars: topics.reduce((a, t) => a + t.text.length, 0),
+        };
+      });
       const r = await generateJson({
         apiKey, model, schema: PlanStrategy, jsonSchema: strategyJsonSchema(),
         parts: [{ text: strategyPrompt({ role: notice.role_name, board: notice.board, examDate: isOpenEnded(notice.exam_date, new Date().toISOString().slice(0, 10)) ? '' : notice.exam_date ?? '', weeks: int(body.weeks, 1, 260), hours: int(body.hours, 1, 20000), profile: inputs.data.profile, notes: notice.notes ?? [], subjects: refs, duties: notice.role_duties ?? '', otherRoles: notice.structure?.otherRoles ?? [] }) }],

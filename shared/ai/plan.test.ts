@@ -204,6 +204,19 @@ describe('dias distribuídos pelo conteúdo e pela cobrança', () => {
     const r = allocateSessions(list, [law(1, 4, 100), law(10, 12, 3000), null, null, null], 7, 75);
     expect(r.sessions.map((x) => x.title)).toEqual(['A: Normas da CGJ (arts. 1º a 4º)', 'B: Normas da CGJ (arts. 10 a 12)', 'C', 'D', 'E', 'Aprofundamento: B: Normas da CGJ (arts. 10 a 12)', 'Aprofundamento: C']);
   });
+  it('sem lei, os dias vêm da avaliação da IA (effort), não do número de tópicos', () => {
+    // "IR" é um tópico só, mas denso (effort 3, dois subtemas); "Crase" e "Ortografia" são dois tópicos curtos.
+    const list = [{ ...s('IR: pessoas físicas e jurídicas', 2, [0, 1]), effort: 3 }, { ...s('Crase e ortografia', 2, [2, 3]), effort: 1 }];
+    const r = allocateSessions(list, [null, null], 4, 75);
+    expect(r.sessions.map((x) => x.title)).toEqual(['IR: pessoas físicas e jurídicas (parte 1 de 2)', 'IR: pessoas físicas e jurídicas (parte 2 de 2)', 'Crase e ortografia', 'Aprofundamento: IR: pessoas físicas e jurídicas']);
+    // Sem a avaliação (plano antigo), os dois tópicos de cada lado pesavam igual.
+    const old = allocateSessions(list.map(({ effort: _, ...x }) => x), [null, null], 4, 75);
+    expect(old.sessions.filter((x) => x.title.startsWith('Crase')).length).toBe(2);
+  });
+  it('repairSessions lê o days da IA (1 a 3)', () => {
+    const r = repairSessions({ sessions: [{ title: 'IR', keyword: 'ir', topics: [1], days: 3 }, { title: 'Crase', keyword: 'crase', topics: [2], days: 9 }] }, 2, ['IR', 'Crase']);
+    expect(r.sessions.map((x) => x.effort)).toEqual([3, 3]);
+  });
   it('aprofundamento nunca fica entre duas partes do mesmo tema', () => {
     const list = [s('A', 3), s('B'), s('C'), s('D: Normas da CGJ (arts. 10 a 13)', 1)];
     const r = allocateSessions(list, [null, null, null, law(10, 13, 3000)], 7, 75);

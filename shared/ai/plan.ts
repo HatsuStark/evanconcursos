@@ -9,7 +9,10 @@ import { citedArticleCount, mergeLawRefs, rangesLabel, type ArticleRange, type L
 // tamanho do texto e pela cobrança (allocateSessions).
 // plan-v5: cada sessão traz também a lei e os artigos (campo laws), gravados na sessão para a lei seca, a apostila e as
 // questões não dependerem de reler o título.
-export const PLAN_PROMPT_VERSION = 'plan-v5';
+// plan-v6: a IA avalia o esforço de cada sessão (days, 1 a 3) pelo volume e pela dificuldade, e o app usa isso para dar
+// os dias das sessões sem lei (antes contava tópicos: um tópico com 30 subitens pesava igual a "Crase."). A estratégia
+// recebe o tamanho do conteúdo de cada matéria, não só o número de tópicos.
+export const PLAN_PROMPT_VERSION = 'plan-v6';
 
 // ---------- questionário ----------
 export const PlanInputs = z.object({
@@ -34,7 +37,8 @@ export const PlanStrategy = z.object({
 export type PlanStrategy = z.infer<typeof PlanStrategy>;
 export const strategyJsonSchema = () => z.toJSONSchema(PlanStrategy, { target: 'draft-7' });
 
-export interface StrategySubject { ref: string; name: string; core: boolean; questions: number; weight: number; level: number; topics: number }
+// chars: tamanho do conteúdo programático da matéria (soma do texto dos tópicos).
+export interface StrategySubject { ref: string; name: string; core: boolean; questions: number; weight: number; level: number; topics: number; chars?: number }
 // Cargo com as atribuições do edital: sem elas, a IA deduz pelo nome e pode confundir com outro cargo do mesmo edital.
 export const roleContext = (role: string, duties = '', otherRoles: string[] = []) => [
   duties.trim() ? `Atribuições do cargo (edital): ${duties.trim().slice(0, 1500)}` : '',
@@ -48,10 +52,10 @@ ${roleContext(p.role, p.duties, p.otherRoles)}
 Tempo disponível: ${p.weeks} semanas, ${p.hours} horas de estudo no total.
 Sobre o candidato: ${p.profile.trim() || 'não informado'}.
 Regras do edital: ${p.notes.slice(0, 15).join(' | ') || 'não informadas'}.
-Matérias (código | nome | específica? | questões na prova | peso no edital 1–5 | nível do candidato | nº de tópicos):
-${p.subjects.map((s) => `${s.ref} | ${s.name} | ${s.core ? 'sim' : 'não'} | ${s.questions || '?'} | ${s.weight} | ${LEVEL_NAMES[s.level] ?? '?'} | ${s.topics}`).join('\n')}
+Matérias (código | nome | específica? | questões na prova | peso no edital 1–5 | nível do candidato | nº de tópicos | tamanho do conteúdo em caracteres):
+${p.subjects.map((s) => `${s.ref} | ${s.name} | ${s.core ? 'sim' : 'não'} | ${s.questions || '?'} | ${s.weight} | ${LEVEL_NAMES[s.level] ?? '?'} | ${s.topics} | ${s.chars ?? '?'}`).join('\n')}
 Defina:
-- subjects: para cada matéria (mesmo código), weight de 1 a 5 = prioridade de tempo de estudo. Pese o retorno em pontos (questões, peso, matérias eliminatórias) e quanto o candidato precisa evoluir: nível baixo em matéria muito cobrada = prioridade máxima; nível avançado em matéria pouco cobrada = baixa. Matéria com muitos tópicos precisa de mais tempo. focus: em que concentrar o estudo dela.
+- subjects: para cada matéria (mesmo código), weight de 1 a 5 = prioridade de tempo de estudo. Pese o retorno em pontos (questões, peso, matérias eliminatórias) e quanto o candidato precisa evoluir: nível baixo em matéria muito cobrada = prioridade máxima; nível avançado em matéria pouco cobrada = baixa. Matéria com conteúdo extenso precisa de mais tempo: julgue pelo tamanho do conteúdo, não pelo número de tópicos (o edital pode agrupar muitos assuntos num tópico só). focus: em que concentrar o estudo dela.
 - advice: até 6 orientações práticas e curtas para este candidato, considerando o tempo e o perfil.`;
 }
 
@@ -62,6 +66,7 @@ export const SubjectSessions = z.object({
     keyword: z.string().trim().max(60).describe('1 a 4 palavras para buscar questões do assunto.'),
     topics: z.array(z.number().int()).describe('Números dos tópicos do edital cobertos pela sessão.'),
     incidence: z.number().int().min(1).max(3).optional().describe('Quanto a banca cobra o assunto: 3 muito, 2 médio, 1 pouco.'),
+    days: z.number().int().min(1).max(3).optional().describe('Dias de estudo que a sessão pede pelo volume e pela dificuldade do conteúdo: 1 a 3.'),
     laws: z.array(z.object({
       law: z.string().trim().max(40).describe('Código da lei, exatamente como na lista de leis do prompt.'),
       articles: z.string().trim().max(600).describe('Todos os artigos da sessão, só números: "196, 282, 436-A, 1º a 4º".'),
@@ -83,7 +88,9 @@ Divida a matéria em ATÉ ${p.n} sessões de estudo de cerca de ${Math.round(p.m
 Regras:
 - Ordem de aprendizado: conceitos e definições de que outros assuntos dependem vêm antes deles (ex.: o conceito de funcionário público antes dos crimes funcionais; teoria geral antes das espécies), mesmo que o edital os liste depois.
 - Cada tópico do edital deve aparecer em pelo menos uma sessão (campo topics, com os números acima).
-- Nunca repita um assunto só para completar o número de sessões. Assunto extenso e muito cobrado pode ter mais de uma sessão, cada uma com uma parte diferente (outros artigos ou subtemas); assunto pouco cobrado ou curto pode ser agrupado com outros numa sessão só.
+- Nunca repita um assunto só para completar o número de sessões. Assunto pouco cobrado ou curto pode ser agrupado com outros numa sessão só.
+- Avalie o volume pelo conteúdo, não pelo número de tópicos: um tópico com muitos subitens (ex.: "4. Imposto sobre a Renda… 4.3 pessoas físicas… 4.4 pessoas jurídicas… lucro real, presumido, arbitrado") é mais extenso que vários tópicos curtos. Assunto que não cabe numa sessão e tem partes distintas (subitens, espécies, capítulos, artigos) vira sessões separadas, uma por parte, cada uma com o subtema no título; o mesmo tópico pode aparecer em várias sessões.
+- days: quantos dias de estudo (de cerca de ${Math.round(p.minutesPerSession / 6) / 10} horas) a sessão pede pelo volume e pela dificuldade: 1 para o que cabe num dia; 2 ou 3 só para assunto denso que não dá para separar em partes.
 - incidence: 3 para assunto muito cobrado, 2 médio, 1 pouco cobrado. Baseie-se no histórico de provas da banca e do cargo.
 - Ajuste ao nível: iniciante precisa de mais sessões de base; avançado, de mais tempo nos pontos difíceis e mais cobrados.
 - title: até 160 caracteres, formato "Assunto curto: detalhes". Quando houver lei, cite a lei e TODOS os artigos da sessão (ex.: "Normas da CGJ, arts. 1º a 4º, 33, 47 e 49"), sem abreviar com "etc.". Sem repetir títulos.
@@ -96,7 +103,8 @@ ${(p.laws ?? []).map((l) => `${l.key} | ${l.name}`).join('\n') || 'nenhuma'}
 
 // ---------- correção determinística ----------
 // topics: índices 0-based; incidence 1–3; refs: lei e artigos da sessão (gravados em study_sessions.law_refs).
-export interface Session { title: string; keyword: string; topics: number[]; incidence?: number; refs?: LawRef[] }
+// effort: dias que a IA estimou para a sessão (1 a 3); vale para as sessões sem lei, as de lei são medidas pelo texto.
+export interface Session { title: string; keyword: string; topics: number[]; incidence?: number; refs?: LawRef[]; effort?: number }
 
 // Sessões sem IA: os tópicos em ordem, agrupados ou divididos em partes para dar exatamente n.
 export function fallbackSessions(topics: string[], n: number): Session[] {
@@ -126,7 +134,7 @@ export function fallbackSessions(topics: string[], n: number): Session[] {
 export function repairSessions(raw: { sessions: (SubjectSessions['sessions'][number] & { refs?: LawRef[] })[] }, n: number, topics: string[], opts: { sizes?: (LawSize[] | null)[]; minutes?: number } = {}): { sessions: Session[]; fixes: string[] } {
   const T = topics.length, fixes: string[] = [];
   const mapped = raw.sessions
-    .map((x) => ({ title: x.title.trim(), keyword: x.keyword.trim(), incidence: x.incidence && [1, 2, 3].includes(x.incidence) ? x.incidence : 2, topics: [...new Set(x.topics.filter((t) => Number.isInteger(t) && t >= 1 && t <= T).map((t) => t - 1))], ...(x.refs?.length ? { refs: x.refs } : {}) }));
+    .map((x) => ({ title: x.title.trim(), keyword: x.keyword.trim(), incidence: x.incidence && [1, 2, 3].includes(x.incidence) ? x.incidence : 2, topics: [...new Set(x.topics.filter((t) => Number.isInteger(t) && t >= 1 && t <= T).map((t) => t - 1))], ...(x.refs?.length ? { refs: x.refs } : {}), ...(x.days && Number.isInteger(x.days) ? { effort: Math.min(3, Math.max(1, x.days)) } : {}) }));
   // Os tamanhos acompanham as sessões que ficam.
   const sizes = opts.sizes ? mapped.map((_, i) => opts.sizes![i] ?? null).filter((_, i) => mapped[i]!.title) : null;
   const s: Session[] = mapped.filter((x) => x.title);
@@ -168,12 +176,14 @@ const liveArticlesOf = (z: LawSize[] | null) => (z ?? []).reduce((a, s) => a + (
 // Sem texto da lei no banco (norma fora do registro, ainda não enviada), o tamanho é estimado pelos artigos citados.
 const ARTICLE_CHARS = 600;
 const estimatedChars = (title: string) => citedArticleCount(title) * ARTICLE_CHARS;
+// Sem lei: os dias que a IA estimou pelo conteúdo (effort); sem estimativa (plano antigo, sessões sem IA), o nº de tópicos.
 const loadOf = <T extends Session>(it: Sized<T>, minutes: number) => (it.size ? liveOf(it.size) / (minutes * LAW_CHARS_PER_MINUTE)
-  : estimatedChars(it.x.title) ? estimatedChars(it.x.title) / (minutes * LAW_CHARS_PER_MINUTE) : Math.max(1, it.x.topics.length));
-// Dias que o conteúdo pede: lei, pelo tamanho do texto (no máximo um por artigo); sem lei, até 2 se houver tópicos para dividir.
+  : estimatedChars(it.x.title) ? estimatedChars(it.x.title) / (minutes * LAW_CHARS_PER_MINUTE) : it.x.effort ?? Math.max(1, it.x.topics.length));
+// Dias que o conteúdo pede: lei, pelo tamanho do texto (no máximo um por artigo); sem lei, a estimativa da IA ou, sem
+// ela, até 2 se houver tópicos para dividir.
 const contentDays = <T extends Session>(it: Sized<T>, minutes: number) => (it.size
   ? Math.max(1, Math.min(Math.ceil(loadOf(it, minutes)), liveArticlesOf(it.size) || 1))
-  : Math.min(2, Math.max(1, it.x.topics.length)));
+  : it.x.effort ?? Math.min(2, Math.max(1, it.x.topics.length)));
 const weightOf = <T extends Session>(it: Sized<T>, minutes: number) => (it.x.incidence ?? 2) * Math.max(0.5, loadOf(it, minutes));
 
 export function allocateSessions<T extends Session>(list: T[], sizes: (LawSize[] | null)[], n: number, minutes: number): { sessions: T[]; fixes: string[] } {
@@ -189,7 +199,8 @@ export function allocateSessions<T extends Session>(list: T[], sizes: (LawSize[]
     const a = items[best]!, b = items[best + 1]!;
     const extra = (b.size ?? []).filter((z) => z.liveArticles > 0).map((z) => `${z.cite ?? z.short}, ${z.ranges}`).join('; ');
     items.splice(best, 2, {
-      x: { ...a.x, title: (extra ? `${a.x.title}; ${extra}` : a.x.title).slice(0, 200), keyword: a.x.keyword || b.x.keyword, incidence: Math.max(a.x.incidence ?? 2, b.x.incidence ?? 2), topics: [...new Set([...a.x.topics, ...b.x.topics])].sort((p, q) => p - q), ...withRefs(a.x.refs, b.x.refs) },
+      x: { ...a.x, title: (extra ? `${a.x.title}; ${extra}` : a.x.title).slice(0, 200), keyword: a.x.keyword || b.x.keyword, incidence: Math.max(a.x.incidence ?? 2, b.x.incidence ?? 2), topics: [...new Set([...a.x.topics, ...b.x.topics])].sort((p, q) => p - q), ...withRefs(a.x.refs, b.x.refs),
+        ...(a.x.effort || b.x.effort ? { effort: Math.min(3, (a.x.effort ?? 1) + (b.x.effort ?? 1)) } : {}) },
       size: a.size || b.size ? [...(a.size ?? []), ...(b.size ?? [])] : null, days: 1, deep: 0,
     });
     fixes.push('sessões unidas');
