@@ -3,7 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#142d4e">
+<meta name="theme-color" content="#1a1e2c">
+<script>
+  // Aparência salva (web/src/lib/appearance.ts), aplicada antes do app para não piscar o tema errado.
+  try {
+    var a = JSON.parse(localStorage.getItem('evan-appearance') || '{}'), r = document.documentElement;
+    var t = a.theme === 'light' || a.theme === 'dark' ? a.theme : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    r.dataset.theme = t;
+    if (a.strong) r.dataset.reading = 'strong';
+    if (a.paper) r.dataset.paper = 'on';
+    document.querySelector('meta[name="theme-color"]').setAttribute('content', t === 'light' ? '#eef1f6' : '#1a1e2c');
+  } catch (e) {}
+</script>
 <title>Evan Concursos</title>
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">

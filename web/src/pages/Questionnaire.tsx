@@ -124,7 +124,7 @@ export function QuestionnairePage() {
           <div className="progress-steps">
             {steps.map((s, i) => <div key={s.key} className={'progress-step' + (i < idx ? ' done' : i === idx ? ' active' : '')}><span className="dot" /> {s.label}</div>)}
           </div>
-          {progress.step === 'sessions' && <div className="bar" style={{ marginTop: 20 }}><span style={{ width: `${(progress.done / progress.total) * 100}%`, background: 'var(--cyan)', boxShadow: '0 0 12px var(--cyan)' }} /></div>}
+          {progress.step === 'sessions' && <div className="bar" style={{ marginTop: 20 }}><span style={{ width: `${(progress.done / progress.total) * 100}%`, background: 'var(--cyan)' }} /></div>}
         </div>
       </Shell>
     );
@@ -135,7 +135,7 @@ export function QuestionnairePage() {
       <section>
         <h3>Seu tempo</h3>
         <div className="glass card" style={{ display: 'grid', gap: 4 }}>
-          <strong style={{ fontSize: 34, color: 'var(--cyan)', textShadow: '0 0 18px rgba(42,212,232,.5)' }}>{weekly}h</strong>
+          <strong style={{ fontSize: 34, color: 'var(--cyan)' }}>{weekly}h</strong>
           <span className="muted">por semana</span>
         </div>
       </section>

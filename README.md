@@ -262,6 +262,10 @@ Na aba **Meus PDFs** do modo estudo, cada apostila aparece como "Ler das página
 
 O navegador extrai o texto do PDF e a função `material-map` só chama a IA e responde na mesma requisição, porque extrair no servidor esbarra no limite de CPU das Edge Functions em apostilas grandes. Para gastar pouco, a IA não recebe a apostila inteira: recebe o sumário, o começo de cada página, os títulos e as linhas que citam termos das sessões, com raciocínio reduzido. Pode indicar até 3 trechos por sessão, porque uma sessão como "Estabilidade e Petição" costuma juntar assuntos de partes diferentes da apostila. Trecho cuja leitura estimada (1,5 min por página) passa do tempo da tarefa de teoria ganha um aviso.
 
+## Aparência e conforto visual
+
+Em **Conta → Aparência**, o estudante escolhe o tema (**Sistema**, **Claro** ou **Escuro**) e dois ajustes, salvos no aparelho (`web/src/lib/appearance.ts`; o `index.html` aplica antes de o app carregar). Os temas foram pensados para leitura longa e problemas de visão: superfícies sólidas, sem vidro, sem brilho neon e sem gradiente atrás do texto, sem branco puro nem preto puro, e destaques com contraste de pelo menos 4,5 sobre o fundo. O claro (fundo frio, letra em peso 500) costuma ser mais nítido com astigmatismo; o escuro (azul-acinzentado, cores pastel, um pouco mais de espaço entre letras) serve a quem tem sensibilidade à luz. **Leitura reforçada** aumenta a letra das apostilas, questões, lei seca e flashcards (16 → 18 px na apostila), o peso, as bordas (2 px) e o contraste, para visão embaçada. **Fundo de papel** põe essas áreas em tom de papel. Animações respeitam o pedido do sistema para reduzir movimento, e as linhas da apostila ficam com até ~75 caracteres. As cores de destaque do CSS são variáveis, e os tons claros saem delas por `color-mix`, então acompanham o tema.
+
 ## Etapas
 
 | # | Etapa | Status |

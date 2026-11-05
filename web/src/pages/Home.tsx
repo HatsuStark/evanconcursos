@@ -75,7 +75,7 @@ export function HomePage() {
         <section>
           <h3>Prova</h3>
           <div className="glass card" style={{ display: 'grid', gap: 6 }}>
-            <strong style={{ fontSize: 34, color: 'var(--cyan)', textShadow: '0 0 18px rgba(42,212,232,.5)' }}>{days != null ? Math.max(0, days) : '—'}</strong>
+            <strong style={{ fontSize: 34, color: 'var(--cyan)' }}>{days != null ? Math.max(0, days) : '—'}</strong>
             <span className="muted">dias até {fmtDate(notice.exam_date)}</span>
           </div>
         </section>
@@ -92,7 +92,7 @@ export function HomePage() {
                   <SubjectIcon name={s.name} index={i} style={{ width: 36, height: 36 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</div>
-                    <div className="bar" style={{ marginTop: 6 }}><span style={{ width: `${Math.max(pct, 2)}%`, background: subjectColor(i), boxShadow: `0 0 10px ${subjectColor(i)}` }} /></div>
+                    <div className="bar" style={{ marginTop: 6 }}><span style={{ width: `${Math.max(pct, 2)}%`, background: subjectColor(i) }} /></div>
                     <div className="muted small" style={{ marginTop: 6 }}>{doneCount} de {mine.length} aulas</div>
                   </div>
                   <ChevronDown size={16} className="lesson-chevron" />

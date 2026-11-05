@@ -4,8 +4,12 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App } from './App.tsx';
+import { applyAppearance, loadAppearance, watchSystemTheme } from './lib/appearance.ts';
 import { AuthProvider } from './lib/auth.tsx';
 import './styles.css';
+
+applyAppearance(loadAppearance());
+watchSystemTheme();
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: 1 } } });
 

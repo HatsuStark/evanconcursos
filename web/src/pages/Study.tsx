@@ -122,7 +122,7 @@ function StudyView({ d }: { d: StudyData }) {
         <div className="glass card timer">
           <strong style={{ color: timer.running ? 'var(--cyan)' : 'var(--text)' }}>{fmtClock(timer.seconds)}</strong>
           <span className="muted small">previsto: {fmtClock(d.task.minutes * 60)}</span>
-          <div className="bar"><span style={{ width: `${Math.min(100, (timer.seconds / Math.max(60, d.task.minutes * 60)) * 100)}%`, background: 'var(--cyan)', boxShadow: '0 0 10px var(--cyan)' }} /></div>
+          <div className="bar"><span style={{ width: `${Math.min(100, (timer.seconds / Math.max(60, d.task.minutes * 60)) * 100)}%`, background: 'var(--cyan)' }} /></div>
           <button className={'btn' + (timer.running ? ' ghost' : '')} onClick={timer.running ? timer.toggle : start}>{timer.running ? <><Pause size={18} /> Pausar</> : <><Play size={18} /> {timer.seconds ? 'Continuar' : 'Começar'}</>}</button>
         </div>
       </section>
@@ -133,7 +133,7 @@ function StudyView({ d }: { d: StudyData }) {
           <div className="stat"><strong style={{ color: score.pending ? 'var(--cyan)' : 'var(--lime)' }}>{mine.length ? score.pct + '%' : '—'}</strong><span>no tema</span></div>
           <div className="stat"><strong style={{ color: subjectScore.pending ? 'var(--cyan)' : 'var(--orange)' }}>{subjectAnswers.length ? subjectScore.pct + '%' : '—'}</strong><span>na matéria</span></div>
         </div>
-        {d.task.goal_questions > 0 && <div className="bar" style={{ marginTop: 12 }}><span style={{ width: `${Math.min(100, (mine.length / d.task.goal_questions) * 100)}%`, background: 'var(--violet)', boxShadow: '0 0 10px var(--violet)' }} /></div>}
+        {d.task.goal_questions > 0 && <div className="bar" style={{ marginTop: 12 }}><span style={{ width: `${Math.min(100, (mine.length / d.task.goal_questions) * 100)}%`, background: 'var(--violet)' }} /></div>}
         {!!mine.length && <p className="small" style={{ margin: '10px 0 0' }}>{score.pending
           ? <span className="badge violet">Tema incompleto: {score.pending} {score.pending === 1 ? 'pendente' : 'pendentes'}</span>
           : <span className={'badge ' + (verdict.level === 'ok' ? 'lime' : 'orange')}>{verdict.text}</span>}</p>}

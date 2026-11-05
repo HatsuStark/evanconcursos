@@ -56,8 +56,8 @@ export function SchedulePage() {
       <section>
         <h3>Progresso</h3>
         <div className="glass card" style={{ display: 'grid', gap: 8 }}>
-          <strong style={{ fontSize: 30, color: 'var(--lime)', textShadow: '0 0 16px rgba(181,229,80,.4)' }}>{done}<span className="muted" style={{ fontSize: 16 }}> / {studyTasks.length}</span></strong>
-          <div className="bar"><span style={{ width: `${(done / Math.max(1, studyTasks.length)) * 100}%`, background: 'var(--lime)', boxShadow: '0 0 10px var(--lime)' }} /></div>
+          <strong style={{ fontSize: 30, color: 'var(--lime)' }}>{done}<span className="muted" style={{ fontSize: 16 }}> / {studyTasks.length}</span></strong>
+          <div className="bar"><span style={{ width: `${(done / Math.max(1, studyTasks.length)) * 100}%`, background: 'var(--lime)' }} /></div>
           <span className="muted small">tarefas concluídas{openEnded ? ' · sem prazo' : ` · prova em ${fmtDate(notice.exam_date)}`}</span>
         </div>
       </section>
@@ -80,7 +80,7 @@ export function SchedulePage() {
             return (
               <div key={p.subjectId} title={focus || undefined}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}><span>{p.name}</span><span className="muted">{p.days}</span></div>
-                <div className="bar" style={{ marginTop: 5 }}><span style={{ width: `${(p.days / maxDays) * 100}%`, background: subjectColor(i), boxShadow: `0 0 8px ${subjectColor(i)}` }} /></div>
+                <div className="bar" style={{ marginTop: 5 }}><span style={{ width: `${(p.days / maxDays) * 100}%`, background: subjectColor(i) }} /></div>
               </div>
             );
           })}

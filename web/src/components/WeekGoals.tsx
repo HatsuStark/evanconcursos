@@ -9,7 +9,7 @@ function GoalBar({ label, done, goal, text, color }: { label: string; done: numb
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}><span>{label}</span><span className="muted">{text}</span></div>
-      {goal > 0 && <div className="bar" style={{ marginTop: 5 }}><span style={{ width: `${Math.min(100, (done / goal) * 100)}%`, background: color, boxShadow: `0 0 8px ${color}` }} /></div>}
+      {goal > 0 && <div className="bar" style={{ marginTop: 5 }}><span style={{ width: `${Math.min(100, (done / goal) * 100)}%`, background: color }} /></div>}
     </div>
   );
 }
