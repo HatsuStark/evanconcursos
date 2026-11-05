@@ -9,7 +9,7 @@ import { isOpenEnded } from '../../../shared/domain/rounds.ts';
 import { LawUpload } from '../components/LawUpload.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { fmtDate, Steps, SubjectIcon } from '../components/ui.tsx';
-import { generatePlan, resolveNoticeLaws, updatePlanFromNotice, useActivePlan, type GenProgress, type SubjectRow } from '../lib/plans.ts';
+import { generatePlan, isNetworkError, resolveNoticeLaws, updatePlanFromNotice, useActivePlan, type GenProgress, type SubjectRow } from '../lib/plans.ts';
 import { useOwnLaws } from '../lib/legal.ts';
 import { supabase } from '../lib/supabase.ts';
 import { unlistedNorms } from '../../../shared/legal/norms.ts';
@@ -93,6 +93,9 @@ export function QuestionnairePage() {
     if (!weekly) return setError('Informe horas de estudo em pelo menos um dia.');
     if (regenerate && !confirm('Refazer o cronograma a partir de hoje? Tarefas concluídas e o histórico ficam guardados.')) return;
     setError('');
+    // A geração leva cerca de 1 minuto: a tela não apaga, para o celular não suspender a aba e derrubar a conexão.
+    let lock: WakeLockSentinel | null = null;
+    try { lock = (await navigator.wakeLock?.request('screen')) ?? null; } catch { /* sem permissão: segue sem */ }
     try {
       if (updating) {
         const failed = await updatePlanFromNotice(noticeId, inputs, setProgress);
@@ -104,8 +107,11 @@ export function QuestionnairePage() {
       }
       navigate('/cronograma');
     } catch (e) {
-      setError((e as Error).message);
+      const message = (e as Error).message;
+      setError(isNetworkError(message) ? 'A conexão com a internet caiu durante a geração. Confira o sinal e toque em "Gerar cronograma com IA" de novo: nada foi perdido.' : message);
       setProgress(null);
+    } finally {
+      void lock?.release().catch(() => {});
     }
   }
 

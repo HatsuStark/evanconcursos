@@ -24,7 +24,22 @@ export interface TaskRow {
 }
 export interface SubjectRow { id: string; name: string; position: number; is_core: boolean; questions: number; weight: number; block?: string }
 
-// Chamada a uma Edge Function com a mensagem de erro do servidor; 429 (limite da IA) espera e tenta de novo.
+// Falha de rede: o pedido não chegou ou a resposta se perdeu (Wi-Fi e 4G trocando, celular que suspende a aba com a tela
+// apagada). Cada navegador escreve de um jeito; o supabase-js põe "TypeError: Failed to fetch" na mensagem.
+export const isNetworkError = (message: string) => /failed to fetch|networkerror|load failed|network request failed|failed to send a request|fetch failed/i.test(message);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Repete chamadas ao banco que falharam pela rede: até 3 vezes, esperando 2 e 4 s. Erros do próprio banco não se repetem.
+async function retryNet<T extends { error: { message: string } | null }>(call: () => PromiseLike<T>, tries = 3): Promise<T> {
+  for (let i = 1; ; i++) {
+    const r = await call();
+    if (!r.error || i >= tries || !isNetworkError(r.error.message)) return r;
+    await sleep(2000 * i);
+  }
+}
+
+// Chamada a uma Edge Function com a mensagem de erro do servidor; 429 (limite da IA) espera e tenta de novo, e falha de
+// rede ou 502 tenta de novo em 3 s.
 async function invoke<T>(name: string, body: Record<string, unknown>, tries = 3): Promise<T> {
   for (let i = 1; ; i++) {
     const { data, error } = await supabase.functions.invoke(name, { body });
@@ -32,7 +47,7 @@ async function invoke<T>(name: string, body: Record<string, unknown>, tries = 3)
     const ctx = (error as { context?: Response }).context;
     let msg = error.message;
     try { msg = (await ctx?.json())?.error ?? msg; } catch { /* sem JSON */ }
-    if (i < tries && (ctx?.status === 429 || ctx?.status === 502)) { await new Promise((r) => setTimeout(r, ctx?.status === 429 ? 20000 : 3000)); continue; }
+    if (i < tries && (ctx?.status === 429 || ctx?.status === 502 || isNetworkError(msg))) { await sleep(ctx?.status === 429 ? 20000 : 3000); continue; }
     throw new Error(msg);
   }
 }
@@ -53,9 +68,9 @@ export type GenProgress ={ step: 'strategy' | 'sessions' | 'saving' | 'materials
 // direto dos tópicos (o plano nunca fica pela metade) e isso fica registrado na estratégia.
 // Com `carry` (novo edital), o conteúdo novo vem antes, o já estudado vira revisão, e edital sem data fica sem prazo.
 export async function generatePlan(noticeId: string, inputs: PlanInputs, onProgress: (p: GenProgress) => void, carry?: { studied: Set<string> }) {
-  const notice = must(await supabase.from('notices').select('id, title, exam_date, total_questions, structure').eq('id', noticeId).single()) as { id: string; title: string; exam_date: string | null; total_questions: number; structure: { blocks?: { name: string; rule: string; questions: number }[] } | null };
+  const notice = must(await retryNet(() => supabase.from('notices').select('id, title, exam_date, total_questions, structure').eq('id', noticeId).single())) as { id: string; title: string; exam_date: string | null; total_questions: number; structure: { blocks?: { name: string; rule: string; questions: number }[] } | null };
   if (!notice.exam_date && !carry) throw new Error('Defina a data da prova na conferência do edital.');
-  const subs = must(await supabase.from('notice_subjects').select('id, name, block, is_core, questions, weight, notice_topics(id, text, position)').eq('notice_id', noticeId).order('position')) as
+  const subs = must(await retryNet(() => supabase.from('notice_subjects').select('id, name, block, is_core, questions, weight, notice_topics(id, text, position)').eq('notice_id', noticeId).order('position'))) as
     (SubjectRow & { block: string; notice_topics: { id: string; text: string; position: number }[] })[];
   // Prova já realizada: plano sem prazo, com a primeira volta dimensionada pelo tamanho do conteúdo.
   const openEnded = isOpenEnded(notice.exam_date, ymd(new Date())) || !notice.exam_date;
@@ -112,10 +127,11 @@ export async function generatePlan(noticeId: string, inputs: PlanInputs, onProgr
     }
   }
   const payload = buildPlanPayload(base, sessions, review);
-  const { data, error } = await supabase.rpc('create_plan_version', {
+  // Se a resposta se perder depois de gravar, a nova tentativa grava uma versão igual, que passa a ser a ativa: nada se perde.
+  const { data, error } = await retryNet(() => supabase.rpc('create_plan_version', {
     p_notice_id: noticeId,
     p_data: { name: notice.title, from: ymd(new Date()), inputs, strategy, summary: { ...payload.summary, openEnded }, generatorVersion: GENERATOR_VERSION, promptVersion: PLAN_PROMPT_VERSION, sessions: payload.sessions, tasks: payload.tasks },
-  });
+  }));
   if (error) throw new Error(error.message);
   return data as string;
 }
