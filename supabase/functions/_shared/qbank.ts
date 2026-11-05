@@ -95,8 +95,9 @@ export function mapDeps(admin: SupabaseClient, quest: QuestClient, usage: Gemini
 
 // Matéria da disciplina (uma vez) e banca do edital. Os dados só são lidos se ainda não houver mapeamento.
 export async function ensureSubjectMap(admin: SupabaseClient, quest: QuestClient, deps: MapDeps, ownerId: string, subjectId: string, load: () => Promise<{ name: string; board: string; topics: string[]; organization: string }>) {
-  const { data: sm } = await admin.from('qbank_subject_maps').select('materia, banca, banca_tipo').eq('subject_id', subjectId).maybeSingle();
-  if (sm) return sm as { materia: string | null; banca: string; banca_tipo: string | null };
+  const { data: sm } = await admin.from('qbank_subject_maps').select('materia, banca, banca_tipo, prompt_version').eq('subject_id', subjectId).maybeSingle();
+  // Disciplina que ficou sem matéria numa versão antiga do mapa é mapeada de novo; as que têm matéria ficam.
+  if (sm && (sm.materia || sm.prompt_version === QMAP_PROMPT_VERSION)) return sm as { materia: string | null; banca: string; banca_tipo: string | null };
   const s = await load();
   const banca = s.board ? await pickBoard(s.board, (q) => quest.bancas(q)) : '';
   const r = await mapSubject(deps, { name: s.name, topics: s.topics, organization: s.organization });

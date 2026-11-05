@@ -13,10 +13,12 @@ import { organSearch, placeFilter } from './places.ts';
 // qmap-v5: assunto com o nome do tema ("Competência" numa sessão de competência) não conta como genérico.
 // qmap-v6: até 8 assuntos em ordem de relevância; a medição fica com os 5 primeiros que têm questões. A IA prefere nomes que
 // parecem específicos ("Conceito, Princípios e Regras de Competência", 2 questões) aos que têm volume ("Competência", 159).
-export const QMAP_PROMPT_VERSION = 'qmap-v6';
+export const QMAP_PROMPT_VERSION = 'qmap-v7';
 export const SESSION_ASSUNTOS = 5, ASSUNTO_CANDIDATES = 8;
 
 const STOP = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'a', 'o', 'as', 'os', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'ao', 'aos', 'art', 'arts', 'lei', 'nocoes', 'noções']);
+// Palavras de título que não nomeiam matéria: a busca por elas traz matérias de qualquer assunto.
+const GENERIC_WORDS = new Set(['introducao', 'conceitos', 'fundamentos', 'principios', 'aspectos', 'gerais', 'basicos', 'basicas', 'teoria', 'estudo', 'questoes', 'revisao', 'reforco', 'aplicada', 'aplicadas']);
 export const tokens = (s: string) => normalizeText(s).split(' ').filter((w) => w.length > 2 && !STOP.has(w));
 
 // Matéria: igual > contém todas as palavras > sobreposição; penaliza especializações que o edital não pediu.
@@ -93,9 +95,18 @@ export interface MapDeps {
 }
 export interface SessionFilter { materia: string | null; assuntos: string[]; how: string }
 
+// Buscas de matéria para um nome: o nome inteiro, cada parte de um nome composto ("Economia e Finanças públicas" →
+// "Economia", "Finanças públicas") e a última palavra. A API busca pelo trecho, então o nome composto inteiro não acha nada.
+export function materiaQueries(q: string, max = 4) {
+  const parts = q.split(/\s+e\s+|[,;/]/i).map((p) => p.trim()).filter((p) => p.length > 3);
+  const words = q.split(' ').filter((w) => w.length > 3);
+  return [...new Set([q, ...(parts.length > 1 ? parts : []), ...(words.length > 1 ? [words[words.length - 1]!] : [])])].slice(0, max);
+}
+
 async function candidates(d: MapDeps, q: string) {
-  const parts = q.split(' ').filter((w) => w.length > 3);
-  return fullMaterias([...(await d.materias(q)), ...(parts.length > 1 ? await d.materias(parts[parts.length - 1]!) : [])]);
+  const found: string[] = [];
+  for (const x of materiaQueries(q)) found.push(...(await d.materias(x)));
+  return fullMaterias(found);
 }
 
 // Matéria da disciplina: pontuação pelo nome, mas matéria "vazia" (≤ 2 assuntos) perde para a versão cheia
@@ -191,10 +202,13 @@ export async function mapSession(d: MapDeps, subjectMateria: string | null,
     if (a.length) return { materia: subjectMateria, assuntos: a, how: 'matéria da disciplina' };
   }
   const head = s.title.split(':')[0]!.replace(/\(.*?\)/g, '').trim();
+  // Palavras longas do título também viram busca: "Introdução à Microeconomia e Mercados" não acha nada inteira, "Microeconomia" acha.
+  const words = tokens(head).length > 1 ? head.split(/[\s,;/]+/).filter((w) => normalizeText(w).length >= 6 && tokens(w).length && !GENERIC_WORDS.has(normalizeText(w)))
+    .sort((a, b) => b.length - a.length).slice(0, 2) : [];
   // Também pelo nome das leis citadas ("Lei 13.146" → "Estatuto da Pessoa com Deficiência"): siglas não são achadas na busca.
   const laws = findLawRefs(text, s.subject).map((r) => lawByKey(r.law)?.name).filter((n): n is string => !!n);
   const found: string[] = [];
-  for (const q of [...new Set([s.keyword, head, ...laws].filter(Boolean))].slice(0, 4)) found.push(...(await d.materias(q)));
+  for (const q of [...new Set([s.keyword, head, ...laws, ...words].filter(Boolean))].slice(0, 6)) found.push(...(await d.materias(q)));
   const cands = fullMaterias(found).filter((c) => c !== subjectMateria && fits(c)).slice(0, 12);
   if (!cands.length) return { materia: null, assuntos: [], how: 'sem matéria' };
   const pick = await d.ai(MateriaChoice, materiaJsonSchema(), materiaPrompt(`${s.subject} — sessão "${s.title}"`, s.topics, cands));

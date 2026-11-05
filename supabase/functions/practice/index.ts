@@ -144,10 +144,10 @@ Deno.serve(async (req) => {
           const block = { name: g.name, minPct: minPctOf(g.rule), subjects: [] as { name: string; materia: string | null; count: number }[] };
           for (const s of inBlock) {
             const n = s.questions || Math.max(1, Math.round(Math.max(0, g.questions - fixed) / Math.max(1, loose.length)));
-            let { data: sm } = await admin.from('qbank_subject_maps').select('materia').eq('subject_id', s.id).maybeSingle();
-            if (!sm) {
+            let { data: sm } = await admin.from('qbank_subject_maps').select('materia, prompt_version').eq('subject_id', s.id).maybeSingle();
+            if (!sm || (!sm.materia && sm.prompt_version !== QMAP_PROMPT_VERSION)) {
               const r = await mapSubject(deps, { name: s.name, topics: (s.notice_topics ?? []).map((t) => t.text), organization: String(notice?.organization ?? '') });
-              sm = { materia: r.materia };
+              sm = { materia: r.materia, prompt_version: QMAP_PROMPT_VERSION };
               await admin.from('qbank_subject_maps').upsert({ subject_id: s.id, owner_id: auth.user.id, materia: r.materia, banca, how: r.how, prompt_version: QMAP_PROMPT_VERSION });
             }
             block.subjects.push({ name: s.name, materia: sm.materia, count: Math.max(1, Math.round(n * factor)) });

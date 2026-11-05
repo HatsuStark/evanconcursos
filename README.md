@@ -181,7 +181,7 @@ Metas semanais e folgas continuam vindo do plano, e o preparo antecipado de apos
 
 ## Plano sem prazo
 
-Edital com a prova já realizada também é aceito. O questionário avisa que ele não está aberto, e o plano fica sem prazo, adaptando-se ao desempenho (`shared/domain/rounds.ts`, sem IA nas rodadas). Trocar a data na conferência por uma futura e refazer o cronograma volta ao plano com data.
+Edital com a prova já realizada também é aceito. O questionário avisa que ele não está aberto, e o plano fica sem prazo, adaptando-se ao desempenho (`shared/domain/rounds.ts`, sem IA nas rodadas). Trocar a data na conferência por uma futura e refazer o cronograma volta ao plano com data. O plano sem prazo também alterna entre **Agenda**, com a meta de cada dia, e **Ciclo**; começa na agenda. Na agenda, tarefa atrasada não aperta o resto: **Reorganizar** passa as pendentes para os próximos dias de estudo, na mesma ordem, com o tempo e a meta do novo dia (`shiftOverdue`).
 
 1. **Primeira volta:** todas as sessões, em fila, sem datas nem atrasos. O número de sessões vem do tamanho do conteúdo (cada tópico, com mínimo de 4 por matéria e teto de 180), e não do tempo até a prova.
 2. **Rodadas de 2 semanas:** com menos de 3 tarefas pendentes, o app grava sozinho uma nova rodada pela `replan_version`. Os dias vão para as matérias por `peso no edital × fraqueza`; dentro de cada matéria, vêm primeiro as sessões mais fracas e há mais tempo sem ver. Sessão fraca vira **Reforço**, e a boa ou ainda sem dados vira **Manutenção**, com 5 a 10 questões da própria sessão.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { theoryGoal } from '../domain/scheduler.ts';
-import { dominantFormat, localPlace, pickBoard, equalIncidence, interleave, inTurn, assuntoPrompt, prefilterAssuntos, mapSession, mapSubject, measureIncidence, newestPage, usefulNarrowing, planPicks, roleKeyword, searchFilters, type MapDeps } from './map.ts';
+import { dominantFormat, localPlace, materiaQueries, pickBoard, equalIncidence, interleave, inTurn, assuntoPrompt, prefilterAssuntos, mapSession, mapSubject, measureIncidence, newestPage, usefulNarrowing, planPicks, roleKeyword, searchFilters, type MapDeps } from './map.ts';
 
 const tally = (picks: string[]) => picks.reduce<Record<string, number>>((m, a) => ({ ...m, [a]: (m[a] ?? 0) + 1 }), {});
 
@@ -275,5 +275,37 @@ describe('tema da sessão como foco (qmap-v4)', () => {
     expect(p).toMatch(/só contexto/);
     expect(p).toMatch(/Evite assunto genérico/);
     expect(p).toMatch(/nome do próprio tema ou de uma parte dele não é genérico/);
+  });
+});
+
+describe('disciplina com nome composto (qmap-v7)', () => {
+  // A API busca pelo trecho: o nome composto inteiro não acha nada.
+  const api: Record<string, string[]> = { Economia: ['Economia', 'Microeconomia', 'Macroeconomia'], 'Finanças públicas': ['Finanças Públicas'], Microeconomia: ['Microeconomia'], públicas: ['Políticas Públicas'] };
+  const searched: string[] = [];
+  const deps = (pick: string): MapDeps => ({
+    materias: async (q) => { searched.push(q); return api[q] ?? []; },
+    assuntosOf: async (m) => Array.from({ length: 30 }, (_, i) => `${m} ${i}`),
+    ai: (async (_s: unknown, _j: unknown, prompt: string) => (prompt.includes('Escolha a matéria') ? { materia: pick } : { assuntos: ['Microeconomia 1', 'Microeconomia 2'] })) as MapDeps['ai'],
+  });
+
+  it('busca cada parte do nome', () => {
+    expect(materiaQueries('Economia e Finanças públicas')).toEqual(['Economia e Finanças públicas', 'Economia', 'Finanças públicas', 'públicas']);
+    expect(materiaQueries('Direito Penal')).toEqual(['Direito Penal', 'Penal']);
+  });
+
+  it('as partes viram candidatas da disciplina', async () => {
+    let shown = '';
+    const d = deps('Economia');
+    const r = await mapSubject({ ...d, ai: (async (s: unknown, j: unknown, p: string) => { shown = p; return d.ai(s as never, j, p); }) as MapDeps['ai'] }, { name: 'Economia e Finanças públicas', topics: [] });
+    expect(r.materia).toBe('Economia');
+    expect(shown).toContain('- Finanças Públicas');
+  });
+
+  it('sessão sem matéria da disciplina busca pelas palavras longas do título', async () => {
+    searched.length = 0;
+    const r = await mapSession(deps('Microeconomia'), null, { subject: 'Economia e Finanças públicas', title: 'Introdução à Microeconomia e Mercados: demanda, oferta e elasticidades', keyword: '', topics: [] });
+    expect(searched).toContain('Microeconomia');
+    expect(searched).not.toContain('Introdução');
+    expect(r).toMatchObject({ materia: 'Microeconomia', how: 'matéria pela sessão' });
   });
 });
