@@ -6,8 +6,10 @@
 // O app acompanha pelo job; o usuário confere e aprova depois (approve_notice).
 import { extractText } from 'unpdf';
 import { GeminiError, generateJson, toBase64, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { checkNotice, NOTICE_PROMPT_VERSION, NoticeRoles, noticeRolesJsonSchema, normalizeText, readNotice, ROLES_PROMPT_VERSION, rolesPrompt, uniqueRoles } from '../../../shared/ai/notice.ts';
+import { checkNotice, NOTICE_PROMPT_VERSION, NoticeExtraction, type NoticeRole, NoticeRoles, noticeRolesJsonSchema, normalizeText, readNotice, ROLES_PROMPT_VERSION, rolesPrompt, uniqueRoles } from '../../../shared/ai/notice.ts';
+import { noticeDocKeys, noticeRoleKey, worthSharing } from '../../../shared/ai/notice-cache.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
+import { cachedRead, saveRead } from '../_shared/notice-cache.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -15,6 +17,8 @@ const OPERATION = 'notice_extract';
 const ROLES_OPERATION = 'notice_roles';
 const modelName = () => Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash';
 type Exact = { code: string; otherRoles: string[] } | null;
+// Leitura reaproveitada de outro candidato (notice_ai_cache): entra no consumo sem custo de IA.
+const CACHE_MODEL = 'cache';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -58,11 +62,21 @@ async function listRoles(ownerId: string, path: string) {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   let text = '';
   try { text = (await extractText(bytes.slice(), { mergePages: true })).text; } catch { /* PDF só com imagem */ }
+  // Mesmo edital já listado por outro candidato: sem IA.
+  const keys = await noticeDocKeys(bytes, text);
+  const hit = await cachedRead(admin, 'roles', keys, '', ROLES_PROMPT_VERSION);
+  if (hit) {
+    await saveRead(admin, 'roles', keys, '', ROLES_PROMPT_VERSION, hit);
+    await logUsage(admin, { ownerId, operation: ROLES_OPERATION, model: CACHE_MODEL, promptVersion: ROLES_PROMPT_VERSION, usage: null, latencyMs: null, status: 'ok' });
+    return json(200, { roles: (hit.result as { roles: NoticeRole[] }).roles, cached: true });
+  }
   const doc = text.trim().length > 2000 ? { text: `EDITAL:\n${text}` } : { inline_data: { mime_type: 'application/pdf', data: toBase64(bytes) } };
   try {
     const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model: m, schema: NoticeRoles, jsonSchema: noticeRolesJsonSchema(), temperature: 0, timeoutMs: 60_000, thinkingLevel: 'low', parts: [doc, { text: rolesPrompt() }] });
     await logUsage(admin, { ownerId, operation: ROLES_OPERATION, model: m, promptVersion: ROLES_PROMPT_VERSION, usage: r.usage, latencyMs: r.latencyMs, status: 'ok' });
-    return json(200, { roles: uniqueRoles(r.data.roles) });
+    const roles = uniqueRoles(r.data.roles);
+    if (roles.length) await saveRead(admin, 'roles', keys, '', ROLES_PROMPT_VERSION, { result: { roles }, raw: null, model: m });
+    return json(200, { roles });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await logUsage(admin, { ownerId, operation: ROLES_OPERATION, model: m, promptVersion: ROLES_PROMPT_VERSION, usage: err instanceof GeminiError ? err.usage : null, latencyMs: null, status: 'error', error: message });
@@ -89,9 +103,23 @@ async function process(p: { jobId: string; ownerId: string; noticeId: string; fi
     } catch { /* PDF só com imagem ou protegido */ }
 
     await step('analyzing');
-    const pdf = toBase64(bytes);
-    const r = await readNotice({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, pdfBase64: pdf, roleHint: p.roleHint, exact: p.exact ?? undefined });
-    usage = r.usage; latencyMs = r.latencyMs;
+    // Mesmo edital já lido para o mesmo cargo por outro candidato: reaproveita a leitura da IA (cada um confere a sua).
+    const keys = await noticeDocKeys(bytes, pdfText), roleKey = noticeRoleKey(p.roleHint, p.exact);
+    const found = await cachedRead(admin, 'extract', keys, roleKey, NOTICE_PROMPT_VERSION);
+    const parsed = found ? NoticeExtraction.safeParse(found.result) : null;
+    const hit = parsed?.success ? found : null;
+    let r: { data: NoticeExtraction; raw: unknown };
+    let readModel = model;
+    if (hit && parsed?.success) {
+      r = { data: parsed.data, raw: hit.raw };
+      readModel = hit.model || model;
+      await saveRead(admin, 'extract', keys, roleKey, NOTICE_PROMPT_VERSION, hit);
+    } else {
+      const read = await readNotice({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, pdfBase64: toBase64(bytes), roleHint: p.roleHint, exact: p.exact ?? undefined });
+      usage = read.usage; latencyMs = read.latencyMs;
+      r = { data: read.data, raw: read.raw };
+      if (worthSharing(read.data)) await saveRead(admin, 'extract', keys, roleKey, NOTICE_PROMPT_VERSION, { result: read.data, raw: read.raw, model });
+    }
     // Cargo escolhido na lista: nome e demais cargos vêm da escolha, não da leitura.
     if (p.exact && p.roleHint) {
       r.data.role = p.roleHint;
@@ -102,12 +130,12 @@ async function process(p: { jobId: string; ownerId: string; noticeId: string; fi
     const warnings = checkNotice(r.data, pdfText);
     if (pdfText === null) warnings.push({ code: 'pdf_text_unavailable', message: 'Não foi possível ler o texto do PDF para conferir os tópicos. Revise com atenção.' });
     const { data: extraction, error: exErr } = await admin.from('notice_extractions').insert({
-      owner_id: p.ownerId, notice_id: p.noticeId, file_id: p.fileId, status: 'succeeded', model, prompt_version: NOTICE_PROMPT_VERSION,
+      owner_id: p.ownerId, notice_id: p.noticeId, file_id: p.fileId, status: 'succeeded', model: readModel, prompt_version: NOTICE_PROMPT_VERSION,
       raw: r.raw, result: r.data, warnings, finished_at: new Date().toISOString(),
     }).select('id').single();
     if (exErr || !extraction) throw new Error('Não foi possível salvar a leitura do edital.');
 
-    await logUsage(admin, { ownerId: p.ownerId, jobId: p.jobId, operation: OPERATION, model, promptVersion: NOTICE_PROMPT_VERSION, usage, latencyMs, status: 'ok' });
+    await logUsage(admin, { ownerId: p.ownerId, jobId: p.jobId, operation: OPERATION, model: hit ? CACHE_MODEL : model, promptVersion: NOTICE_PROMPT_VERSION, usage, latencyMs, status: 'ok' });
     await admin.from('ai_jobs').update({ status: 'succeeded', finished_at: new Date().toISOString(), result: { extractionId: extraction.id }, progress: { step: 'done' } }).eq('id', p.jobId);
   } catch (err) {
     const cause = err instanceof Error ? err.cause : null;
