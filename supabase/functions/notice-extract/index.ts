@@ -133,7 +133,11 @@ async function process(p: { jobId: string; ownerId: string; noticeId: string; fi
     }
 
     await step('checking');
-    const warnings = checkNotice(r.data, pdfText);
+    // Disciplinas com tópicos resumidos pela IA (a cópia literal foi recusada): um aviso próprio no lugar do "não
+    // encontrados no PDF", que é esperado nelas.
+    const summarized = new Set(((r.raw as { summarized?: string[] } | null)?.summarized ?? []).map(String));
+    const warnings = checkNotice(r.data, pdfText).filter((w) => !(w.code === 'topic_not_found' && w.subject && summarized.has(w.subject)));
+    for (const name of summarized) warnings.push({ code: 'topics_summarized', subject: name, message: `${name}: a IA não conseguiu copiar o texto do edital e listou os tópicos resumidos. Confira com o conteúdo programático do PDF.` });
     if (pdfText === null) warnings.push({ code: 'pdf_text_unavailable', message: 'Não foi possível ler o texto do PDF para conferir os tópicos. Revise com atenção.' });
     // Leitura de outro arquivo com o mesmo título e o texto quase igual: uma retificação pequena também passa por aqui.
     if (hit && match?.fuzzy) warnings.push({ code: 'reused_similar_notice', message: 'Aproveitamos a leitura de uma cópia deste edital. Confira as datas e as vagas com o seu PDF.' });

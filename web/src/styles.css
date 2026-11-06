@@ -768,3 +768,5 @@ details.card summary { cursor: pointer; font-weight: 600; }
 
 /* Fundo de leitura: apostila, lei seca, questões e flashcards (tom de papel se o estudante escolher). */
 .guide, .law-block, .q-card, .flashcard { background: var(--paper); }
+/* Conferência: matérias agrupadas por bloco da prova. */
+.block-group > summary { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; cursor: pointer; padding: 8px 2px; font-size: 16px; }

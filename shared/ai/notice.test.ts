@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { checkNotice, comparableText, extractWithRetry, NOTICE_DEADLINE_MS, mergeNoticeParts, noticePrompt, NoticeExtraction, noticeJsonSchema, noticeSpecificJsonSchema, subjectWeights, topicInText, uniqueRoles } from './notice.ts';
+import { checkNotice, comparableText, extractWithRetry, fillMissingTopics, NOTICE_DEADLINE_MS, mergeNoticeParts, noticePrompt, NoticeExtraction, noticeJsonSchema, noticeSpecificJsonSchema, subjectWeights, topicInText, uniqueRoles } from './notice.ts';
 
 describe('extractWithRetry', () => {
   const recitation = Object.assign(new Error('O Gemini não devolveu conteúdo (RECITATION).'), { finishReason: 'RECITATION' });
@@ -155,5 +155,28 @@ describe('leitura em duas partes', () => {
     expect(noticePrompt('Auditor', false, undefined, 'specific')).toContain('Liste só as disciplinas de conhecimentos específicos');
     expect(noticePrompt('Auditor')).not.toContain('lido à parte');
     expect(noticeSpecificJsonSchema()).toMatchObject({ required: ['subjects'] });
+  });
+});
+
+describe('passada extra de tópicos', () => {
+  const base = { title: '', organization: '', role: 'Juiz', roleDuties: '', educationLevel: '' as const, board: '', examDate: '', totalQuestions: 100, notes: [], blocks: [], stages: [], otherRoles: [] };
+  const e = { ...base, subjects: [
+    { name: 'Direito Civil', block: 'Bloco I', questions: 0, core: true, topics: [] },
+    { name: 'Direito Penal', block: 'Bloco II', questions: 0, core: true, topics: [{ text: 'Do crime.', page: 49 }] },
+  ] } as unknown as NoticeExtraction;
+
+  it('preenche só a disciplina sem tópicos, pelo nome', () => {
+    const r = fillMissingTopics(e, { subjects: [
+      { name: 'DIREITO CIVIL', topics: [{ text: 'Pessoas naturais.', page: 39 }] },
+      { name: 'Direito Penal', topics: [{ text: 'Outro texto.', page: 50 }] },
+    ] });
+    expect(r.subjects[0]!.topics.map((t) => t.text)).toEqual(['Pessoas naturais.']);
+    expect(r.subjects[1]!.topics.map((t) => t.text)).toEqual(['Do crime.']);
+  });
+
+  it('não cria disciplina nova nem apaga a lacuna sem resposta', () => {
+    const r = fillMissingTopics(e, { subjects: [{ name: 'Direito Eleitoral', topics: [{ text: 'Partidos.', page: 57 }] }] });
+    expect(r.subjects).toHaveLength(2);
+    expect(r.subjects[0]!.topics).toEqual([]);
   });
 });

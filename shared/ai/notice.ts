@@ -1,9 +1,9 @@
 // Interpretação do edital: schema da resposta da IA, prompt versionado e verificações determinísticas.
 // Usado pela Edge Function notice-extract e pela avaliação (evals/run.ts).
 import { z } from 'zod';
-import { generateJson, type GeminiUsage } from './gemini.ts';
+import { GeminiError, generateJson, type GeminiUsage } from './gemini.ts';
 
-export const NOTICE_PROMPT_VERSION = 'notice-v9';
+export const NOTICE_PROMPT_VERSION = 'notice-v10';
 
 // Mesmos valores do filtro nivel_escolaridade da Quest API; vazio se o edital não informar.
 export const EDUCATION_LEVELS = ['Fundamental', 'Médio', 'Superior'] as const;
@@ -121,8 +121,11 @@ export function uniqueRoles(roles: NoticeRole[]): NoticeRole[] {
 // part: a leitura vai em duas chamadas paralelas (readNotice), porque transcrever o conteúdo de um edital grande numa
 // resposta só passa do limite de tempo da função (Receita Federal: 106 s de 130). 'general' traz tudo, com os tópicos só
 // das disciplinas básicas; 'specific' traz só os tópicos das específicas. 'all' = uma chamada só.
-export type NoticePart = 'all' | 'general' | 'specific';
-export function noticePrompt(roleHint: string, retry = false, exact?: { code?: string; otherRoles?: string[] }, part: NoticePart = 'all'): string {
+// 'fill' (com `only`): os tópicos de disciplinas que as duas partes deixaram sem conteúdo (ver fillMissingTopics).
+// 'summary' (com `only`): último recurso, os tópicos resumidos em palavras-chave, quando a transcrição literal é recusada
+// (RECITATION: o ECA do TJSP, com a lista de convenções internacionais, caía no filtro mesmo com nova tentativa).
+export type NoticePart = 'all' | 'general' | 'specific' | 'fill' | 'summary';
+export function noticePrompt(roleHint: string, retry = false, exact?: { code?: string; otherRoles?: string[] }, part: NoticePart = 'all', only: string[] = []): string {
   const role = roleHint.trim().slice(0, 160);
   const others = (exact?.otherRoles ?? []).filter((r) => normalizeText(r) !== normalizeText(role)).slice(0, 60);
   const cargo = !role
@@ -141,6 +144,20 @@ export function noticePrompt(roleHint: string, retry = false, exact?: { code?: s
   - tamanho: em geral uma a quatro linhas (até uns 800 caracteres); tema curto e autônomo ("Ortografia.", "Crase.") pode ser tópico sozinho; nunca a disciplina inteira num tópico.
   Copie o texto do edital como está (mesmas palavras, numeração, leis e artigos), decidindo só onde um tópico termina e o próximo começa; não resuma, não reescreva, não acrescente nada e não prefixe com o nome da disciplina. page = página do PDF onde o tópico começa.`;
   const retryRule = retry ? '\n- Em topics, quebre itens longos em entradas menores (cada entrada com no máximo 2000 caracteres), separadas nos pontos finais e, se preciso, nos pontos e vírgulas, e padronize a pontuação, sem mudar o sentido nem omitir leis e artigos.' : '';
+  if (part === 'summary') return `Você é especialista em editais de concursos públicos brasileiros. Leia o edital em anexo e liste os tópicos do conteúdo programático destas disciplinas do cargo: ${only.map((n) => `"${n}"`).join(', ')}.
+Cargo: ${cargo}.
+Regras:
+${scope}
+- subjects: uma entrada para cada disciplina pedida, com o nome exatamente como na lista acima.
+- topics: um tópico por item do conteúdo programático, na ordem do edital, cobrindo todos os itens do primeiro ao último. Cada tópico com as palavras-chave do item (até 25 palavras): o tema, as leis com número e os artigos citados. Não copie frases longas do edital: resuma cada item. page = página do PDF onde o item começa.
+- Se o edital não trouxer o conteúdo de uma delas, devolva topics vazio para ela; não invente.`;
+  if (part === 'fill') return `Você é especialista em editais de concursos públicos brasileiros. Leia o edital em anexo e transcreva o conteúdo programático completo destas disciplinas do cargo: ${only.map((n) => `"${n}"`).join(', ')}.
+Cargo: ${cargo}.
+Regras:
+${scope}
+- subjects: uma entrada para cada disciplina pedida, com o nome exatamente como na lista acima. O conteúdo pode estar num anexo do edital ("Conteúdo programático", "Anexo I"), às vezes sob um título um pouco diferente do nome da disciplina.
+${topicsRule}
+- Transcreva todos os itens da disciplina, do primeiro ao último, sem parar no meio. Se o edital não trouxer o conteúdo de uma delas, devolva topics vazio para ela; não invente.${retryRule}`;
   if (part === 'specific') return `Você é especialista em editais de concursos públicos brasileiros. Leia o edital em anexo e transcreva o conteúdo programático das disciplinas de conhecimentos específicos do cargo (as próprias do cargo, não as de conhecimentos gerais/básicos).
 Cargo: ${cargo}.
 Regras:
@@ -189,17 +206,70 @@ export function mergeNoticeParts(main: NoticeExtraction, spec: NoticeSpecific): 
   return { ...main, subjects };
 }
 
+// Disciplinas que as duas partes deixaram sem tópicos ganham os da passada extra ('fill'), pelo nome. A divisão em
+// gerais × específicas deixava um vão: no edital de Juiz do TJSP (três blocos de Direito, sem essa divisão), a parte geral
+// marcou as 14 disciplinas como específicas e a específica não reconheceu nenhuma; o conteúdo do Anexo I não foi lido.
+export function fillMissingTopics(e: NoticeExtraction, fill: NoticeSpecific): NoticeExtraction {
+  const key = (s: string) => comparableText(s) || normalizeText(s);
+  const same = (a: string, b: string) => !!a && !!b && (a === b || a.includes(b) || b.includes(a));
+  return { ...e, subjects: e.subjects.map((s) => {
+    if (s.topics.length) return s;
+    const hit = fill.subjects.find((x) => x.topics.length && same(key(x.name), key(s.name)));
+    return hit ? { ...s, topics: hit.topics } : s;
+  }) };
+}
+// Disciplinas por chamada da passada extra: cada uma pode ter dezenas de itens (Direito Civil do TJSP: 61).
+export const FILL_GROUP = 2;
+const FILL_MIN_MS = 25_000;
+// A parte específica tem prazo curto: em edital grande (TJSP Juiz, Anexo I de 30 páginas) ela tentava transcrever tudo numa
+// resposta só e passava do limite da função. Estourado o prazo, as disciplinas dela vão para a passada extra, em grupos.
+const SPECIFIC_MAX_MS = 60_000;
+
 // Leitura completa do edital: as duas partes em paralelo, juntas, com as novas tentativas de extractWithRetry.
 export async function readNotice(o: { apiKey: string; model: string; pdfBase64: string; roleHint: string; exact?: { code?: string; otherRoles?: string[] }; fetchImpl?: typeof fetch }) {
   return extractWithRetry(async ({ temperature, retry, timeoutMs }) => {
-    const parts = (t: string) => [{ inline_data: { mime_type: 'application/pdf', data: o.pdfBase64 } }, { text: t }];
+    const started = Date.now();
+    const parts =(t: string) => [{ inline_data: { mime_type: 'application/pdf', data: o.pdfBase64 } }, { text: t }];
     const common = { apiKey: o.apiKey, model: o.model, temperature, timeoutMs, thinkingLevel: NOTICE_THINKING, fetchImpl: o.fetchImpl };
     const [a, b] = await Promise.all([
       generateJson({ ...common, schema: NoticeExtraction, jsonSchema: noticeJsonSchema(), parts: parts(noticePrompt(o.roleHint, retry, o.exact, 'general')) }),
-      generateJson({ ...common, schema: NoticeSpecific, jsonSchema: noticeSpecificJsonSchema(), parts: parts(noticePrompt(o.roleHint, retry, o.exact, 'specific')) }),
+      generateJson({ ...common, timeoutMs: Math.min(SPECIFIC_MAX_MS, timeoutMs), schema: NoticeSpecific, jsonSchema: noticeSpecificJsonSchema(), parts: parts(noticePrompt(o.roleHint, retry, o.exact, 'specific')) })
+        .catch((err: unknown) => ({ data: { subjects: [] } as NoticeSpecific, raw: { error: err instanceof Error ? err.message : String(err) }, usage: err instanceof GeminiError && err.usage ? err.usage : { inputTokens: 0, outputTokens: 0, thinkingTokens: 0 } })),
     ]);
     const usage: GeminiUsage = { inputTokens: a.usage.inputTokens + b.usage.inputTokens, outputTokens: a.usage.outputTokens + b.usage.outputTokens, thinkingTokens: a.usage.thinkingTokens + b.usage.thinkingTokens };
-    return { data: mergeNoticeParts(a.data, b.data), raw: { main: a.raw, specific: b.raw }, usage, model: a.model, latencyMs: Math.max(a.latencyMs, b.latencyMs) };
+    const add = (u: GeminiUsage) => { usage.inputTokens += u.inputTokens; usage.outputTokens += u.outputTokens; usage.thinkingTokens += u.thinkingTokens; };
+    let data = mergeNoticeParts(a.data, b.data);
+    const raw: Record<string, unknown> = { main: a.raw, specific: b.raw };
+    // Passada extra para as disciplinas ainda sem tópicos, em chamadas paralelas, enquanto houver tempo:
+    // 1) grupos de FILL_GROUP, transcrição literal; 2) uma disciplina por chamada, quebrando itens longos e com mais variação
+    // (contra o filtro RECITATION); 3) uma por chamada, tópicos resumidos em palavras-chave (raw.summarized: a conferência
+    // avisa que essas vieram resumidas). O que sobrar fica sem tópicos e aparece na conferência.
+    const fillLog: unknown[] = [], summarized: string[] = [];
+    const rounds = [
+      { size: FILL_GROUP, part: 'fill', split: retry, temperature: temperature },
+      { size: 1, part: 'fill', split: true, temperature: 0.7 },
+      { size: 1, part: 'summary', split: true, temperature: 0.7 },
+    ] as const;
+    for (const round of rounds) {
+      const missing = data.subjects.filter((s) => !s.topics.length).map((s) => s.name);
+      const left = timeoutMs - (Date.now() - started);
+      if (!missing.length || left < FILL_MIN_MS) break;
+      const groups = Array.from({ length: Math.ceil(missing.length / round.size) }, (_, i) => missing.slice(i * round.size, (i + 1) * round.size));
+      const fills = await Promise.all(groups.map((names) => generateJson({ ...common, temperature: round.temperature, timeoutMs: left - 3_000, schema: NoticeSpecific, jsonSchema: noticeSpecificJsonSchema(),
+        parts: parts(noticePrompt(o.roleHint, round.split, o.exact, round.part, names)) })
+        .catch((err: unknown) => ({ error: err instanceof Error ? err.message.slice(0, 300) : String(err), names, usage: err instanceof GeminiError ? err.usage : null }))));
+      for (const f of fills) {
+        if ('error' in f) { fillLog.push({ error: f.error, names: f.names }); if (f.usage) add(f.usage); continue; }
+        const before = new Set(data.subjects.filter((s) => s.topics.length).map((s) => s.name));
+        data = fillMissingTopics(data, f.data);
+        if (round.part === 'summary') summarized.push(...data.subjects.filter((s) => s.topics.length && !before.has(s.name)).map((s) => s.name));
+        add(f.usage);
+        fillLog.push(f.raw);
+      }
+    }
+    if (fillLog.length) raw.fill = fillLog;
+    if (summarized.length) raw.summarized = summarized;
+    return { data, raw, usage, model: a.model, latencyMs: Date.now() - started };
   });
 }
 
@@ -245,7 +315,7 @@ export function checkNotice(e: NoticeExtraction, pdfText: string | null, today =
     const key = normalizeText(s.name);
     if (names.has(key)) out.push({ code: 'subject_duplicate', message: `Disciplina repetida: ${s.name}.`, subject: s.name });
     names.add(key);
-    if (!s.topics.length) out.push({ code: 'subject_no_topics', message: `${s.name}: sem conteúdo programático.`, subject: s.name });
+    if (!s.topics.length) out.push({ code: 'subject_no_topics', message: `${s.name}: não conseguimos ler os tópicos. Cole os itens do conteúdo programático na matéria, um por linha.`, subject: s.name });
   }
   // Questões: por bloco (quando o bloco detalha por disciplina) e no total.
   for (const b of e.blocks) {

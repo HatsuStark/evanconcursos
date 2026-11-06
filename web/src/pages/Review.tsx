@@ -29,6 +29,22 @@ export function ReviewPage() {
     set({ subjects: draft.subjects.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
   const topicsCount = draft.subjects.reduce((a, s) => a + s.topics.length, 0);
   const questions = draft.subjects.reduce((a, s) => a + s.questions, 0);
+  // Matérias agrupadas por bloco, na ordem do edital: quando o edital dá só o total do bloco, a quantidade aparece uma vez,
+  // no bloco, e não como "0" em cada matéria.
+  const norm = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+  const blockQuestions = (name: string) => {
+    // "Bloco I" casa com "Bloco I – Língua Portuguesa", mas não com "Bloco II".
+    const prefix = (a: string, b: string) => !!b && (a === b || a.startsWith(b + ' ') || a.startsWith(b + ':'));
+    const b = draft.structure.blocks.find((x) => norm(x.name) === norm(name)) ?? draft.structure.blocks.find((x) => prefix(norm(x.name), norm(name)) || prefix(norm(name), norm(x.name)));
+    return b?.questions ?? 0;
+  };
+  const groups = [...new Set(draft.subjects.map((s) => s.block.trim()))].map((name) => {
+    const items = draft.subjects.map((s, i) => ({ s, i })).filter((x) => x.s.block.trim() === name);
+    return { name, items, questions: blockQuestions(name) || items.reduce((n, x) => n + x.s.questions, 0) };
+  });
+  const pages = draft.subjects.flatMap((s) => s.topics.map((t) => t.page)).filter((p) => p > 0);
+  const noTopics = draft.subjects.filter((s) => !s.topics.length).length;
+  const summarizedSubjects = new Set((extraction?.warnings ?? []).filter((w) => w.code === 'topics_summarized').map((w) => w.subject ?? ''));
 
   async function confirm() {
     if (!draft) return;
@@ -118,8 +134,22 @@ export function ReviewPage() {
       </div>
 
       <div className="section-title"><h2>Matérias</h2><span className="badge violet">{draft.subjects.length}</span></div>
+      {/* Cobertura: o que foi lido do conteúdo programático, para o candidato conferir com o edital antes de seguir. */}
+      <div className="glass card" style={{ marginBottom: 16, display: 'grid', gap: 8 }}>
+        <strong>{topicsCount} tópicos em {draft.subjects.length} matérias{pages.length ? `, lidos das páginas ${Math.min(...pages)} a ${Math.max(...pages)} do edital` : ''}.</strong>
+        <span className="muted small">Confira cada matéria com o conteúdo programático do edital. Todos os tópicos daqui entram no cronograma, e depois você acompanha cada um no Edital verticalizado.</span>
+        {noTopics > 0 && <div className="warning-card"><AlertTriangle /><span>{noTopics === 1 ? '1 matéria está' : `${noTopics} matérias estão`} sem tópicos. Cole os itens do edital nela{noTopics === 1 ? '' : 's'}, um por linha; sem tópicos, o cronograma usa só o nome da matéria.</span></div>}
+      </div>
       <div className="grid">
-        {draft.subjects.map((s, i) => (
+        {groups.map((g) => (
+          <details key={g.name || '-'} className="block-group" open>
+            <summary>
+              <strong>{g.name || 'Sem bloco'}</strong>
+              {g.questions > 0 && <span className="badge cyan">{g.questions} questões no bloco</span>}
+              <span className="muted small">{g.items.length} matéria{g.items.length === 1 ? '' : 's'} · {g.items.reduce((n, x) => n + x.s.topics.length, 0)} tópicos</span>
+            </summary>
+            <div className="grid" style={{ marginTop: 12 }}>
+        {g.items.map(({ s, i }) => (
           <div key={i} className="glass subject-edit">
             <div className="subject-edit-head">
               <SubjectIcon name={s.name} index={i} />
@@ -128,7 +158,9 @@ export function ReviewPage() {
             </div>
             <div className="row">
               <label className="field">Bloco<input className="input" value={s.block} onChange={(e) => setSubject(i, { block: e.target.value })} /></label>
-              <label className="field" style={{ flex: '0 1 120px' }}>Questões<input className="input" type="number" min={0} value={s.questions} onChange={(e) => setSubject(i, { questions: Number(e.target.value) || 0 })} /></label>
+              <label className="field" style={{ flex: '0 1 120px' }}>Questões<input className="input" type="number" min={0} value={s.questions} onChange={(e) => setSubject(i, { questions: Number(e.target.value) || 0 })} />
+                {!s.questions && <span className="faint small">0 = só o total do bloco</span>}
+              </label>
               <label className="field" style={{ flex: '0 1 200px' }}>Peso
                 <select className="select" value={s.weight} onChange={(e) => setSubject(i, { weight: Number(e.target.value) })}>
                   {[1, 2, 3, 4, 5].map((w) => <option key={w} value={w}>{w}{w === 1 ? ' · pouco cobrada' : w === 5 ? ' · muito cobrada' : ''}</option>)}
@@ -136,8 +168,11 @@ export function ReviewPage() {
               </label>
               <label className="check"><input type="checkbox" checked={s.core} onChange={(e) => setSubject(i, { core: e.target.checked })} /> Específica do cargo</label>
             </div>
-            <details>
-              <summary className="muted" style={{ cursor: 'pointer' }}>{s.topics.length} tópico(s) do conteúdo programático</summary>
+            <details open={!s.topics.length}>
+              <summary className="muted" style={{ cursor: 'pointer' }}>
+                {s.topics.length ? `${s.topics.length} tópico(s) do conteúdo programático` : <span className="error">Nenhum tópico lido: cole os itens do edital abaixo, um por linha</span>}
+                {summarizedSubjects.has(s.name) && <span className="badge orange" style={{ marginLeft: 8 }}>resumidos pela IA: confira com o PDF</span>}
+              </summary>
               <textarea className="textarea" style={{ marginTop: 10, minHeight: 160 }} aria-label={`Tópicos de ${s.name}`}
                 value={s.topics.map((t) => t.text).join('\n')}
                 onChange={(e) => {
@@ -147,6 +182,9 @@ export function ReviewPage() {
                 }} />
             </details>
           </div>
+        ))}
+            </div>
+          </details>
         ))}
         <button className="btn ghost" style={{ justifySelf: 'start' }}
           onClick={() => set({ subjects: [...draft.subjects, { name: 'Nova matéria', block: '', questions: 0, core: false, weight: 2, topics: [] }] })}>
