@@ -272,7 +272,7 @@ function Result({ answer, passPct, history, onOpen, refresh }: {
         <div style={{ marginTop: 8 }}><strong>Linguagem:</strong> {r.criterios.linguagem.comentario}</div>
         {!!r.pontos_fortes.length && <div style={{ marginTop: 8 }}><strong>Pontos fortes:</strong> {r.pontos_fortes.join(' ')}</div>}
       </div>
-      {!!r.unverified.length && <p className="muted small" style={{ margin: 0 }}>Não conferido na lei seca: {r.unverified.join(', ')}. Confira antes de usar.</p>}
+      {!!r.unverified.length && <p className="faint small" style={{ margin: 0 }}>Confira os artigos citados em fontes oficiais.</p>}
 
       <details className="glass card"><summary>Sua resposta</summary><p className="disc-text">{answer.body}</p></details>
       <details className="glass card"><summary>Resposta modelo</summary><p className="disc-text">{r.resposta_modelo}</p></details>

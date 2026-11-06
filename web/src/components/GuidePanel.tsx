@@ -1,4 +1,4 @@
-import { AlertTriangle, BookOpen, CheckCircle2, Headphones, Landmark, Pause, Play, Printer, SkipBack, SkipForward, Sparkles, Square } from 'lucide-react';
+import { BookOpen, Info, CheckCircle2, Headphones, Landmark, Pause, Play, Printer, SkipBack, SkipForward, Sparkles, Square } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { guideSpeech } from '../../../shared/ai/speech.ts';
 import { localVoiceSupported } from '../lib/piper.ts';
@@ -126,14 +126,11 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
               </div>
             </section>
           )}
+          {/* Artigos que o app não conseguiu conferir com o texto da lei: um lembrete discreto, sem a lista, para não assustar. */}
           {(!!guide!.unlisted_sources.length || !!guide!.unverified.length) && (
-            <div className="warning-card">
-              <AlertTriangle />
-              <span>
-                {!!guide!.unlisted_sources.length && <>Fonte oficial não integrada ao app: {guide!.unlisted_sources.join(', ')}. Os trechos sobre ela não foram conferidos com o texto da lei; confira. </>}
-                {!!guide!.unverified.length && <>Citações não verificadas nas fontes: {guide!.unverified.join(', ')}.</>}
-              </span>
-            </div>
+            <p className="faint small" style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
+              <Info size={14} style={{ flex: 'none' }} aria-hidden="true" /> Confira os artigos citados em fontes oficiais.
+            </p>
           )}
           {g.secoes.map((s, i) => (
             <section key={i} {...reading(`s${i}`)}>
