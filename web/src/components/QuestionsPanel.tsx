@@ -73,8 +73,9 @@ export function QuestionsPanel({ source, goal = 0, answered = 0, paged = false }
     try {
       // Cada questão nova custa créditos: a busca livre traz só o que a página vai mostrar.
       // Na revisão semanal, os erros já mostrados não voltam no mesmo lote.
-      // Tarefa do cronograma: abre com 1 questão (as do aquecimento vêm todas) e o resto chega em segundo plano.
-      const r = source.kind === 'task' ? await nextQuestions(source.taskId, initial ? 1 : 5, queueRef.current.map((q) => q.qid), 5)
+      // Tarefa do cronograma: uma questão por vez (as do aquecimento vêm todas no começo). Enquanto o estudante responde
+      // uma, chega só a seguinte: questão que ele não vai abrir não gasta créditos.
+      const r = source.kind === 'task' ? await nextQuestions(source.taskId, 1, queueRef.current.map((q) => q.qid), 5)
         : source.kind === 'free' ? await searchFree(source.filters, Math.max(sizeRef.current, 5), queueRef.current.map((q) => q.qid))
         : source.kind === 'id' ? await questionById(source.qid)
         : { ...(await reviewDue(20)), reason: 'revisao' as string | null };
@@ -87,8 +88,10 @@ export function QuestionsPanel({ source, goal = 0, answered = 0, paged = false }
     } catch (e) { setError((e as Error).message); } finally { setLoading(false); fetching.current = false; }
   }, [srcKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void load(true); }, [load]);
-  // Com uma por página, deixa folga para a próxima abrir na hora; com mais, só carrega ao faltar questão na página.
-  useEffect(() => { if (queue.length && queue.length < idx + pageSize + (pageSize === 1 ? 2 : 0) && !reason) void load(); }, [idx, pageSize, queue.length, reason, load]);
+  // Com uma por página, deixa a próxima pronta para abrir na hora (na tarefa, só ela; na busca livre, até 2); com mais, só
+  // carrega ao faltar questão na página.
+  const ahead = pageSize > 1 ? 0 : source.kind === 'task' ? 1 : 2;
+  useEffect(() => { if (queue.length && queue.length < idx + pageSize + ahead && !reason) void load(); }, [idx, pageSize, ahead, queue.length, reason, load]);
 
   // Avançar além do que já veio dispara a busca acima: a próxima página só gasta créditos se for aberta. Se não vier nada, volta.
   useEffect(() => { if (reason && queue.length && idx >= queue.length) setIdx(Math.floor((queue.length - 1) / pageSize) * pageSize); }, [reason, idx, queue.length, pageSize]);
