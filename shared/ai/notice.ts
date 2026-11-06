@@ -223,8 +223,21 @@ export function topicInText(topic: string, haystack: string): boolean {
   return hits / windows.length >= 0.6;
 }
 
+// PDF que é só a retificação ("onde se lê… leia-se…"), e não o edital completo: texto curto com as marcas de alteração e
+// leitura quase sem conteúdo programático. O app não aplica a retificação a um edital já lido; o candidato envia o edital
+// completo, de preferência a versão consolidada.
+const AMENDMENT_MARKS = /\bonde se le\b.{0,400}\bleia se\b|\bficam? retificad[oa]s?\b|\bpassam? a vigorar com a seguinte redacao\b|\bretificar? o edital\b|\bedital de retificacao\b/s;
+export const AMENDMENT_MAX_CHARS = 30000, AMENDMENT_MAX_TOPICS = 5;
+export function looksLikeAmendmentOnly(e: Pick<NoticeExtraction, 'subjects'>, pdfText: string | null) {
+  if (!pdfText) return false;
+  const t = normalizeText(pdfText);
+  const topics = e.subjects.reduce((n, s) => n + s.topics.length, 0);
+  return t.length <= AMENDMENT_MAX_CHARS && topics <= AMENDMENT_MAX_TOPICS && AMENDMENT_MARKS.test(t);
+}
+
 export function checkNotice(e: NoticeExtraction, pdfText: string | null, today = new Date()): NoticeWarning[] {
   const out: NoticeWarning[] = [];
+  if (looksLikeAmendmentOnly(e, pdfText)) out.push({ code: 'amendment_only', message: 'Este PDF parece ser só a retificação de um edital, e não o edital completo. Envie o edital completo, de preferência a versão consolidada, que já inclui a retificação.' });
   if (!e.examDate) out.push({ code: 'exam_date_missing', message: 'O edital não informa a data da prova (ou ela não foi encontrada). Defina a data para gerar o cronograma.' });
   else if (new Date(e.examDate + 'T12:00:00') < today) out.push({ code: 'exam_date_past', message: `A prova (${e.examDate.split('-').reverse().join('/')}) já foi realizada: este edital não está aberto. Você pode continuar, e o plano não terá prazo, adaptando-se ao seu desempenho.` });
   const names = new Set<string>();
