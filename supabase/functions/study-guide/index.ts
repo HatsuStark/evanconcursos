@@ -7,7 +7,8 @@
 // Reaproveita apostilas idênticas (mesmo tema, fontes e profundidade) entre sessões e estudantes.
 // Não há "gerar de novo" pelo estudante (economia de créditos): uma apostila existente é sempre reaproveitada.
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide, guideCacheKey, guidePracticeJsonSchema, GuidePractice, GuideText, guideTextJsonSchema, guideVersion, guideJsonSchema, guidePrompt, mergeGuide, partialGuide, lawKeys, pickSimilarGuide, topicKeys, trimReview, unlistedLaws, verifyGuide, type BoardQuestion, type GuideDepth } from '../../../shared/ai/guide.ts';
+import type { z } from 'zod';
+import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide, guideCacheKey, GuideExtras, guideExtrasJsonSchema, GuideOutline, guideOutlineJsonSchema, GuideSections, guideSectionsJsonSchema, guideStage, mergeReviewHalves, reviewHalfJsonSchema, ReviewHalves, reviewStage, sectionGroups, textFromOutline, guidePracticeJsonSchema, GuidePractice, GuideText, guideTextJsonSchema, guideVersion, guidePrompt, mergeGuide, partialGuide, lawKeys, pickSimilarGuide, topicKeys, trimReview, unlistedLaws, verifyGuide, type BoardQuestion, type GuideDepth } from '../../../shared/ai/guide.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient } from '../../../shared/qbank/client.ts';
 import { materiaOf, measureIncidence, QMAP_PROMPT_VERSION } from '../../../shared/qbank/map.ts';
@@ -125,7 +126,7 @@ async function boardEvidence(admin: Admin, ownerId: string, ctx: GuideContext): 
 async function generate(admin: Admin, ownerId: string, jobId: string, ctx: GuideContext) {
   const { input, key, articles, cargo, duties, otherRoles } = ctx;
   const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash', started = Date.now();
-  let usage: GeminiUsage | null = null, text: GuideText | null = null;
+  let usage: GeminiUsage | null = null, text: GuideText | null = null, split = false;
   const apiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
   const add = (u: GeminiUsage) => { usage = usage ? { inputTokens: usage.inputTokens + u.inputTokens, outputTokens: usage.outputTokens + u.outputTokens, thinkingTokens: usage.thinkingTokens + u.thinkingTokens } : u; };
   const save = async (content: Guide | (Guide & { parcial: true }), board: number) => {
@@ -139,34 +140,64 @@ async function generate(admin: Admin, ownerId: string, jobId: string, ctx: Guide
   };
   // Formato predominante da banca na matéria: as questões de fixação seguem ele.
   const format = async () => String((await admin.from('qbank_subject_maps').select('banca_tipo').eq('subject_id', ctx.subjectId).maybeSingle()).data?.banca_tipo ?? '');
+  const ask = <T,>(schema: z.ZodType<T>, jsonSchema: unknown, stage?: string) => generateJson({ apiKey, model, schema, jsonSchema, temperature: 0.3, thinkingLevel: GUIDE_THINKING,
+    parts: [{ text: guidePrompt({ ...input, cargo, duties, otherRoles, part: 'texto', stage }) }] }).then((r) => { add(r.usage); return r.data; });
+  // Texto da apostila em partes: o roteiro aparece na hora e cada parte é gravada quando fica pronta (as gravações vão em
+  // fila, para uma não passar a outra). Sem roteiro, ou sem nenhuma seção escrita, volta ao texto numa chamada só.
+  const writeText = async (): Promise<GuideText> => {
+    const outline = await ask(GuideOutline, guideOutlineJsonSchema(), guideStage({ kind: 'roteiro' })).catch((e) => { console.error('roteiro:', e); return null; });
+    if (!outline?.secoes.length) return await ask(GuideText, guideTextJsonSchema());
+    split = true;
+    const state = textFromOutline(outline), pending = new Set(outline.secoes.map((_, i) => i));
+    let queue = Promise.resolve();
+    const show = () => { queue = queue.then(() => save(partialGuide(state, [...pending]), 0)).catch((e) => console.error('parcial:', e)); };
+    show();
+    const sections = sectionGroups(outline.secoes.length).map((indices) =>
+      ask(GuideSections, guideSectionsJsonSchema(), guideStage({ kind: 'secoes', outline, indices })).then((r) => {
+        indices.forEach((i, k) => { const x = r.secoes[k]; if (x?.texto.trim()) state.secoes[i] = { ...state.secoes[i]!, texto: x.texto, exemplos: x.exemplos ?? [] }; });
+      }).catch((e) => console.error('seções', indices, e)).finally(() => { indices.forEach((i) => pending.delete(i)); show(); }));
+    const extras = ask(GuideExtras, guideExtrasJsonSchema(), guideStage({ kind: 'extras', outline })).then((r) => {
+      state.quadros = r.quadros; state.legislacao = r.legislacao; show();
+    }).catch((e) => console.error('quadros e lei:', e));
+    await Promise.all([...sections, extras]);
+    await queue;
+    // Seção que falhou sai da apostila; sem nenhuma, a apostila é escrita de novo numa chamada só.
+    state.secoes = state.secoes.filter((x) => x.texto.trim());
+    return state.secoes.length ? state : await ask(GuideText, guideTextJsonSchema());
+  };
   try {
     if (input.depth === 'revisao') {
-      // A revisão não tem seções, então não tem "como a banca cobra": não compra questões da banca. Sai numa etapa só.
-      const r = await generateJson({ apiKey, model, schema: Guide, jsonSchema: guideJsonSchema(), temperature: 0.3,
-        parts: [{ text: guidePrompt({ ...input, cargo, boardQuestions: [], format: await format(), duties, otherRoles }) }] });
-      add(r.usage);
-      await save(trimReview(r.data), 0);
+      // A revisão não tem seções, então não tem "como a banca cobra": não compra questões da banca. Sai em duas metades
+      // paralelas; a primeira que chega já aparece na tela.
+      const base = { ...input, cargo, boardQuestions: [], format: await format(), duties, otherRoles };
+      const halves: [Partial<Guide> | null, Partial<Guide> | null] = [null, null];
+      let shown = Promise.resolve();
+      const half = (i: 0 | 1) => generateJson({ apiKey, model, schema: ReviewHalves[i] as z.ZodType<Partial<Guide>>, jsonSchema: reviewHalfJsonSchema(i), temperature: 0.3, thinkingLevel: GUIDE_THINKING,
+        parts: [{ text: guidePrompt({ ...base, stage: reviewStage(i) }) }] }).then((r) => {
+        add(r.usage);
+        halves[i] = r.data;
+        if (!halves[1 - i]) shown = shown.then(() => save({ ...trimReview(mergeReviewHalves(halves[0] ?? {}, halves[1] ?? {})), parcial: true }, 0)).catch(() => {});
+      });
+      const results = await Promise.allSettled([half(0), half(1)]);
+      await shown;
+      if (results.every((r) => r.status === 'rejected')) throw (results[0] as PromiseRejectedResult).reason;
+      await save(trimReview(mergeReviewHalves(halves[0] ?? {}, halves[1] ?? {})), 0);
     } else {
-      // Duas chamadas em paralelo, com raciocínio baixo (o tempo é de escrita): o texto começa na hora; a prática, quando
-      // as questões da banca chegam. O texto pronto é gravado e aparece na tela enquanto a prática termina.
-      let practiceDone = false;
+      // Prática em paralelo, com raciocínio baixo (o tempo é de escrita): começa quando as questões da banca chegam.
       const practice = boardEvidence(admin, ownerId, ctx).then(async (boardQuestions) => {
         const p = await generateJson({ apiKey, model, schema: GuidePractice, jsonSchema: guidePracticeJsonSchema(), temperature: 0.3, thinkingLevel: GUIDE_THINKING,
           parts: [{ text: guidePrompt({ ...input, cargo, boardQuestions, format: await format(), duties, otherRoles, part: 'pratica' }) }] });
         add(p.usage);
         return { data: p.data, board: boardQuestions.length };
-      }).finally(() => { practiceDone = true; });
+      });
       practice.catch(() => {}); // a falha é tratada no await abaixo
-      const t = await generateJson({ apiKey, model, schema: GuideText, jsonSchema: guideTextJsonSchema(), temperature: 0.3, thinkingLevel: GUIDE_THINKING,
-        parts: [{ text: guidePrompt({ ...input, cargo, duties, otherRoles, part: 'texto' }) }] });
-      add(t.usage);
-      text = t.data;
-      if (!practiceDone) await save(partialGuide(text), 0);
+      text = await writeText();
       const p = await practice;
       await save(mergeGuide(text, p.data), p.board);
     }
     await admin.from('ai_jobs').update({ status: 'succeeded', finished_at: new Date().toISOString() }).eq('id', jobId);
-    await logUsage(admin, { ownerId, jobId, operation: 'study_guide', model, promptVersion: guideVersion(input.depth), usage, latencyMs: Date.now() - started, status: 'ok' });
+    // "+partes": escrita em partes (a chave do cache continua a da versão do prompt, para não refazer as apostilas já feitas).
+    await logUsage(admin, { ownerId, jobId, operation: 'study_guide', model, promptVersion: `${guideVersion(input.depth)}${split || input.depth === 'revisao' ? '+partes' : ''}`, usage, latencyMs: Date.now() - started, status: 'ok' });
   } catch (err) {
     if (err instanceof GeminiError && err.usage) add(err.usage);
     // Prática falhou com o texto já gravado: a apostila fica só com o texto, sem esperar mais.

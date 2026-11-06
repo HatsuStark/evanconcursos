@@ -72,12 +72,76 @@ export const GuidePractice = Guide.pick({ memorizar: true, pontos_banca: true, p
     .describe('Como a banca cobra cada assunto do tema, pelo que se vê nas questões fornecidas, em até 2 frases por assunto. Só assuntos que alguma questão trata; vazio sem questões.') });
 export type GuidePractice = z.infer<typeof GuidePractice>;
 export const guideTextJsonSchema = () => z.toJSONSchema(GuideText, { target: 'draft-7' });
+
+// ---------- escrita em partes (completa e aprofundamento) ----------
+// O tempo é quase todo de escrita (~150 tokens/s): o texto inteiro numa chamada levava 30 s ou mais antes de aparecer.
+// Primeiro um roteiro curto (título, introdução, objetivos, mapa e a lista de seções com o que cada uma cobre), que aparece
+// na hora; depois, em paralelo, a 1ª seção sozinha (para o aluno começar logo), as demais em dois grupos e os quadros com
+// a lei comentada. O roteiro vai em todas as chamadas, para as seções não repetirem nem deixarem buraco.
+export const GuideOutline = Guide.pick({ titulo: true, introducao: true, objetivos: true, esquema: true }).extend({
+  secoes: z.array(z.object({
+    titulo: z.string(),
+    prioridade: Secao.shape.prioridade,
+    cobre: z.string().describe('O que a seção explica, em 1 frase: os pontos e os artigos dela.'),
+  })).describe('3 a 6 seções, na ordem didática.'),
+});
+export type GuideOutline = z.infer<typeof GuideOutline>;
+export const GuideSections = z.object({ secoes: z.array(Secao.pick({ titulo: true, texto: true, exemplos: true })).describe('Só as seções pedidas, na ordem pedida.') });
+export type GuideSections = z.infer<typeof GuideSections>;
+export const GuideExtras = GuideText.pick({ quadros: true, legislacao: true });
+export type GuideExtras = z.infer<typeof GuideExtras>;
+export const guideOutlineJsonSchema = () => z.toJSONSchema(GuideOutline, { target: 'draft-7' });
+export const guideSectionsJsonSchema = () => z.toJSONSchema(GuideSections, { target: 'draft-7' });
+export const guideExtrasJsonSchema = () => z.toJSONSchema(GuideExtras, { target: 'draft-7' });
+
+// A 1ª seção sozinha; as demais em até dois grupos, para nenhum ficar muito maior que o outro.
+export function sectionGroups(n: number): number[][] {
+  if (n <= 0) return [];
+  const rest = Array.from({ length: n - 1 }, (_, i) => i + 1), half = Math.ceil(rest.length / 2);
+  return [[0], rest.slice(0, half), rest.slice(half)].filter((g) => g.length);
+}
+
+const outlineText = (o: GuideOutline) => o.secoes.map((x, i) => `${i + 1}. ${x.titulo} (prioridade ${x.prioridade}): ${x.cobre}`).join('\n');
+export function guideStage(step: { kind: 'roteiro' } | { kind: 'secoes'; outline: GuideOutline; indices: number[] } | { kind: 'extras'; outline: GuideOutline }): string {
+  if (step.kind === 'roteiro') return 'Nesta etapa, faça só o roteiro da apostila: título, introdução, objetivos, mapa mental e a lista de seções, cada uma com título, prioridade e o que ela cobre em 1 frase (com os artigos dela, se houver). Não escreva o texto das seções: ele vem nas etapas seguintes, a partir deste roteiro.';
+  const roteiro = `Roteiro já definido da apostila "${step.outline.titulo}":\n${outlineText(step.outline)}`;
+  if (step.kind === 'extras') return `${roteiro}\nNesta etapa, faça só os quadros comparativos e a lei seca comentada desse tema. As seções são escritas em separado.`;
+  const wanted = step.indices.map((i) => `${i + 1}. ${step.outline.secoes[i]!.titulo}`).join('; ');
+  return `${roteiro}\nNesta etapa, escreva só ${step.indices.length === 1 ? 'a seção' : 'as seções'} ${wanted}, com o título exatamente como no roteiro: texto e exemplos, cobrindo o que o roteiro diz. Tamanho de seção de apostila: 2 a 4 parágrafos curtos e 1 ou 2 exemplos; seção de prioridade baixa, 1 ou 2 parágrafos. As outras seções são escritas em separado: não escreva o conteúdo delas nem o repita.${step.indices[0] === 0 ? ' Esta é a primeira seção: comece da base do tema.' : ''}`;
+}
+
+// Junta o roteiro com o que já foi escrito: seção sem texto ainda é pendente.
+export function textFromOutline(o: GuideOutline): GuideText {
+  return { titulo: o.titulo, introducao: o.introducao, objetivos: o.objetivos, esquema: o.esquema, quadros: [], legislacao: [],
+    secoes: o.secoes.map((x) => ({ titulo: x.titulo, prioridade: x.prioridade, texto: '', exemplos: [] })) };
+}
+
+// Revisão curta em duas metades paralelas, cada uma com a metade dos campos.
+export const REVIEW_HALVES = [
+  { fields: ['titulo', 'introducao', 'esquema', 'memorizar', 'mnemonicos', 'gatilhos'], label: 'título, introdução, mapa mental, o que memorizar, mnemônicos e gatilhos de prova' },
+  { fields: ['quadros', 'legislacao', 'pontos_banca', 'pegadinhas', 'resumo', 'perguntas'], label: 'quadro, lei seca comentada, o que mais cai, pegadinhas, resumo e perguntas de recordação' },
+] as const;
+// Cada metade tem o próprio schema, só com os seus campos: pedir "deixe vazios os outros" não bastava (a IA escrevia a
+// revisão inteira nas duas e não ganhava tempo).
+export const ReviewHalves = [
+  Guide.pick({ titulo: true, introducao: true, esquema: true, memorizar: true, mnemonicos: true, gatilhos: true }),
+  Guide.pick({ quadros: true, legislacao: true, pontos_banca: true, pegadinhas: true, resumo: true, perguntas: true, depende_legislacao: true }),
+] as const;
+export const reviewHalfJsonSchema = (half: 0 | 1) => z.toJSONSchema(ReviewHalves[half], { target: 'draft-7' });
+export const reviewStage = (half: 0 | 1) => `Nesta etapa, preencha só: ${REVIEW_HALVES[half].label}. O resto da revisão é feito em separado.`;
+// Junta as duas metades: cada campo vem da metade responsável por ele.
+export function mergeReviewHalves(a: Partial<Guide>, b: Partial<Guide>): Guide {
+  const pick = (g: Partial<Guide>, half: 0 | 1) => Object.fromEntries(REVIEW_HALVES[half].fields.map((f) => [f, g[f as keyof Guide]]));
+  return { titulo: '', introducao: '', objetivos: [], esquema: [], secoes: [], quadros: [], legislacao: [], memorizar: [], mnemonicos: [], gatilhos: [], pontos_banca: [], pegadinhas: [],
+    resumo: [], questoes: [], perguntas: [], depende_legislacao: !!(a.depende_legislacao || b.depende_legislacao), ...pick(a, 0), ...pick(b, 1) } as Guide;
+}
 export const guidePracticeJsonSchema = () => z.toJSONSchema(GuidePractice, { target: 'draft-7' });
 
-// Prática ainda chegando: os campos dela vazios, e `parcial` avisa a tela para continuar esperando.
-export function partialGuide(t: GuideText): Guide & { parcial: true } {
+// Prática ainda chegando: os campos dela vazios, e `parcial` avisa a tela para continuar esperando. `pendentes`: seções do
+// roteiro ainda sendo escritas (a tela mostra o título com "escrevendo").
+export function partialGuide(t: GuideText, pendentes: number[] = []): Guide & { parcial: true; pendentes?: number[] } {
   return { ...t, secoes: t.secoes.map((x) => ({ ...x, como_banca_cobra: '' })), memorizar: [], mnemonicos: [], gatilhos: [], pontos_banca: [], pegadinhas: [], resumo: [],
-    questoes: [], perguntas: [], depende_legislacao: false, parcial: true };
+    questoes: [], perguntas: [], depende_legislacao: false, parcial: true, ...(pendentes.length ? { pendentes } : {}) };
 }
 // Cada "como a banca cobra" vai para a seção que mais compartilha palavras com o assunto (título pesa em dobro); sem
 // palavra em comum, fica de fora. Uma seção recebe no máximo um.
@@ -188,10 +252,11 @@ const REVIEW_RULES = `- Revisão curta: nada de texto corrido nem questões de f
 // duties/otherRoles: atribuições do cargo no edital e os outros cargos dele, para a apostila não descrever outro cargo.
 // part: na completa e no aprofundamento, 'texto' (sem as questões da banca) ou 'pratica'; a revisão curta sai numa
 // chamada só.
-export function guidePrompt(p: { depth: GuideDepth; banca: string; cargo: string; subject: string; title: string; topics: string[]; law: GuideSource[]; boardQuestions?: BoardQuestion[]; format?: string; duties?: string; otherRoles?: string[]; part?: 'texto' | 'pratica' }) {
+// stage: instrução da etapa quando o texto é escrito em partes (guideStage, reviewStage); substitui a da parte.
+export function guidePrompt(p: { depth: GuideDepth; banca: string; cargo: string; subject: string; title: string; topics: string[]; law: GuideSource[]; boardQuestions?: BoardQuestion[]; format?: string; duties?: string; otherRoles?: string[]; part?: 'texto' | 'pratica'; stage?: string }) {
   const full = p.depth !== 'revisao', deep = p.depth === 'aprofundamento', board = p.boardQuestions ?? [], ce = /certo/i.test(p.format ?? '');
   const texto = !full || p.part !== 'pratica', pratica = !full || p.part !== 'texto';
-  const step = !full ? '' : p.part === 'texto'
+  const step = p.stage ? p.stage : !full ? '' : p.part === 'texto'
     ? 'Nesta parte, escreva só o texto da apostila (título, introdução, objetivos, mapa, seções, quadros e lei comentada). Questões de fixação, perguntas, pegadinhas e o resto são feitos em separado.'
     : p.part === 'pratica' ? 'Nesta parte, o texto explicativo é feito em separado: monte só a prática e a revisão do tema (o que memorizar, o que mais cai, pegadinhas, resumo, questões de fixação, perguntas e como a banca cobra cada assunto), cobrindo os pontos principais do tema e dos trechos de lei.' : '';
   return `Você é professor especialista em concursos públicos brasileiros, autor de material de cursinho que aprova. ${deep ? 'Escreva o aprofundamento do tema para quem já estudou a base e quer subir o acerto (cerca de 20 minutos de leitura antes de questões difíceis).' : full ? 'Escreva uma apostila completa, para quem está começando o tema (cerca de 20 minutos de leitura antes de resolver questões).' : 'Monte a revisão curta do tema: uma folha de memorização para quem já estudou (cerca de 5 minutos), sem texto corrido.'}${step ? ` ${step}` : ''}

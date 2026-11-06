@@ -173,3 +173,34 @@ describe('apostila em duas partes', () => {
     expect(Guide.safeParse(g).success).toBe(true);
   });
 });
+
+describe('apostila em partes', () => {
+  it('1ª seção sozinha e as demais em até dois grupos', async () => {
+    const { sectionGroups } = await import('./guide.ts');
+    expect(sectionGroups(1)).toEqual([[0]]);
+    expect(sectionGroups(3)).toEqual([[0], [1], [2]]);
+    expect(sectionGroups(6)).toEqual([[0], [1, 2, 3], [4, 5]]);
+    expect(sectionGroups(0)).toEqual([]);
+  });
+  it('as etapas levam o roteiro e pedem só a sua parte', async () => {
+    const { guideStage, textFromOutline, partialGuide } = await import('./guide.ts');
+    const outline = { titulo: 'Crase', introducao: 'i', objetivos: [], esquema: [], secoes: [
+      { titulo: 'Regra geral', prioridade: 'alta' as const, cobre: 'a + a' }, { titulo: 'Casos proibidos', prioridade: 'media' as const, cobre: 'antes de verbo' }] };
+    const st = guideStage({ kind: 'secoes', outline, indices: [1] });
+    expect(st).toMatch(/1\. Regra geral \(prioridade alta\): a \+ a/);
+    expect(st).toMatch(/escreva só a seção 2\. Casos proibidos/);
+    expect(st).not.toMatch(/primeira seção/);
+    expect(guideStage({ kind: 'secoes', outline, indices: [0] })).toMatch(/primeira seção/);
+    expect(guideStage({ kind: 'roteiro' })).toMatch(/Não escreva o texto das seções/);
+    const t = textFromOutline(outline);
+    expect(t.secoes.map((x) => x.texto)).toEqual(['', '']);
+    expect(partialGuide(t, [0, 1])).toMatchObject({ parcial: true, pendentes: [0, 1] });
+    expect(partialGuide(t)).not.toHaveProperty('pendentes');
+  });
+  it('revisão: cada campo vem da metade responsável', async () => {
+    const { mergeReviewHalves } = await import('./guide.ts');
+    const g = mergeReviewHalves({ titulo: 'A', memorizar: ['m'], resumo: ['não é desta metade'] }, { titulo: 'B', resumo: ['r'], perguntas: [{ pergunta: 'p', resposta: 'r' }] });
+    expect(g).toMatchObject({ titulo: 'A', memorizar: ['m'], resumo: ['r'], secoes: [], questoes: [] });
+    expect(g.perguntas).toHaveLength(1);
+  });
+});

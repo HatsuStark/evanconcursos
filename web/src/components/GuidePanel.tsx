@@ -18,15 +18,16 @@ interface GuideContent {
   perguntas: { pergunta: string; resposta: string }[];
   depende_legislacao: boolean;
   perfil_banca?: { banca: string; questoes: number } | null;
-  parcial?: boolean; // só o texto: a prática (questões, revisão, pegadinhas) ainda está sendo escrita
+  parcial?: boolean; // ainda sendo escrita: chega em partes (roteiro, seções, quadros e lei, prática)
+  pendentes?: number[]; // seções do roteiro ainda sendo escritas
 }
 interface GuideRow { content: GuideContent; sources: string[]; unlisted_sources: string[]; unverified: string[]; model: string; created_at: string; depth: string }
 
-const POLL_MS = 4000, GIVE_UP_MS = 3 * 60 * 1000; // igual ao da função: depois disso a geração foi interrompida
+const POLL_MS = 2500, GIVE_UP_MS = 3 * 60 * 1000; // igual ao da função: depois disso a geração foi interrompida
 
 // Sem "gerar de novo" (economia de créditos): a apostila existente é sempre reaproveitada.
 // A geração roda em segundo plano no servidor; aqui só espera. null se a espera foi cancelada.
-// O texto chega antes da prática: `onPartial` mostra a apostila enquanto a espera continua.
+// A apostila chega em partes (o roteiro em segundos, depois as seções): `onPartial` mostra o que já existe enquanto a espera continua.
 async function fetchGuide(taskId: string, depth: string, cancelled: () => boolean, onPartial: (g: GuideRow) => void) {
   const giveUp = Date.now() + GIVE_UP_MS;
   for (let poll = false; !cancelled(); poll = true) {
@@ -98,12 +99,13 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
         </div>
         {g && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {voice.status === 'idle' && <button className="btn ghost sm" onClick={voice.play}><Headphones size={15} /> Ouvir</button>}
+            {/* Seções ainda em escrita: o áudio sairia só com os títulos. */}
+            {voice.status === 'idle' && !g.pendentes?.length && <button className="btn ghost sm" onClick={voice.play}><Headphones size={15} /> Ouvir</button>}
             <button className="btn ghost sm" onClick={() => window.print()}><Printer size={15} /> Imprimir / PDF</button>
           </div>
         )}
       </div>
-      {loading && <div className="glass card" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> Montando a apostila com base no edital e na lei seca… (cerca de 30 segundos na primeira vez; pode sair desta tela, ela continua sendo feita)</div>}
+      {loading && <div className="glass card" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> Montando a apostila com base no edital e na lei seca… (o começo aparece em alguns segundos; pode sair desta tela, ela continua sendo feita)</div>}
       {error && <div className="glass card"><p className="error" style={{ margin: 0 }}>{error}</p><button className="btn sm" style={{ marginTop: 10 }} onClick={() => load()}>Tentar de novo</button></div>}
       {g && !loading && (
         <article ref={article} className="glass guide printable">
@@ -135,6 +137,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
           {g.secoes.map((s, i) => (
             <section key={i} {...reading(`s${i}`)}>
               <h3>{s.titulo}{s.prioridade === 'alta' && <span className="badge orange" style={{ marginLeft: 8, verticalAlign: 2 }}>cai muito</span>}</h3>
+              {g.pendentes?.includes(i) && !s.texto && <p className="muted small" style={{ display: 'flex', gap: 8, alignItems: 'center' }}><span className="spinner" /> Escrevendo esta seção…</p>}
               {paragraphs(s.texto).map((p, j) => <p key={j}>{p}</p>)}
               {!!s.exemplos.length && <div className="guide-examples">{s.exemplos.map((e, j) => <p key={j}><b>Exemplo:</b> {e}</p>)}</div>}
               {s.como_banca_cobra && g.perfil_banca && (
@@ -168,7 +171,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
               <ul>{g.legislacao.map((l, i) => <li key={i}><b>{l.ref}:</b> {l.comentario}</li>)}</ul>
             </section>
           )}
-          {g.parcial && <div className="glass card no-print" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> Escrevendo o que memorizar, pegadinhas, resumo e questões de fixação… Pode ir lendo; eles aparecem aqui em instantes.</div>}
+          {g.parcial && <div className="glass card no-print" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> {g.secoes.length ? 'Escrevendo o restante: quadros, lei comentada, o que memorizar, pegadinhas e questões de fixação…' : 'Escrevendo o restante da revisão…'} Pode ir lendo; aparece aqui em instantes.</div>}
           {!!g.memorizar?.length && <section {...reading('memorizar')} className={'guide-memo' + (voice.activeKey === 'memorizar' ? ' speaking' : '')}><h3>Para memorizar</h3><ul>{g.memorizar.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
           {!!g.pontos_banca.length && <section {...reading('banca')}><h3>O que mais cai</h3><ul>{g.pontos_banca.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
           {!!g.pegadinhas.length && <section data-voice="pegadinhas" className={'guide-traps' + (voice.activeKey === 'pegadinhas' ? ' speaking' : '')}><h3>Pegadinhas</h3><ul>{g.pegadinhas.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
