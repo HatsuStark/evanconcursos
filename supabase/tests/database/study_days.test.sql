@@ -18,6 +18,16 @@ insert into public.question_attempts (owner_id, plan_id, qid, chosen, correct, c
   ('00000000-0000-4000-8000-0000000000ad', 'c2000000-0000-4000-8000-000000000001', 'q1', 'A', true, now()),
   ('00000000-0000-4000-8000-0000000000ad', 'c2000000-0000-4000-8000-000000000001', 'q2', 'B', false, now()),
   ('00000000-0000-4000-8000-0000000000ad', 'c2000000-0000-4000-8000-000000000001', 'q3', 'B', false, now() - interval '30 days');
+-- Tarefa de teoria da sessão 2: uma resposta dela e uma de aquecimento (questão da sessão 1, gravada com a sessão 1).
+insert into public.notice_subjects (id, owner_id, notice_id, name) values ('c1000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-0000000000ad', 'c0000000-0000-4000-8000-000000000001', 'Matéria');
+insert into public.study_sessions (id, owner_id, plan_version_id, subject_id, position, title) values
+  ('c4000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-0000000000ad', 'c3000000-0000-4000-8000-000000000001', 'c1000000-0000-4000-8000-000000000001', 0, 'Sessão 1'),
+  ('c4000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-0000000000ad', 'c3000000-0000-4000-8000-000000000001', 'c1000000-0000-4000-8000-000000000001', 1, 'Sessão 2');
+insert into public.tasks (id, owner_id, plan_id, date, kind, title, subject_id, session_id, created_in_version) values
+  ('c5000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-0000000000ad', 'c2000000-0000-4000-8000-000000000001', '2026-01-01', 'theory', 'Sessão 2', 'c1000000-0000-4000-8000-000000000001', 'c4000000-0000-4000-8000-000000000002', 'c3000000-0000-4000-8000-000000000001');
+insert into public.question_attempts (owner_id, plan_id, task_id, session_id, subject_id, qid, chosen, correct, created_at) values
+  ('00000000-0000-4000-8000-0000000000ad', 'c2000000-0000-4000-8000-000000000001', 'c5000000-0000-4000-8000-000000000002', 'c4000000-0000-4000-8000-000000000002', 'c1000000-0000-4000-8000-000000000001', 'q4', 'A', true, now()),
+  ('00000000-0000-4000-8000-0000000000ad', 'c2000000-0000-4000-8000-000000000001', 'c5000000-0000-4000-8000-000000000002', 'c4000000-0000-4000-8000-000000000001', 'c1000000-0000-4000-8000-000000000001', 'q5', 'A', true, now());
 
 select pg_temp.as_user('00000000-0000-4000-8000-0000000000ad');
 update public.tasks set time_spent_sec = 600 where id = 'c5000000-0000-4000-8000-000000000001';
@@ -28,7 +38,7 @@ select is((select seconds from public.study_days where day = pg_temp.today()), 9
 update public.tasks set done_at = now() where id = 'c5000000-0000-4000-8000-000000000001';
 
 select is((select seconds from public.study_activity('c2000000-0000-4000-8000-000000000001', pg_temp.today() - 7) where day = pg_temp.today()), 900, 'atividade traz o tempo do dia');
-select is((select questions from public.study_activity('c2000000-0000-4000-8000-000000000001', pg_temp.today() - 7) where day = pg_temp.today()), 2, 'atividade traz as questões do dia');
+select is((select questions from public.study_activity('c2000000-0000-4000-8000-000000000001', pg_temp.today() - 7) where day = pg_temp.today()), 3, 'atividade traz as questões do dia, sem as de aquecimento');
 select is((select tasks_done from public.study_activity('c2000000-0000-4000-8000-000000000001', pg_temp.today() - 7) where day = pg_temp.today()), 1, 'atividade traz as tarefas concluídas no dia');
 select is((select count(*) from public.study_activity('c2000000-0000-4000-8000-000000000001', pg_temp.today() - 7)), 1::bigint, 'o que veio antes de p_from fica de fora');
 select is((select count(*) from public.study_activity('c2000000-0000-4000-8000-000000000001', pg_temp.today() - 60)), 2::bigint, 'dias anteriores aparecem separados');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { studyStreak, weekDays, weeklyGoals, type DayActivity, type GoalTask } from './goals.ts';
+import { isWarmupAnswer, studyStreak, weekDays, weeklyGoals, type DayActivity, type GoalTask } from './goals.ts';
 
 // 2026-10-28 é uma quarta-feira; a semana vai de 26/10 a 01/11.
 const TODAY = '2026-10-28';
@@ -56,5 +56,18 @@ describe('weekDays', () => {
     expect(days[1]).toMatchObject({ active: false, future: false });
     expect(days[2]).toMatchObject({ isToday: true, future: false });
     expect(days[6]).toMatchObject({ rest: true, future: true });
+  });
+});
+
+describe('aquecimento fora da meta', () => {
+  const task = { id: 't1', session_id: 's2' };
+  it('resposta da sessão anterior, dada na tarefa, é aquecimento', () => {
+    expect(isWarmupAnswer({ task_id: 't1', session_id: 's1' }, task)).toBe(true);
+  });
+  it('resposta da própria sessão, de outra tarefa ou de tarefa sem sessão não é', () => {
+    expect(isWarmupAnswer({ task_id: 't1', session_id: 's2' }, task)).toBe(false);
+    expect(isWarmupAnswer({ task_id: 't9', session_id: 's1' }, task)).toBe(false);
+    expect(isWarmupAnswer({ task_id: 't1', session_id: null }, task)).toBe(false);
+    expect(isWarmupAnswer({ task_id: 't1', session_id: 's1' }, { id: 't1', session_id: null })).toBe(false);
   });
 });

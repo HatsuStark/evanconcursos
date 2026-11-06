@@ -14,6 +14,11 @@ const isActive = (a: DayActivity | undefined) => !!a && (a.seconds >= MIN_ACTIVE
 
 export const activityStart = (today: string) => addDays(today, -ACTIVITY_LOOKBACK_DAYS);
 
+// Aquecimento: resposta dada na tarefa, mas a questões da sessão anterior (gravada com a sessão de origem). Conta para o
+// desempenho daquela sessão, não para a meta de questões da tarefa nem da semana (a mesma regra está em study_activity).
+export const isWarmupAnswer = (a: { task_id: string | null; session_id: string | null }, task: { id: string; session_id: string | null }) =>
+  a.task_id === task.id && !!task.session_id && !!a.session_id && a.session_id !== task.session_id;
+
 export function weeklyGoals(tasks: GoalTask[], activity: DayActivity[], today: string) {
   const start = addDays(today, -weekdayIndex(today)), end = addDays(start, 6);
   const planned = tasks.filter((t) => t.date >= start && t.date <= end && t.kind !== 'exam');

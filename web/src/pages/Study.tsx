@@ -5,6 +5,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { evaluate, latestAnswers, questionScore, scoreGoal } from '../../../shared/domain/adaptive.ts';
 import { REVIEW_PREFIX } from '../../../shared/ai/plan-build.ts';
 import { DEEP_PREFIX, PRACTICE_PREFIX } from '../../../shared/ai/plan.ts';
+import { isWarmupAnswer } from '../../../shared/domain/goals.ts';
 import { videoQuery } from '../../../shared/domain/videos.ts';
 import { GuidePanel } from '../components/GuidePanel.tsx';
 import { LawReader } from '../components/LawReader.tsx';
@@ -77,7 +78,8 @@ function StudyView({ d }: { d: StudyData }) {
   const [tab, setTab] = useState<TabKey>(d.task.kind === 'lei_seca' && tabs.some((t) => t.key === 'lei') ? 'lei' : tabs[0]!.key);
   const [videosOpened, setVideosOpened] = useState(false);
   const color = d.subjectIndex >= 0 ? subjectColor(d.subjectIndex) : 'var(--magenta)';
-  const mine = latestAnswers(d.attempts.filter((a) => a.task_id === d.task.id));
+  // Meta e desempenho da tarefa: as questões de aquecimento (da sessão anterior) ficam de fora.
+  const mine = latestAnswers(d.attempts.filter((a) => a.task_id === d.task.id && !isWarmupAnswer(a, d.task)));
   const right = mine.filter((a) => a.correct).length;
   const verdict = evaluate(mine.length ? right / mine.length : null, scoreGoal(d.cutoffPct));
   const score = questionScore(right, mine.length, d.task.goal_questions);
