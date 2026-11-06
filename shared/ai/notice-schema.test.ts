@@ -12,3 +12,10 @@ describe('limites do schema do edital', () => {
     expect(() => NoticeTopic.parse({ text: 'x'.repeat(2001), page: 1 })).toThrow();
   });
 });
+
+describe('prompt das atribuições', () => {
+  it('pede resumo das atribuições longas, sem perder tarefa', async () => {
+    const { noticePrompt } = await import('./notice.ts');
+    expect(noticePrompt('Professor')).toMatch(/Se passarem de 1800 caracteres, resuma: mantenha cada tarefa distinta do cargo/);
+  });
+});

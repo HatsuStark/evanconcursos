@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { generateJson, type GeminiUsage } from './gemini.ts';
 
-export const NOTICE_PROMPT_VERSION = 'notice-v8';
+export const NOTICE_PROMPT_VERSION = 'notice-v9';
 
 // Mesmos valores do filtro nivel_escolaridade da Quest API; vazio se o edital não informar.
 export const EDUCATION_LEVELS = ['Fundamental', 'Médio', 'Superior'] as const;
@@ -42,7 +42,7 @@ export const NoticeExtraction = z.object({
   organization: text(160).describe('Órgão (ex.: "Tribunal de Justiça do Estado de São Paulo").'),
   role: text(160).describe('Cargo escolhido, com área/especialidade.'),
   otherRoles: z.array(text(160)).describe('Demais cargos do edital, se houver.'),
-  roleDuties: text(2000).describe('Atribuições do cargo escolhido como o edital descreve (anexo de atribuições ou descrição do cargo); vazio se não houver.'),
+  roleDuties: text(2000).describe('Atribuições do cargo escolhido como o edital descreve (anexo de atribuições ou descrição do cargo), resumidas se passarem de 1800 caracteres; vazio se não houver.'),
   educationLevel: z.enum(['', ...EDUCATION_LEVELS]).describe('Escolaridade exigida para o cargo escolhido; vazio se o edital não informar.'),
   board: text(80).describe('Banca organizadora (ex.: "VUNESP", "FGV", "Cebraspe").'),
   examDate: z.string().regex(/^(\d{4}-\d{2}-\d{2})?$/).describe('Data da prova objetiva (AAAA-MM-DD); vazio se o edital não informar.'),
@@ -152,7 +152,7 @@ ${topicsRule}
 Cargo: ${cargo}.
 Regras:
 ${scope}
-- roleDuties: as atribuições do cargo escolhido, fiéis ao edital (normalmente num anexo "Atribuições dos cargos"), em frases curtas separadas por ponto e vírgula. Nunca misture com as de outro cargo, mesmo de nome parecido (ex.: "Agente Escolar" × "Agente de Segurança Escolar"). Vazio se o edital não trouxer.
+- roleDuties: as atribuições do cargo escolhido, fiéis ao edital (normalmente num anexo "Atribuições dos cargos"), em frases curtas separadas por ponto e vírgula. Se passarem de 1800 caracteres, resuma: mantenha cada tarefa distinta do cargo, com as palavras do edital, e tire só repetições, exemplos e fórmulas genéricas ("e outras atividades correlatas", "cumprir as normas da unidade"). Nunca misture com as de outro cargo, mesmo de nome parecido (ex.: "Agente Escolar" × "Agente de Segurança Escolar"). Vazio se o edital não trouxer.
 - educationLevel: escolaridade exigida para o cargo escolhido. Ensino técnico conta como "Médio"; graduação ou pós-graduação, como "Superior".
 - examDate: data prevista da prova objetiva. Se o texto remeter ao cronograma, procure a data no cronograma/anexo. Vazio se não houver.
 - blocks: os blocos/provas objetivas como o edital define (ex.: "Bloco I – Língua Portuguesa", "P1 – Conhecimentos Gerais"), com o número de questões e a regra mínima de aprovação.
