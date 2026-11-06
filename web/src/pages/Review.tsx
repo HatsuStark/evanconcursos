@@ -22,7 +22,7 @@ export function ReviewPage() {
 
   if (review.isError) return <Shell title="Conferência"><p className="error">{(review.error as Error).message}</p></Shell>;
   if (!review.data || !draft) return <Shell title="Conferência"><div className="spinner" /></Shell>;
-  const { extraction, usage, notice, hasPlan } = review.data;
+  const { extraction, notice, hasPlan } = review.data;
 
   const set = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch });
   const setSubject = (i: number, patch: Partial<DraftSubject>) =>
@@ -109,16 +109,6 @@ export function ReviewPage() {
           </div>
         </section>
       )}
-      {extraction && (
-        <section>
-          <h3>Leitura da IA</h3>
-          <p className="faint small" style={{ margin: 0 }}>
-            {extraction.model} · {extraction.prompt_version}
-            {usage?.latency_ms ? ` · ${Math.round(usage.latency_ms / 1000)}s` : ''}
-            {usage?.cost_usd != null ? ` · US$ ${Number(usage.cost_usd).toFixed(4)}` : ''}
-          </p>
-        </section>
-      )}
     </>
   );
 
@@ -181,9 +171,6 @@ export function ReviewPage() {
             </div>
             <div className="row">
               <label className="field">Bloco<input className="input" value={s.block} onChange={(e) => setSubject(i, { block: e.target.value })} /></label>
-              <label className="field" style={{ flex: '0 1 120px' }}>Questões<input className="input" type="number" min={0} value={s.questions} onChange={(e) => setSubject(i, { questions: Number(e.target.value) || 0 })} />
-                {!s.questions && <span className="faint small">0 = só o total do bloco</span>}
-              </label>
               <label className="field" style={{ flex: '0 1 200px' }}>Peso
                 <select className="select" value={s.weight} onChange={(e) => setSubject(i, { weight: Number(e.target.value) })}>
                   {[1, 2, 3, 4, 5].map((w) => <option key={w} value={w}>{w}{w === 1 ? ' · pouco cobrada' : w === 5 ? ' · muito cobrada' : ''}</option>)}
