@@ -6,11 +6,11 @@ import { costUsd, generateJson } from '../shared/ai/gemini.ts';
 import {
   DiscursiveGrade, discursiveGradeJsonSchema, DiscursivePrompt, discursivePromptJsonSchema, discursivePromptText, gradePromptText, scoreGrade, verifyPrompt, type DiscursiveFormat,
 } from '../shared/ai/discursive.ts';
+import { evalAi } from './ai.ts';
 
 const root = new URL('..', import.meta.url);
 const env = Object.fromEntries(readFileSync(new URL('.env', root), 'utf8').split(/\r?\n/).filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf('=')).trim(), l.slice(l.indexOf('=') + 1).trim()]));
-const model = env.GEMINI_MODEL || 'gemini-3.8-flash', apiKey = env.GEMINI_API_KEY!;
-const PRICE = { inputPerMtokUsd: 0.75, outputPerMtokUsd: 3.75 };
+const { model, apiKey, price: PRICE } = evalAi(env);
 const format = (process.argv[2] ?? 'questao') as DiscursiveFormat;
 let usd = 0;
 

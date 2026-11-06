@@ -10,6 +10,7 @@ import { aiLawRefs, findLawRefs, inRanges, type LawRef, mergeLawRefs, rangesLabe
 import { LAWS, lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
 import { type LawSize, mergeShortLawSessions, PLAN_PROMPT_VERSION, PlanInputs, PlanStrategy, repairSessions, sessionsJsonSchema, sessionsPrompt, strategyJsonSchema, strategyPrompt, SubjectSessions } from '../../../shared/ai/plan.ts';
 import { isOpenEnded } from '../../../shared/domain/rounds.ts';
+import { aiFor, defaultModel, keyFor } from '../_shared/ai.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { ensureLaw, ownLaws } from '../_shared/legal.ts';
 import { resolveCitedNorms } from '../_shared/resolve-laws.ts';
@@ -62,7 +63,7 @@ Deno.serve(async (req) => {
   const auth = await requireUser(req);
   if (auth instanceof Response) return auth;
   const body = await req.json().catch(() => ({}));
-  const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash', apiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
+  const { model, apiKey } = aiFor('plan');
   const admin = adminClient();
   const operation = body.step === 'strategy' ? 'plan_strategy' : 'plan_sessions';
   let usage: GeminiUsage | null = null, latencyMs: number | null = null;
@@ -118,8 +119,8 @@ Deno.serve(async (req) => {
       const own = await ownLaws(admin, auth.user.id);
       // "Constituição Estadual" e "Lei Orgânica Municipal", sem nome, são as do órgão do edital.
       const local = new Set(localNormsCited(topics.join('\n'), org).filter((l) => l.generic).map(localKey));
-      const r = await generateJson({
-        apiKey, model, schema: SubjectSessions, jsonSchema: sessionsJsonSchema(), temperature: 0.3,
+      const ask = (m: string) => generateJson({
+        apiKey: keyFor(m), model: m, schema: SubjectSessions, jsonSchema: sessionsJsonSchema(), temperature: 0.3,
         parts: [{ text: sessionsPrompt({
           role: notice.role_name, board: notice.board, profile: String(body.profile ?? '').slice(0, 1500), subject: subject.name,
           level: int(body.level, 0, 3), questions: subject.questions, focus: String(body.focus ?? '').slice(0, 300), n,
@@ -128,6 +129,14 @@ Deno.serve(async (req) => {
           laws: [...LAWS, ...own.filter((l) => l.urn.startsWith('upload:') || local.has(l.key) || new RegExp(l.match.source, 'i').test(topics.join('\n')))].map((l) => ({ key: l.key, name: l.name })),
         }) }],
       });
+      // Resposta sem sessões (o Haiku deixou vazia uma matéria sem tópicos na avaliação): o modelo padrão tenta de novo,
+      // antes de o repairSessions montar sessões genéricas ("Estudo 1 de N").
+      let used = model, r = await ask(model);
+      if (!r.data.sessions.length && model !== defaultModel()) {
+        await logUsage(admin, { ownerId: auth.user.id, operation, model, promptVersion: PLAN_PROMPT_VERSION, usage: r.usage, latencyMs: r.latencyMs, status: 'ok', error: `sem sessões: refeito com ${defaultModel()}` });
+        used = defaultModel();
+        r = await ask(used);
+      }
       usage = r.usage; latencyMs = r.latencyMs;
       // Sessão de lei quase vazia (artigos revogados ou só remissivos) é juntada à vizinha da mesma lei; repairSessions
       // divide a maior para manter as n sessões.
@@ -135,7 +144,7 @@ Deno.serve(async (req) => {
       const short = mergeShortLawSessions(r.data.sessions.map((x, i) => ({ ...x, ...(sized[i]!.refs.length ? { refs: sized[i]!.refs } : {}) })), sized.map((z) => z.size));
       const { sessions, fixes } = repairSessions({ ...r.data, sessions: short.sessions }, n, topics, { sizes: short.sizes, minutes: int(body.minutes, 15, 960) });
       fixes.unshift(...short.merged.map((m) => `lei curta: ${m}`));
-      await logUsage(admin, { ownerId: auth.user.id, operation, model, promptVersion: PLAN_PROMPT_VERSION, usage, latencyMs, status: 'ok' });
+      await logUsage(admin, { ownerId: auth.user.id, operation, model: used, promptVersion: PLAN_PROMPT_VERSION, usage, latencyMs, status: 'ok' });
       return json(200, { sessions, fixes });
     }
 

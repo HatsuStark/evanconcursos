@@ -5,11 +5,10 @@ import { readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { extractText } from 'unpdf';
 import { costUsd, toBase64 } from '../shared/ai/gemini.ts';
 import { checkNotice, comparableText, NOTICE_PROMPT_VERSION, NoticeExtraction, normalizeText, readNotice, topicInText } from '../shared/ai/notice.ts';
+import { evalAi } from './ai.ts';
 
 // Limites de aprovação (ver README: "Qualidade da extração").
 export const THRESHOLDS = { fields: 1, subjectRecall: 1, subjectPrecision: 0.95, questionAccuracy: 1, hallucination: 0.02 };
-// Preço vigente do modelo padrão (ai.google.dev/gemini-api/docs/pricing), para estimar o custo da avaliação.
-const PRICE = { inputPerMtokUsd: 0.75, outputPerMtokUsd: 3.75 };
 
 interface Expected {
   board: string; examDate: string; roleKeywords: string[]; totalQuestions: number; essay: boolean; blockQuestions: number[];
@@ -20,7 +19,7 @@ interface Gold { pdf: string; roleHint: string; expected: Expected }
 const root = new URL('./', import.meta.url);
 const env = Object.fromEntries(readFileSync(new URL('../.env', root), 'utf8').split(/\r?\n/)
   .filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).trim()]));
-const model = env.GEMINI_MODEL || 'gemini-3.8-flash';
+const { model, apiKey, price: PRICE } = evalAi(env);
 
 const strip = (s: string) => normalizeText(s).replace(/^nocoes (de|dos|das) /, '');
 const sameSubject = (a: string, b: string) => { const x = strip(a), y = strip(b); return x === y || x.includes(y) || y.includes(x); };
@@ -68,7 +67,7 @@ for (const file of golds) {
   const { text } = await extractText(bytes.slice(), { mergePages: true });
   process.stdout.write(`${file.replace('.json', '')}: `);
   try {
-    const r = await readNotice({ apiKey: env.GEMINI_API_KEY!, model, pdfBase64: toBase64(bytes), roleHint: gold.roleHint });
+    const r = await readNotice({ apiKey, model, pdfBase64: toBase64(bytes), roleHint: gold.roleHint });
     const cost = costUsd(r.usage, PRICE);
     totalCost += cost;
     const s = score(r.data, gold.expected, text);

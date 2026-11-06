@@ -1,5 +1,5 @@
 // Chamada ao Gemini com resposta em JSON validada por schema, e cálculo de custo pelo consumo.
-// Sem dependências de runtime: roda no Deno (Edge Functions) e no Node (avaliação).
+// Roda no Deno (Edge Functions) e no Node (avaliação). Modelos "claude-*" vão para claude.ts (SDK da Anthropic).
 import type { z } from 'zod';
 
 export interface GeminiUsage { inputTokens: number; outputTokens: number; thinkingTokens: number }
@@ -26,6 +26,8 @@ type Part = { text: string } | { inline_data: { mime_type: string; data: string 
 export async function generateJson<S extends z.ZodType>(opts: {
   apiKey: string; model: string; parts: Part[]; schema: S; jsonSchema: unknown; temperature?: number; thinkingLevel?: 'low' | 'medium' | 'high'; timeoutMs?: number; fetchImpl?: typeof fetch;
 }): Promise<GeminiResult<z.infer<S>>> {
+  // Modelo da Anthropic: mesma interface, outro provedor (o apiKey passado deve ser a chave da Anthropic).
+  if (opts.model.startsWith('claude-')) return (await import('./claude.ts')).generateClaudeJson(opts);
   const started = Date.now();
   const res = await (opts.fetchImpl ?? fetch)(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(opts.model)}:generateContent`, {
     method: 'POST',

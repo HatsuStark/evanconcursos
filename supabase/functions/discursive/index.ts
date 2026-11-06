@@ -8,6 +8,7 @@ import {
   countWords, DISCURSIVE_PROMPT_VERSION, DiscursiveGrade, discursiveGradeJsonSchema, DiscursivePrompt, discursivePromptJsonSchema, discursivePromptText, discursiveRules,
   gradePromptText, itemScale, MIN_WORDS, pickSession, promptCacheKey, scoreGrade, verifyPrompt,
 } from '../../../shared/ai/discursive.ts';
+import { aiFor, keyFor } from '../_shared/ai.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { loadLawSources } from '../_shared/law.ts';
 
@@ -60,7 +61,7 @@ async function start(auth: Auth, admin: Admin, model: string, body: Record<strin
   if (!prompt) {
     const started = Date.now();
     try {
-      const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: DiscursivePrompt, jsonSchema: discursivePromptJsonSchema(), temperature: 0.6,
+      const r = await generateJson({ apiKey: keyFor(model), model, schema: DiscursivePrompt, jsonSchema: discursivePromptJsonSchema(), temperature: 0.6,
         parts: [{ text: discursivePromptText({ ...input, cargo: notice.role_name ?? '', title: session?.title ?? '', avoid: (existing ?? []).map((p) => p.title) }) }] });
       const v = verifyPrompt(r.data, articles, subject?.name ?? '', extra);
       const { data: saved, error } = await admin.from('discursive_prompts').insert({
@@ -111,7 +112,7 @@ async function grade(auth: Auth, admin: Admin, model: string, answerId: string) 
       if (s) ({ articles, law, extra } = await loadLawSources(admin, { title: s.title, topics: (tt ?? []).map((t) => t.text), subject: answer.subject_name, ownerId: auth.user.id, lawRefs: s.law_refs }));
     }
     const statement = [answer.statement, ...answer.support_texts].join('\n\n');
-    const r = await generateJson({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, schema: DiscursiveGrade, jsonSchema: discursiveGradeJsonSchema(), temperature: 0.1,
+    const r = await generateJson({ apiKey: keyFor(model), model, schema: DiscursiveGrade, jsonSchema: discursiveGradeJsonSchema(), temperature: 0.1,
       parts: [{ text: gradePromptText({ format: answer.format, banca: promptRow!.banca, statement, prompt, law, body: answer.body }) }] });
     const scored = scoreGrade(r.data, { format: answer.format, prompt, body: answer.body, maxPoints: Number(answer.max_points) || 10, law: articles, subject: answer.subject_name, extra });
     // Citações sem fonte da resposta modelo também entram no aviso da tela.
@@ -146,7 +147,7 @@ Deno.serve(async (req) => {
   if (auth instanceof Response) return auth;
   const body = await req.json().catch(() => ({}));
   const admin = adminClient();
-  const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash';
+  const { model } = aiFor('discursive');
   if (body.action === 'start') return start(auth, admin, model, body);
   if (body.action === 'grade') return grade(auth, admin, model, String(body.answerId ?? ''));
   if (body.action === 'rewrite') return rewrite(auth, admin, String(body.answerId ?? ''));

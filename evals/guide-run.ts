@@ -7,13 +7,14 @@ import { costUsd, generateJson } from '../shared/ai/gemini.ts';
 import { Guide, guideJsonSchema, guidePracticeJsonSchema, GuidePractice, guidePrompt, GuideText, guideTextJsonSchema, mergeGuide, sourceRef, trimReview, verifyGuide, type GuideDepth } from '../shared/ai/guide.ts';
 import { findLawRefs, inRanges } from '../shared/legal/refs.ts';
 import { lawByKey } from '../shared/legal/registry.ts';
+import { evalAi } from './ai.ts';
 
 const root = new URL('..', import.meta.url);
 const env = Object.fromEntries(readFileSync(new URL('.env', root), 'utf8').split(/\r?\n/).filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).trim()]));
 const url = new URL(readFileSync(new URL('supabase/.temp/pooler-url', root), 'utf8').trim()); url.password = encodeURIComponent(env.SUPABASE_DB_PASSWORD!);
 const db = new pg.Client({ connectionString: url.href, ssl: { rejectUnauthorized: false } }); await db.connect();
 const depth = (process.argv[2] ?? 'completa') as GuideDepth, n = Number(process.argv[3] ?? 3);
-const PRICE = { inputPerMtokUsd: 0.75, outputPerMtokUsd: 3.75 };
+const { model, apiKey, price: PRICE } = evalAi(env);
 
 const { rows: [notice] } = await db.query(`select id, board, role_name from public.notices where status = 'reviewed' order by created_at desc limit 1`);
 // Sessões com lei citada (as mais exigentes para a verificação) + uma sem lei.
@@ -33,7 +34,7 @@ for (const s of sessions) {
   }
   const law = provided.map((p) => ({ ref: sourceRef(p.lawKey, p.label), text: p.text.slice(0, 1500) }));
   const t0 = Date.now();
-  const gen = { apiKey: env.GEMINI_API_KEY!, model: env.GEMINI_MODEL || 'gemini-3.8-flash', temperature: 0.3, ...(process.env.THINK ? { thinkingLevel: process.env.THINK as 'low' | 'medium' | 'high' } : {}) };
+  const gen = { apiKey, model, temperature: 0.3, ...(process.env.THINK ? { thinkingLevel: process.env.THINK as 'low' | 'medium' | 'high' } : {}) };
   const base = { depth, banca: notice.board, cargo: notice.role_name, subject: s.subject, title: s.title, topics: s.topics, law };
   // Como no servidor: revisão numa etapa; completa e aprofundamento em texto (aparece na tela) e prática.
   let r: { data: Guide; usage: { inputTokens: number; outputTokens: number; thinkingTokens: number } }, firstAt = 0;

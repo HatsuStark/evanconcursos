@@ -4,14 +4,15 @@
 import { readFileSync } from 'node:fs';
 import { costUsd, generateJson } from '../shared/ai/gemini.ts';
 import { arrangeBatch, GeneratedQuestions, generatedJsonSchema, generatedPrompt, themeKind } from '../shared/qbank/generated.ts';
+import { evalAi } from './ai.ts';
 
 const env = Object.fromEntries(readFileSync(new URL('../.env', import.meta.url), 'utf8').split(/\r?\n/)
   .filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).trim()]));
 const [subject = 'Matemática', title = 'Regra de três simples', cargo = '', duties = '', others = ''] = process.argv.slice(2);
-const model = env.GEMINI_MODEL || 'gemini-3.8-flash';
+const { model, apiKey, price } = evalAi(env);
 console.log(`Tipo do tema: ${themeKind({ subject, title, law: [] })}`);
-const r = await generateJson({ apiKey: env.GEMINI_API_KEY!, model, schema: GeneratedQuestions, jsonSchema: generatedJsonSchema(), temperature: 0.5, timeoutMs: 90_000,
+const r = await generateJson({ apiKey, model, schema: GeneratedQuestions, jsonSchema: generatedJsonSchema(), temperature: 0.5, timeoutMs: 180_000, ...(process.env.THINK ? { thinkingLevel: process.env.THINK as 'low' | 'medium' | 'high' } : {}),
   parts: [{ text: generatedPrompt({ banca: 'NOSSO RUMO', cargo, subject, title, keyword: '', law: [], format: 'multipla escolha', n: 4, avoid: [], duties, otherRoles: others.split(';').filter(Boolean) }) }] });
 const out = arrangeBatch(r.data.questoes);
-console.log(`${r.data.questoes.length} geradas, ${out.length} mantidas · ${(r.latencyMs / 1000).toFixed(0)} s · US$ ${costUsd(r.usage, { inputPerMtokUsd: 0.75, outputPerMtokUsd: 3.75 }).toFixed(4)}\n`);
+console.log(`${r.data.questoes.length} geradas, ${out.length} mantidas · ${(r.latencyMs / 1000).toFixed(0)} s · US$ ${costUsd(r.usage, price).toFixed(4)}\n`);
 for (const q of out) console.log(`${q.enunciado}\n${q.alternativas.map((a, i) => `  ${String.fromCharCode(65 + i)}) ${a}`).join('\n')}\n  Gabarito: ${q.gabarito} · ${q.fundamento}\n`);

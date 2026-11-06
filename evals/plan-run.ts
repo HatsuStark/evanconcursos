@@ -7,15 +7,15 @@ import { costUsd, generateJson } from '../shared/ai/gemini.ts';
 import { NoticeExtraction, subjectWeights } from '../shared/ai/notice.ts';
 import { buildPlanPayload, theoryPlan, type PlanBase } from '../shared/ai/plan-build.ts';
 import { PlanStrategy, repairSessions, sessionsJsonSchema, sessionsPrompt, strategyJsonSchema, strategyPrompt, SubjectSessions, type Session } from '../shared/ai/plan.ts';
+import { evalAi } from './ai.ts';
 
-const PRICE = { inputPerMtokUsd: 0.75, outputPerMtokUsd: 3.75 };
 const root = new URL('./', import.meta.url);
 const env = Object.fromEntries(readFileSync(new URL('../.env', root), 'utf8').split(/\r?\n/)
   .filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).trim()]));
-const model = env.GEMINI_MODEL || 'gemini-3.8-flash', apiKey = env.GEMINI_API_KEY!;
+const { model, apiKey, price: PRICE } = evalAi(env);
 
 // Para cada edital, a extração mais recente com notice-v2 (os relatórios podem cobrir só parte dos editais).
-const files = readdirSync(new URL('results/', root)).filter((f) => f.includes('notice-v2')).sort().reverse();
+const files = readdirSync(new URL('results/', root)).filter((f) => f.includes('gemini-3.8-flash-notice-v9')).sort().reverse();
 if (!files.length) throw Error('Rode antes: node --experimental-strip-types evals/run.ts');
 const byFile = new Map<string, { file: string; extraction?: unknown }>();
 for (const f of files) for (const r of JSON.parse(readFileSync(new URL(`results/${f}`, root), 'utf8')).report as { file: string; extraction?: unknown }[])

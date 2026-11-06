@@ -12,6 +12,7 @@ import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide,
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient } from '../../../shared/qbank/client.ts';
 import { materiaOf, measureIncidence, QMAP_PROMPT_VERSION } from '../../../shared/qbank/map.ts';
+import { aiFor } from '../_shared/ai.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { loadLawSources } from '../_shared/law.ts';
 import { cacheQuestions, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, type PublicQuestion } from '../_shared/qbank.ts';
@@ -125,9 +126,8 @@ async function boardEvidence(admin: Admin, ownerId: string, ctx: GuideContext): 
 
 async function generate(admin: Admin, ownerId: string, jobId: string, ctx: GuideContext) {
   const { input, key, articles, cargo, duties, otherRoles } = ctx;
-  const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash', started = Date.now();
+  const { model, apiKey } = aiFor('guide'), started = Date.now();
   let usage: GeminiUsage | null = null, text: GuideText | null = null, split = false;
-  const apiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
   const add = (u: GeminiUsage) => { usage = usage ? { inputTokens: usage.inputTokens + u.inputTokens, outputTokens: usage.outputTokens + u.outputTokens, thinkingTokens: usage.thinkingTokens + u.thinkingTokens } : u; };
   const save = async (content: Guide | (Guide & { parcial: true }), board: number) => {
     const v = verifyGuide(applyBoardEvidence(content, input.banca, board), articles, input.subject, ctx.extra);
