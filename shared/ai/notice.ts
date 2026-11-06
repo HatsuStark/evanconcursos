@@ -8,10 +8,14 @@ export const NOTICE_PROMPT_VERSION = 'notice-v8';
 // Mesmos valores do filtro nivel_escolaridade da Quest API; vazio se o edital não informar.
 export const EDUCATION_LEVELS = ['Fundamental', 'Médio', 'Superior'] as const;
 
-const text = (max: number) => z.string().trim().max(max);
+// Campos descritivos: o que passar do limite é cortado, em vez de derrubar a leitura do edital (as atribuições do Professor
+// de Ensino Infantil de Canitar passaram de 2.000 caracteres). O limite continua no schema, como orientação para a IA.
+const text = (max: number) => z.string().trim().overwrite((s) => s.slice(0, max)).max(max);
+// Item do conteúdo programático: cortar perderia conteúdo, então passar do limite é erro, e a nova tentativa divide o item.
+const topicText = (max: number) => z.string().trim().max(max);
 
 export const NoticeTopic = z.object({
-  text: text(2000).min(1).describe('Item do conteúdo programático, transcrito fielmente.'),
+  text: topicText(2000).min(1).describe('Item do conteúdo programático, transcrito fielmente.'),
   page: z.number().int().min(0).describe('Página do PDF onde o item aparece (0 se não souber).'),
 });
 
