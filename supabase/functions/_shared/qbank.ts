@@ -102,9 +102,32 @@ export function mapDeps(admin: SupabaseClient, quest: QuestClient, usage: Gemini
 }
 
 // Matéria da disciplina (uma vez) e banca do edital. Os dados só são lidos se ainda não houver mapeamento.
+// Mapa já feito por outro candidato do mesmo edital (notices.doc_key) para a disciplina de mesmo nome: matéria, banca,
+// formato da banca e as medições de órgão, cargo, carreira e escolaridade. Sem IA nem créditos; as medições guardam o
+// cargo e a escolaridade com que foram feitas, e ensureNarrowing mede de novo se forem outros.
+type SubjectMapRow = { materia: string | null; banca: string; banca_tipo: string | null; narrowing: unknown; how: string; prompt_version: string };
+async function sharedSubjectMap(admin: SupabaseClient, subjectId: string): Promise<SubjectMapRow | null> {
+  const { data: me } = await admin.from('notice_subjects').select('name, notices!inner(doc_key)').eq('id', subjectId).maybeSingle();
+  const docKey = (me?.notices as { doc_key?: string | null } | null)?.doc_key;
+  if (!me || !docKey) return null;
+  const { data } = await admin.from('notice_subjects').select('name, notices!inner(doc_key), qbank_subject_maps!inner(materia, banca, banca_tipo, narrowing, how, prompt_version)')
+    .eq('notices.doc_key', docKey).neq('id', subjectId).limit(300);
+  const name = normalizeText(String(me.name));
+  for (const row of (data ?? []) as { name: string; qbank_subject_maps: SubjectMapRow | SubjectMapRow[] }[]) {
+    const m = Array.isArray(row.qbank_subject_maps) ? row.qbank_subject_maps[0] : row.qbank_subject_maps;
+    if (m && m.prompt_version === QMAP_PROMPT_VERSION && normalizeText(row.name) === name) return m;
+  }
+  return null;
+}
+
 export async function ensureSubjectMap(admin: SupabaseClient, quest: QuestClient, deps: MapDeps, ownerId: string, subjectId: string, load: () => Promise<{ name: string; board: string; topics: string[]; organization: string }>) {
   const { data: sm } = await admin.from('qbank_subject_maps').select('materia, banca, banca_tipo, prompt_version').eq('subject_id', subjectId).maybeSingle();
   if (sm && sm.prompt_version === QMAP_PROMPT_VERSION) return sm as { materia: string | null; banca: string; banca_tipo: string | null };
+  const shared = await sharedSubjectMap(admin, subjectId).catch(() => null);
+  if (shared) {
+    await admin.from('qbank_subject_maps').upsert({ subject_id: subjectId, owner_id: ownerId, materia: shared.materia, banca: shared.banca, banca_tipo: shared.banca_tipo, narrowing: shared.narrowing, how: shared.how, prompt_version: QMAP_PROMPT_VERSION });
+    return { materia: shared.materia, banca: shared.banca, banca_tipo: shared.banca_tipo };
+  }
   // Mapa de versão antiga: refaz o da disciplina que ficou sem matéria ou que tem nome genérico ("Conhecimentos
   // Específicos" casava com "Conhecimentos Específicos das Regiões"); os outros só passam para a versão atual.
   const s = await load();
@@ -133,9 +156,18 @@ export async function ensureBoardFormat(admin: SupabaseClient, quest: QuestClien
 // Carreiras do edital no banco de questões (a específica e a geral), escolhidas uma vez pela IA, com raciocínio baixo, e
 // guardadas no edital. Se a escolha falhar, segue sem carreira e tenta de novo na próxima busca.
 export async function ensureCarreiras(admin: SupabaseClient, quest: QuestClient, deps: MapDeps, noticeId: string): Promise<string[]> {
-  const { data: n } = await admin.from('notices').select('organization, role_name, role_duties, education_level, qbank_carreiras').eq('id', noticeId).maybeSingle();
+  const { data: n } = await admin.from('notices').select('organization, role_name, role_duties, education_level, qbank_carreiras, doc_key').eq('id', noticeId).maybeSingle();
   if (!n) return [];
   if (Array.isArray(n.qbank_carreiras)) return n.qbank_carreiras as string[];
+  // Outro candidato do mesmo edital e do mesmo cargo já teve as carreiras escolhidas: copia, sem IA.
+  if (n.doc_key) {
+    const { data: same } = await admin.from('notices').select('role_name, qbank_carreiras').eq('doc_key', n.doc_key).neq('id', noticeId).not('qbank_carreiras', 'is', null).limit(50);
+    const twin = (same ?? []).find((x) => normalizeText(String(x.role_name ?? '')) === normalizeText(String(n.role_name ?? '')));
+    if (twin) {
+      await admin.from('notices').update({ qbank_carreiras: twin.qbank_carreiras }).eq('id', noticeId);
+      return twin.qbank_carreiras as string[];
+    }
+  }
   try {
     const candidates = await quest.carreiras();
     if (!candidates.length) return [];
