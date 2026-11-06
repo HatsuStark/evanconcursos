@@ -6,6 +6,7 @@ import { LEVEL_NAMES, type PlanInputs } from '../../../shared/ai/plan.ts';
 import { ymd } from '../../../shared/domain/dates.ts';
 import { subjectEquivalence } from '../../../shared/domain/notice-diff.ts';
 import { isOpenEnded } from '../../../shared/domain/rounds.ts';
+import { DEFAULT_HOURS } from '../../../shared/domain/scheduler.ts';
 import { LawUpload } from '../components/LawUpload.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { fmtDate, Steps, SubjectIcon } from '../components/ui.tsx';
@@ -75,7 +76,7 @@ export function QuestionnairePage() {
     const equivalent = source && !existing.data ? subjectEquivalence(source.subjects, subjects.data) : {};
     const carried = Object.fromEntries(Object.entries(equivalent).map(([from, to]) => [to, prev?.levels[from]]));
     setInputs({
-      hours: prev?.hours ?? [2, 2, 2, 2, 2, 4, 0], startDate: ymd(new Date()), weeklyReview: prev?.weeklyReview ?? true, profile: prev?.profile ?? '',
+      hours: prev?.hours ?? [...DEFAULT_HOURS], startDate: ymd(new Date()), weeklyReview: prev?.weeklyReview ?? true, profile: prev?.profile ?? '',
       levels: Object.fromEntries(subjects.data.map((s) => [s.id, prev?.levels[s.id] ?? carried[s.id] ?? 1])),
     });
   }, [subjects.data, existing.isLoading, existing.data, previous.isLoading, previous.data, previousId, inputs]);
@@ -159,7 +160,7 @@ export function QuestionnairePage() {
 
   return (
     <Shell title="Questionário" subtitle={updating ? 'Confira suas respostas: o novo plano aproveita o que você já estudou.' : regenerate ? 'Ajuste suas respostas para refazer o cronograma a partir de hoje.' : 'Algumas perguntas para montar um plano do seu jeito.'} rail={rail}>
-      <Steps current={2} />
+      <Steps current={2} noticeId={noticeId} />
       {openEnded && (
         <div className="warning-card" role="status" style={{ marginBottom: 16 }}>
           <AlertTriangle />
@@ -223,6 +224,7 @@ export function QuestionnairePage() {
 
       <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', marginTop: 24 }}>
         <button className="btn" onClick={submit}><Sparkles size={18} /> {updating ? 'Atualizar meu plano com IA' : regenerate ? 'Refazer cronograma com IA' : 'Gerar cronograma com IA'}</button>
+        <button className="btn ghost" onClick={() => navigate(`/concursos/${noticeId}/conferencia`)}>Voltar à conferência</button>
         {error && <span className="error" role="alert">{error}</span>}
       </div>
     </Shell>

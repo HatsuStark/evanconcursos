@@ -90,7 +90,7 @@ export function ReviewPage() {
 
   return (
     <Shell title="Conferência" subtitle="Confira o que a IA leu do edital. Tudo pode ser corrigido antes de seguir." rail={rail}>
-      <Steps current={1} />
+      <Steps current={1} noticeId={notice.id} upTo={notice.status === 'reviewed' ? 2 : 1} />
       <div className="hero" style={{ display: 'grid', gap: 14 }}>
         <label className="field">Nome do plano
           <input className="input" value={draft.title} onChange={(e) => set({ title: e.target.value })} style={{ fontSize: 20, fontWeight: 600 }} />
@@ -165,6 +165,8 @@ export function ReviewPage() {
         {hasPlan
           ? <span className="muted">Este edital já tem cronograma; as matérias ficam fixas. Para mudar horas ou níveis, use "Refazer cronograma".</span>
           : <button className="btn" disabled={busy} onClick={confirm}><CheckCircle2 size={18} /> {busy ? 'Salvando…' : 'Confirmar e seguir'}</button>}
+        {/* Já conferido (voltou para olhar): segue sem gravar de novo. */}
+        {notice.status === 'reviewed' && <button className="btn ghost" disabled={busy} onClick={() => navigate(`/concursos/${notice.id}/questionario`)}>Ir para o questionário</button>}
         {error && <span className="error" role="alert">{error}</span>}
       </div>
     </Shell>

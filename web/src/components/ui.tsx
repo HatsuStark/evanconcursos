@@ -1,5 +1,6 @@
 import { BookOpen, Brain, Calculator, Cpu, Gavel, Globe, Landmark, Languages, Scale, ScrollText, Shield, type LucideIcon } from 'lucide-react';
 import type { CSSProperties } from 'react';
+import { Link } from 'react-router-dom';
 
 // Cor e ícone por matéria: cores em rodízio (as do tema) e ícone pelo nome.
 export const PALETTE = ['var(--violet)', 'var(--orange)', 'var(--cyan)', 'var(--blue)', 'var(--magenta)', 'var(--lime)'];
@@ -24,15 +25,22 @@ export function SubjectIcon({ name, index, style }: { name: string; index: numbe
   return <span className="subject-icon" style={{ color: subjectColor(index), ...style }}><Icon /></span>;
 }
 
-export function Steps({ current }: { current: number }) {
+// Com noticeId, conferência e questionário viram links: as etapas já feitas e, até `upTo`, as seguintes (edital já
+// conferido pode ir direto ao questionário). Sem noticeId (envio do edital, cronograma sendo gerado), só indicação.
+export function Steps({ current, noticeId, upTo = current }: { current: number; noticeId?: string; upTo?: number }) {
   const steps = ['Edital', 'Conferência', 'Questionário', 'Cronograma'];
+  const paths: (string | null)[] = [null, 'conferencia', 'questionario', null];
   return (
     <ol className="stepper" aria-label="Etapas da configuração">
-      {steps.map((s, i) => (
-        <li key={s} className={'step' + (i < current ? ' done' : i === current ? ' current' : '')} aria-current={i === current ? 'step' : undefined}>
-          <b>{i < current ? '✓' : i + 1}</b>{s}
-        </li>
-      ))}
+      {steps.map((s, i) => {
+        const inner = <><b>{i < current ? '✓' : i + 1}</b>{s}</>;
+        const path = noticeId && i !== current && i <= upTo ? paths[i] : null;
+        return (
+          <li key={s} className={'step' + (i < current ? ' done' : i === current ? ' current' : '') + (path ? ' link' : '')} aria-current={i === current ? 'step' : undefined}>
+            {path ? <Link to={`/concursos/${noticeId}/${path}`} title={`Voltar para ${s.toLowerCase()}`}>{inner}</Link> : inner}
+          </li>
+        );
+      })}
     </ol>
   );
 }

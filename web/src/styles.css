@@ -279,6 +279,9 @@ b, strong { font-weight: 700; }
   background: var(--surface); border: 1px solid var(--line); font-size: 13px; color: var(--faint);
 }
 .step b { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--surface-2); font-size: 12px; }
+.step.link { padding: 0; }
+.step.link a { display: flex; align-items: center; gap: 8px; padding: 8px 14px 8px 8px; color: inherit; text-decoration: none; border-radius: inherit; }
+.step.link:hover { color: var(--text); border-color: color-mix(in srgb, var(--lime) 40%, transparent); }
 .step.done { color: var(--muted); }
 .step.done b { background: color-mix(in srgb, var(--lime) 15%, transparent); color: var(--lime); }
 .step.current { color: var(--text); border-color: color-mix(in srgb, var(--cyan) 40%, transparent); box-shadow: var(--glow-cyan); }

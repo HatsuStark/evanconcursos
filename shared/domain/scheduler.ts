@@ -14,7 +14,8 @@ import { parseYmd, ymd } from './dates.ts';
 import { isNextPart } from './parts.ts';
 
 export const LEVELS = ['Iniciante', 'Básico', 'Intermediário', 'Avançado'] as const;
-export const DEFAULT_HOURS = [2, 2, 2, 2, 2, 3, 2];
+// Padrão do questionário: 3 h em todos os dias (o candidato ajusta).
+export const DEFAULT_HOURS = [3, 3, 3, 3, 3, 3, 3];
 // Marca de tarefa de reforço: o assunto é decidido na hora pelo desempenho (assunto mais fraco).
 export const WEAK_MARK = '*fracos*';
 // Meta de questões do bloco de teoria pela fase do plano (`progress`: 0 no início da teoria, 1 no começo da reta final).
