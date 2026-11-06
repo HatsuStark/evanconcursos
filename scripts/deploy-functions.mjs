@@ -37,7 +37,7 @@ const secretsFile = join(dir, 'secrets.env');
 try {
   writeFileSync(
     secretsFile,
-    ['GEMINI_API_KEY', 'GEMINI_MODEL', 'ALLOWED_EMAILS', 'QUEST_API_KEY', 'YOUTUBE_API_KEY'].filter((k) => env[k]).map((k) => `${k}=${env[k]}`).join('\n'),
+    ['GEMINI_API_KEY', 'GEMINI_MODEL', 'ALLOWED_EMAILS', 'AI_UNLIMITED_EMAILS', 'AI_DAILY_LIMIT_USD', 'QUEST_API_KEY', 'YOUTUBE_API_KEY'].filter((k) => env[k]).map((k) => `${k}=${env[k]}`).join('\n'),
   );
   run(['secrets', 'set', '--env-file', secretsFile, '--project-ref', env.SUPABASE_PROJECT_REF]);
 } finally {

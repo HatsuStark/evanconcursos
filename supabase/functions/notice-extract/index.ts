@@ -37,7 +37,8 @@ Deno.serve(async (req) => {
     // Posse conferida com o cliente do usuário: a RLS só devolve arquivos dele.
     const { data: file } = await auth.client.from('notice_files').select('id, notice_id, storage_path')
       .eq('id', fileId).eq('notice_id', noticeId).maybeSingle();
-    if (!file) return json(404, { error: 'Arquivo do edital não encontrado.' });
+    // O caminho é gravado pelo app: só vale o que está na pasta do próprio estudante (a função lê com a chave de serviço).
+    if (!file || !file.storage_path.startsWith(`${auth.user.id}/`) || file.storage_path.includes('..')) return json(404, { error: 'Arquivo do edital não encontrado.' });
     if (body.action === 'roles') return await listRoles(auth.user.id, file.storage_path);
 
     const admin = adminClient();
