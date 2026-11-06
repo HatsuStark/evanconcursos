@@ -1,11 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, CheckCircle2, Plus, Trash2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileText, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { EDUCATION_LEVELS } from '../../../shared/ai/notice.ts';
 import { Shell } from '../components/Shell.tsx';
 import { Steps, SubjectIcon } from '../components/ui.tsx';
-import { approveNotice, useReview, type Draft, type DraftSubject } from '../lib/notices.ts';
+import { approveNotice, openNoticePdf, startCorrection, useReview, type Draft, type DraftSubject } from '../lib/notices.ts';
 
 const STAGE_LABEL: Record<string, string> = { objetiva: 'Prova objetiva', discursiva: 'Discursiva', titulos: 'Títulos', pratica: 'Prática', fisica: 'Física', outra: 'Outra etapa' };
 
@@ -45,6 +45,24 @@ export function ReviewPage() {
   const pages = draft.subjects.flatMap((s) => s.topics.map((t) => t.page)).filter((p) => p > 0);
   const noTopics = draft.subjects.filter((s) => !s.topics.length).length;
   const summarizedSubjects = new Set((extraction?.warnings ?? []).filter((w) => w.code === 'topics_summarized').map((w) => w.subject ?? ''));
+  // Página onde a matéria começa no edital; sem tópicos lidos, o começo do conteúdo programático (ou a 1ª página).
+  const firstPage = (s: DraftSubject) => {
+    const ps = s.topics.map((t) => t.page).filter((p) => p > 0);
+    return ps.length ? Math.min(...ps) : pages.length ? Math.min(...pages) : 1;
+  };
+
+  async function correct() {
+    if (!draft) return;
+    setBusy(true); setError('');
+    try {
+      const id = await startCorrection(notice.id, draft);
+      await qc.invalidateQueries();
+      navigate(`/concursos/${id}/comparar`);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
 
   async function confirm() {
     if (!draft) return;
@@ -154,6 +172,11 @@ export function ReviewPage() {
             <div className="subject-edit-head">
               <SubjectIcon name={s.name} index={i} />
               <input className="input" aria-label="Nome da matéria" value={s.name} onChange={(e) => setSubject(i, { name: e.target.value })} />
+              {/* Confere a matéria no edital: abre o PDF na página onde os tópicos dela começam. */}
+              <button className="btn ghost sm" title="Abrir o edital na página desta matéria" style={{ whiteSpace: 'nowrap' }}
+                onClick={() => openNoticePdf(notice.id, firstPage(s)).catch((e: Error) => setError(e.message))}>
+                <FileText size={15} /> Ver no PDF{firstPage(s) > 1 ? ` (p. ${firstPage(s)})` : ''}
+              </button>
               <button className="icon-btn" title="Remover matéria" aria-label={`Remover ${s.name}`} onClick={() => set({ subjects: draft.subjects.filter((_, j) => j !== i) })}><Trash2 size={17} /></button>
             </div>
             <div className="row">
@@ -201,7 +224,11 @@ export function ReviewPage() {
 
       <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', marginTop: 28 }}>
         {hasPlan
-          ? <span className="muted">Este edital já tem cronograma; as matérias ficam fixas. Para mudar horas ou níveis, use "Refazer cronograma".</span>
+          ? <>
+              {/* Edital com cronograma: a correção vira uma versão nova do edital, e o cronograma é refeito aproveitando o que já foi estudado. */}
+              <button className="btn" disabled={busy} onClick={correct}><CheckCircle2 size={18} /> {busy ? 'Salvando…' : 'Salvar correções e atualizar o cronograma'}</button>
+              <span className="muted small" style={{ flexBasis: '100%' }}>Este edital já tem cronograma. Ao salvar, você vê o que mudou e o cronograma é refeito a partir de hoje, com o que já estudou, as questões e as revisões mantidos.</span>
+            </>
           : <button className="btn" disabled={busy} onClick={confirm}><CheckCircle2 size={18} /> {busy ? 'Salvando…' : 'Confirmar e seguir'}</button>}
         {/* Já conferido (voltou para olhar): segue sem gravar de novo. */}
         {notice.status === 'reviewed' && <button className="btn ghost" disabled={busy} onClick={() => navigate(`/concursos/${notice.id}/questionario`)}>Ir para o questionário</button>}

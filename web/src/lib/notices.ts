@@ -232,6 +232,50 @@ export const useNoticeDiff = (noticeId: string | undefined) => useQuery({
   queryFn: () => loadNoticeUpdate(noticeId!),
 });
 
+// Correção do conteúdo de um edital que já tem cronograma: as matérias do plano não podem mudar no lugar (as sessões
+// apontam para elas), então a correção vira uma "retificação" feita pelo candidato. Cria uma cópia do edital (com o mesmo
+// PDF) já conferida com o rascunho, ligada à anterior; a partir daí segue o fluxo do edital atualizado (comparar →
+// questionário → cronograma novo, que aproveita o que já foi estudado). Devolve o id do edital corrigido.
+export async function startCorrection(previousId: string, draft: Draft): Promise<string> {
+  const old = must(await supabase.from('notices').select('title, cutoff_pct, doc_key, qbank_carreiras').eq('id', previousId).single()) as { title: string; cutoff_pct: number | null; doc_key: string | null; qbank_carreiras: unknown };
+  const file = (must(await supabase.from('notice_files').select('storage_path, sha256, size_bytes, pages').eq('notice_id', previousId).order('created_at', { ascending: false }).limit(1)) as { storage_path: string; sha256: string; size_bytes: number; pages: number | null }[])[0];
+  if (!file) throw new Error('O PDF deste edital não foi encontrado.');
+  const notice = must(await supabase.from('notices').insert({ title: draft.title || old.title }).select('id').single()) as { id: string };
+  try {
+    const path = file.storage_path.replace(/^([^/]+)\/[^/]+\//, `$1/${notice.id}/`);
+    const copy = await supabase.storage.from('editais').copy(file.storage_path, path);
+    if (copy.error) throw new Error(`Falha ao copiar o PDF: ${copy.error.message}`);
+    must(await supabase.from('notice_files').insert({ notice_id: notice.id, storage_path: path, sha256: file.sha256, size_bytes: file.size_bytes, pages: file.pages }).select('id').single());
+    must(await supabase.from('notices').update({ cutoff_pct: old.cutoff_pct, doc_key: old.doc_key, qbank_carreiras: old.qbank_carreiras }).eq('id', notice.id).select('id').single());
+    await approveNotice(notice.id, null, draft);
+    await rememberUpdate(notice.id, previousId);
+    return notice.id;
+  } catch (e) {
+    // Desfaz só a cópia (deleteNotice seguiria a cadeia de editais substituídos e apagaria o original).
+    const { data: u } = await supabase.auth.getUser();
+    if (u.user) await clearFolder('editais', `${u.user.id}/${notice.id}`).catch(() => {});
+    await supabase.rpc('delete_notice', { p_notice: notice.id, p_law_urns: [] });
+    throw e;
+  }
+}
+
+// Abre o PDF do edital numa aba nova, na página pedida (leitor do navegador). A aba abre antes da espera pelo link, ainda
+// no clique: aberta depois de um await, o navegador a bloquearia como pop-up.
+export async function openNoticePdf(noticeId: string, page: number) {
+  const tab = window.open('', '_blank');
+  try {
+    const files = must(await supabase.from('notice_files').select('storage_path').eq('notice_id', noticeId).order('created_at', { ascending: false }).limit(1)) as { storage_path: string }[];
+    if (!files[0]) throw new Error('O PDF deste edital não foi encontrado.');
+    const { data, error } = await supabase.storage.from('editais').createSignedUrl(files[0].storage_path, 3600);
+    if (error || !data) throw new Error(error?.message ?? 'Não foi possível abrir o PDF.');
+    const url = `${data.signedUrl}#page=${Math.max(1, page)}`;
+    if (tab) tab.location.href = url; else window.open(url, '_blank');
+  } catch (e) {
+    tab?.close();
+    throw e;
+  }
+}
+
 export async function approveNotice(noticeId: string, extractionId: string | null, draft: Draft) {
   const subjects = draft.subjects.filter((s) => s.name.trim());
   if (!subjects.length) throw new Error('Mantenha ao menos uma disciplina.');

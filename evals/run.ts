@@ -5,6 +5,7 @@ import { readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { extractText } from 'unpdf';
 import { costUsd, toBase64 } from '../shared/ai/gemini.ts';
 import { checkNotice, comparableText, NOTICE_PROMPT_VERSION, NoticeExtraction, normalizeText, readNotice, topicInText } from '../shared/ai/notice.ts';
+import { readNoticeByLines } from '../shared/ai/notice-lines.ts';
 import { evalAi } from './ai.ts';
 
 // Limites de aprovação (ver README: "Qualidade da extração").
@@ -20,6 +21,7 @@ const root = new URL('./', import.meta.url);
 const env = Object.fromEntries(readFileSync(new URL('../.env', root), 'utf8').split(/\r?\n/)
   .filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).trim()]));
 const { model, apiKey, price: PRICE } = evalAi(env);
+const READER = process.env.READER ?? '';
 
 const strip = (s: string) => normalizeText(s).replace(/^nocoes (de|dos|das) /, '');
 const sameSubject = (a: string, b: string) => { const x = strip(a), y = strip(b); return x === y || x.includes(y) || y.includes(x); };
@@ -65,9 +67,14 @@ for (const file of golds) {
   const gold = JSON.parse(readFileSync(new URL(`gabaritos/${file}`, root), 'utf8')) as Gold;
   const bytes = new Uint8Array(readFileSync(new URL(`editais/${gold.pdf}`, root)));
   const { text } = await extractText(bytes.slice(), { mergePages: true });
+  const { text: pages } = await extractText(bytes.slice(), { mergePages: false });
   process.stdout.write(`${file.replace('.json', '')}: `);
   try {
-    const r = await readNotice({ apiKey, model, pdfBase64: toBase64(bytes), roleHint: gold.roleHint });
+    // READER=lines: leitura por linhas (a IA aponta, o código copia), com a cobertura medida.
+    const r = READER === 'lines'
+      ? await readNoticeByLines({ apiKey, model, pdfBase64: toBase64(bytes), pages, roleHint: gold.roleHint })
+      : await readNotice({ apiKey, model, pdfBase64: toBase64(bytes), roleHint: gold.roleHint });
+    const unc = 'uncovered' in r ? r.uncovered : null;
     const cost = costUsd(r.usage, PRICE);
     totalCost += cost;
     const s = score(r.data, gold.expected, text);
@@ -78,6 +85,9 @@ for (const file of golds) {
     for (const [k, v] of Object.entries(s.fields)) if (!v) console.log(`   ✗ ${k}: veio ${JSON.stringify(k === 'blocks' ? r.data.blocks.map((b) => b.questions) : k === 'essay' ? r.data.stages.map((x) => x.kind) : (r.data as Record<string, unknown>)[k === 'role' ? 'role' : k])}`);
     for (const k of ['missingSubjects', 'extraSubjects', 'forbiddenSubjects', 'wrongQuestions', 'topicsNotFound'] as const)
       if (s[k].length) console.log(`   ✗ ${k}: ${s[k].join(' | ')}`);
+    const raw = r.raw as { fill?: unknown[]; summarized?: string[] };
+    console.log(`   tópicos por matéria: ${r.data.subjects.map((x) => x.topics.length).join(', ')} · maior tópico ${Math.max(0, ...r.data.subjects.flatMap((x) => x.topics.map((t) => t.text.length)))} car.${raw.fill ? ` · passada extra: ${raw.fill.length}` : ''}${raw.summarized ? ` · resumidas: ${raw.summarized.join(', ')}` : ''}`);
+    if (unc) console.log(`   cobertura: ${unc.length} linha(s) do conteúdo programático fora de toda matéria${unc.length ? `: ${unc.slice(0, 4).map((l) => `p${l.page} "${l.text.slice(0, 50)}"`).join(' | ')}` : ''}`);
     report.push({ file, pass, model, promptVersion: NOTICE_PROMPT_VERSION, usage: r.usage, costUsd: cost, latencyMs: r.latencyMs, score: s, warnings, extraction: r.data });
   } catch (e) {
     console.log(`ERRO · ${(e as Error).message}`);
@@ -85,7 +95,7 @@ for (const file of golds) {
   }
 }
 mkdirSync(new URL('results/', root), { recursive: true });
-const out = new URL(`results/${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}-${model}-${NOTICE_PROMPT_VERSION}.json`, root);
+const out = new URL(`results/${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}-${model}-${NOTICE_PROMPT_VERSION}${READER ? '-' + READER : ''}.json`, root);
 writeFileSync(out, JSON.stringify({ model, promptVersion: NOTICE_PROMPT_VERSION, thresholds: THRESHOLDS, totalCostUsd: totalCost, report }, null, 2));
 const passed = report.filter((r) => r.pass).length;
 console.log(`\n${passed}/${report.length} editais aprovados · custo total US$ ${totalCost.toFixed(4)} · relatório: evals/results/${out.pathname.split('/').pop()}`);

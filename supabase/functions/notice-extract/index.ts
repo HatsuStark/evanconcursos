@@ -8,6 +8,7 @@ import { extractText } from 'unpdf';
 import { GeminiError, generateJson, toBase64, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { checkNotice, NOTICE_PROMPT_VERSION, NoticeExtraction, type NoticeRole, NoticeRoles, noticeRolesJsonSchema, normalizeText, readNotice, ROLES_PROMPT_VERSION, rolesPrompt, uniqueRoles } from '../../../shared/ai/notice.ts';
 import { noticeRoleKey, worthSharing } from '../../../shared/ai/notice-cache.ts';
+import { hasLineText, readNoticeByLines } from '../../../shared/ai/notice-lines.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { findRead, identifyNotice, registerNotice, saveRead } from '../_shared/notice-cache.ts';
 
@@ -96,11 +97,12 @@ async function process(p: { jobId: string; ownerId: string; noticeId: string; fi
     if (error || !blob) throw new Error('Não foi possível ler o PDF enviado.');
     const bytes = new Uint8Array(await blob.arrayBuffer());
 
-    // Texto do PDF para conferir os tópicos (se falhar, a extração segue sem essa verificação).
-    let pdfText: string | null = null;
+    // Texto do PDF por página: base da leitura por linhas e da conferência dos tópicos (se falhar, a leitura vai pelo PDF).
+    let pdfText: string | null = null, pages: string[] = [];
     try {
-      const t = await extractText(bytes.slice(), { mergePages: true });
-      pdfText = t.text;
+      const t = await extractText(bytes.slice(), { mergePages: false });
+      pages = t.text;
+      pdfText = pages.join('\n');
       await admin.from('notice_files').update({ pages: t.totalPages }).eq('id', p.fileId);
     } catch { /* PDF só com imagem ou protegido */ }
 
@@ -121,7 +123,9 @@ async function process(p: { jobId: string; ownerId: string; noticeId: string; fi
       readModel = hit.model || model;
       await saveRead(admin, 'extract', keys, roleKey, NOTICE_PROMPT_VERSION, hit);
     } else {
-      const read = await readNotice({ apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, pdfBase64: toBase64(bytes), roleHint: p.roleHint, exact: p.exact ?? undefined });
+      // Com texto, leitura por linhas (a IA aponta, o código copia); PDF só com imagem, a leitura pelo PDF.
+      const args = { apiKey: Deno.env.get('GEMINI_API_KEY') ?? '', model, pdfBase64: toBase64(bytes), roleHint: p.roleHint, exact: p.exact ?? undefined };
+      const read = hasLineText(pages) ? await readNoticeByLines({ ...args, pages }) : await readNotice(args);
       usage = read.usage; latencyMs = read.latencyMs;
       r = { data: read.data, raw: read.raw };
       if (worthSharing(read.data)) await saveRead(admin, 'extract', keys, roleKey, NOTICE_PROMPT_VERSION, { result: read.data, raw: read.raw, model });

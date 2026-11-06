@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { GeminiError, generateJson, type GeminiUsage } from './gemini.ts';
 
-export const NOTICE_PROMPT_VERSION = 'notice-v10';
+export const NOTICE_PROMPT_VERSION = 'notice-v11';
 
 // Mesmos valores do filtro nivel_escolaridade da Quest API; vazio se o edital não informar.
 export const EDUCATION_LEVELS = ['Fundamental', 'Médio', 'Superior'] as const;
@@ -124,8 +124,10 @@ export function uniqueRoles(roles: NoticeRole[]): NoticeRole[] {
 // 'fill' (com `only`): os tópicos de disciplinas que as duas partes deixaram sem conteúdo (ver fillMissingTopics).
 // 'summary' (com `only`): último recurso, os tópicos resumidos em palavras-chave, quando a transcrição literal é recusada
 // (RECITATION: o ECA do TJSP, com a lista de convenções internacionais, caía no filtro mesmo com nova tentativa).
-export type NoticePart = 'all' | 'general' | 'specific' | 'fill' | 'summary';
-export function noticePrompt(roleHint: string, retry = false, exact?: { code?: string; otherRoles?: string[] }, part: NoticePart = 'all', only: string[] = []): string {
+// 'meta': tudo menos os tópicos (a leitura por linhas, notice-lines.ts, traz os tópicos à parte).
+export type NoticePart = 'all' | 'general' | 'specific' | 'fill' | 'summary' | 'meta';
+// Cargo e escopo do pedido, comuns a todas as partes (e à leitura por linhas).
+export function roleRules(roleHint: string, exact?: { code?: string; otherRoles?: string[] }, part: NoticePart | 'lines' = 'all') {
   const role = roleHint.trim().slice(0, 160);
   const others = (exact?.otherRoles ?? []).filter((r) => normalizeText(r) !== normalizeText(role)).slice(0, 60);
   const cargo = !role
@@ -134,7 +136,12 @@ export function noticePrompt(roleHint: string, retry = false, exact?: { code?: s
       ? `use exatamente o cargo "${role}"${exact.code ? ` (código ${exact.code})` : ''}, escolhido pelo candidato na lista de cargos do edital. Nunca troque por outro cargo de nome parecido ou que contenha estas palavras${others.length ? `; os outros cargos do edital são: ${others.map((o) => `"${o}"`).join(', ')}. Não use a prova, o conteúdo nem as atribuições deles` : ''}`
       : `use o cargo "${role}" (ou o mais próximo dele)`;
   const scope = `- Considere somente a prova e o conteúdo programático do cargo escolhido.${exact && role ? `
-- Em quadros e anexos com vários cargos (provas, conteúdo programático, atribuições), use só o trecho cujo título traz este cargo${exact.code ? ` (código ${exact.code})` : ''}; o trecho do cargo vizinho, mesmo logo acima ou abaixo, é de outro cargo.${part === 'specific' ? '' : ` Em role, copie "${role}".`}` : ''}`;
+- Em quadros e anexos com vários cargos (provas, conteúdo programático, atribuições), use só o trecho cujo título traz este cargo${exact.code ? ` (código ${exact.code})` : ''}; o trecho do cargo vizinho, mesmo logo acima ou abaixo, é de outro cargo.${part === 'specific' || part === 'lines' ? '' : ` Em role, copie "${role}".`}` : ''}`;
+  return { role, cargo, scope };
+}
+
+export function noticePrompt(roleHint: string, retry = false, exact?: { code?: string; otherRoles?: string[] }, part: NoticePart = 'all', only: string[] = []): string {
+  const { cargo, scope } = roleRules(roleHint, exact, part);
   const subjectsRule = '- subjects: uma entrada por disciplina. Quando um bloco agrupa várias disciplinas, cada disciplina com título próprio no conteúdo programático (inclusive títulos em MAIÚSCULAS como "ENGENHARIA DE SOFTWARE", "BANCOS DE DADOS") é uma entrada separada, com "block" indicando o bloco. Nunca crie uma disciplina com o nome do bloco (ex.: "Conhecimentos Específicos") quando o bloco tem títulos internos.';
   // Tópico definido pelo conteúdo, não pela formatação: regras de corte por pontuação ("uma frase", "um item numerado")
   // acertavam um formato e erravam outro (TRF3 em parágrafo corrido × Receita numerada em 1.1.1).
@@ -176,7 +183,7 @@ ${scope}
 ${subjectsRule}
 - questions: o número de questões da disciplina quando o edital informar por disciplina; 0 quando só houver o total do bloco.
 - core: true para conhecimentos específicos do cargo; false para conhecimentos gerais/básicos.
-${topicsRule}${part === 'general' ? '\n- Em topics, transcreva só as disciplinas de conhecimentos gerais/básicos (core = false). As de conhecimentos específicos (core = true) entram em subjects normalmente, com topics vazio: o conteúdo delas é lido à parte.' : ''}
+${part === 'meta' ? '- topics: deixe vazio em todas as disciplinas; o conteúdo programático é lido à parte.' : topicsRule}${part === 'general' ? '\n- Em topics, transcreva só as disciplinas de conhecimentos gerais/básicos (core = false). As de conhecimentos específicos (core = true) entram em subjects normalmente, com topics vazio: o conteúdo delas é lido à parte.' : ''}
 - stages: as etapas do concurso (objetiva, discursiva, títulos, prática, física...).
 - notes: regras relevantes para o planejamento (nota mínima, critérios de eliminação, peso das provas, detalhes da discursiva), frases curtas.
 - Não invente: se uma informação não estiver no edital, deixe vazio ou 0.${retryRule}`;
@@ -238,39 +245,47 @@ export async function readNotice(o: { apiKey: string; model: string; pdfBase64: 
     ]);
     const usage: GeminiUsage = { inputTokens: a.usage.inputTokens + b.usage.inputTokens, outputTokens: a.usage.outputTokens + b.usage.outputTokens, thinkingTokens: a.usage.thinkingTokens + b.usage.thinkingTokens };
     const add = (u: GeminiUsage) => { usage.inputTokens += u.inputTokens; usage.outputTokens += u.outputTokens; usage.thinkingTokens += u.thinkingTokens; };
-    let data = mergeNoticeParts(a.data, b.data);
     const raw: Record<string, unknown> = { main: a.raw, specific: b.raw };
-    // Passada extra para as disciplinas ainda sem tópicos, em chamadas paralelas, enquanto houver tempo:
-    // 1) grupos de FILL_GROUP, transcrição literal; 2) uma disciplina por chamada, quebrando itens longos e com mais variação
-    // (contra o filtro RECITATION); 3) uma por chamada, tópicos resumidos em palavras-chave (raw.summarized: a conferência
-    // avisa que essas vieram resumidas). O que sobrar fica sem tópicos e aparece na conferência.
-    const fillLog: unknown[] = [], summarized: string[] = [];
-    const rounds = [
-      { size: FILL_GROUP, part: 'fill', split: retry, temperature: temperature },
-      { size: 1, part: 'fill', split: true, temperature: 0.7 },
-      { size: 1, part: 'summary', split: true, temperature: 0.7 },
-    ] as const;
-    for (const round of rounds) {
-      const missing = data.subjects.filter((s) => !s.topics.length).map((s) => s.name);
-      const left = timeoutMs - (Date.now() - started);
-      if (!missing.length || left < FILL_MIN_MS) break;
-      const groups = Array.from({ length: Math.ceil(missing.length / round.size) }, (_, i) => missing.slice(i * round.size, (i + 1) * round.size));
-      const fills = await Promise.all(groups.map((names) => generateJson({ ...common, temperature: round.temperature, timeoutMs: left - 3_000, schema: NoticeSpecific, jsonSchema: noticeSpecificJsonSchema(),
-        parts: parts(noticePrompt(o.roleHint, round.split, o.exact, round.part, names)) })
-        .catch((err: unknown) => ({ error: err instanceof Error ? err.message.slice(0, 300) : String(err), names, usage: err instanceof GeminiError ? err.usage : null }))));
-      for (const f of fills) {
-        if ('error' in f) { fillLog.push({ error: f.error, names: f.names }); if (f.usage) add(f.usage); continue; }
-        const before = new Set(data.subjects.filter((s) => s.topics.length).map((s) => s.name));
-        data = fillMissingTopics(data, f.data);
-        if (round.part === 'summary') summarized.push(...data.subjects.filter((s) => s.topics.length && !before.has(s.name)).map((s) => s.name));
-        add(f.usage);
-        fillLog.push(f.raw);
-      }
-    }
-    if (fillLog.length) raw.fill = fillLog;
-    if (summarized.length) raw.summarized = summarized;
+    const data = await fillTopicGaps(mergeNoticeParts(a.data, b.data), { ...o, common, parts, retry, temperature, deadline: started + timeoutMs, add, raw });
     return { data, raw, usage, model: a.model, latencyMs: Date.now() - started };
   });
+}
+
+// Passada extra para as disciplinas ainda sem tópicos, em chamadas paralelas com o PDF, enquanto houver tempo:
+// 1) grupos de FILL_GROUP, transcrição literal; 2) uma disciplina por chamada, quebrando itens longos e com mais variação
+// (contra o filtro RECITATION); 3) uma por chamada, tópicos resumidos em palavras-chave (raw.summarized: a conferência
+// avisa que essas vieram resumidas). O que sobrar fica sem tópicos e aparece na conferência.
+export async function fillTopicGaps(data: NoticeExtraction, c: {
+  roleHint: string; exact?: { code?: string; otherRoles?: string[] }; retry: boolean; temperature: number; deadline: number;
+  common: Omit<Parameters<typeof generateJson>[0], 'schema' | 'jsonSchema' | 'parts'>; parts: (t: string) => Parameters<typeof generateJson>[0]['parts'];
+  add: (u: GeminiUsage) => void; raw: Record<string, unknown>;
+}): Promise<NoticeExtraction> {
+  const fillLog: unknown[] = [], summarized: string[] = [];
+  const rounds = [
+    { size: FILL_GROUP, part: 'fill', split: c.retry, temperature: c.temperature },
+    { size: 1, part: 'fill', split: true, temperature: 0.7 },
+    { size: 1, part: 'summary', split: true, temperature: 0.7 },
+  ] as const;
+  for (const round of rounds) {
+    const missing = data.subjects.filter((s) => !s.topics.length).map((s) => s.name);
+    const left = c.deadline - Date.now();
+    if (!missing.length || left < FILL_MIN_MS) break;
+    const groups = Array.from({ length: Math.ceil(missing.length / round.size) }, (_, i) => missing.slice(i * round.size, (i + 1) * round.size));
+    const fills = await Promise.all(groups.map((names) => generateJson({ ...c.common, temperature: round.temperature, timeoutMs: left - 3_000, schema: NoticeSpecific, jsonSchema: noticeSpecificJsonSchema(),
+      parts: c.parts(noticePrompt(c.roleHint, round.split, c.exact, round.part, names)) })
+      .catch((err: unknown) => ({ error: err instanceof Error ? err.message.slice(0, 300) : String(err), names, usage: err instanceof GeminiError ? err.usage : null }))));
+    for (const f of fills) {
+      if ('error' in f) { fillLog.push({ error: f.error, names: f.names }); if (f.usage) c.add(f.usage); continue; }
+      const before = new Set(data.subjects.filter((s) => s.topics.length).map((s) => s.name));
+      data = fillMissingTopics(data, f.data);
+      if (round.part === 'summary') summarized.push(...data.subjects.filter((s) => s.topics.length && !before.has(s.name)).map((s) => s.name));
+      c.add(f.usage);
+      fillLog.push(f.raw);
+    }
+  }
+  if (fillLog.length) c.raw.fill = fillLog;
+  if (summarized.length) c.raw.summarized = summarized;
+  return data;
 }
 
 // ---------- verificações determinísticas ----------

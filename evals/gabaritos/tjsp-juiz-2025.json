@@ -1,0 +1,30 @@
+{
+  "pdf": "tjsp-juiz-2025.pdf",
+  "source": "Edital de abertura do 192º Concurso da Magistratura do TJSP (12/09/2025)",
+  "sha256": "037f25de0b12f2d36944efd062b9bcadff58bcb0cc1c25e1539d315d2e4f42ac",
+  "roleHint": "Juiz(a) Substituto(a)",
+  "expected": {
+    "board": "VUNESP",
+    "examDate": "2025-11-30",
+    "roleKeywords": ["juiz"],
+    "totalQuestions": 100,
+    "essay": true,
+    "blockQuestions": [30, 35, 35],
+    "subjects": [
+      { "name": "Direito Civil" },
+      { "name": "Direito Processual Civil" },
+      { "name": "Direito do Consumidor" },
+      { "name": "Direito da Criança e do Adolescente" },
+      { "name": "Direito Penal" },
+      { "name": "Direito Processual Penal" },
+      { "name": "Direito Constitucional" },
+      { "name": "Direito Eleitoral" },
+      { "name": "Direito Empresarial" },
+      { "name": "Direito Tributário" },
+      { "name": "Direito Ambiental" },
+      { "name": "Direito Administrativo" },
+      { "name": "Noções Gerais de Direito e Formação Humanística", "aliases": ["Formação Humanística"] },
+      { "name": "Direitos Humanos" }
+    ]
+  }
+}
