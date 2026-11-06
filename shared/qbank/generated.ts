@@ -17,6 +17,17 @@ export const GENERATED_PROMPT_VERSION = 'qgen-v3';
 export const GENERATED_BANCA = 'Inédita (IA)';
 export const GENERATED_MAX = 5;
 
+// Proporção na sessão: enquanto o banco ainda tem questão no tema (só demorou, ou a triagem descartou parte), a IA entra
+// no máximo 1 para cada 3 da API. Sem questão real para servir agora (banco esgotado, nenhum assunto, nada no lote), a IA
+// completa o que faltar.
+export const API_PER_GENERATED = 3;
+export function generatedRoom(o: { missing: number; sessionQids: string[]; apiDry: boolean }) {
+  if (o.missing <= 0) return 0;
+  const ai = o.sessionQids.filter((q) => q.startsWith('ia-')).length, api = o.sessionQids.length - ai;
+  if (o.apiDry || !api) return o.missing;
+  return Math.max(0, Math.min(o.missing, Math.floor(api / API_PER_GENERATED) - ai));
+}
+
 export const GeneratedQuestions = z.object({
   questoes: z.array(z.object({
     enunciado: z.string().describe('Trecho chamado de "destacado" no comando vai entre **duplo asterisco**.'),

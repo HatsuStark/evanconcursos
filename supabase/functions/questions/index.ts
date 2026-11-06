@@ -6,7 +6,7 @@
 //   {action:'mnemonic', qid, taskId?}     → mnemônico compartilhado (ou nenhum), vira flashcard do estudante
 // A chave da Quest API e o gabarito ficam só no servidor. taskId é opcional fora do cronograma.
 import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { arrangeBatch, GENERATED_EXAMPLES, GENERATED_MAX, GENERATED_PROMPT_VERSION, GeneratedQuestions, generatedJsonSchema, generatedPrompt, generatedTheme, guideDigest, toPublic } from '../../../shared/qbank/generated.ts';
+import { arrangeBatch, generatedRoom, GENERATED_EXAMPLES, GENERATED_MAX, GENERATED_PROMPT_VERSION, GeneratedQuestions, generatedJsonSchema, generatedPrompt, generatedTheme, guideDigest, toPublic } from '../../../shared/qbank/generated.ts';
 import { guideCacheKey, roleSpecific } from '../../../shared/ai/guide.ts';
 import { missingMark } from '../../../shared/ai/marks.ts';
 import { loadLawSources } from '../_shared/law.ts';
@@ -370,13 +370,15 @@ Deno.serve(async (req) => {
       for (const q of result) seen.add(q.qid);
     }
     const opening = result.length;
+    // Banco sem mais nada no tema para este pedido (sem assunto vivo ou busca vazia): libera a IA sem a proporção.
+    let apiDry = false;
     // Até 3 rodadas: as questões descartadas pela triagem são repostas no mesmo pedido.
     // Assunto que trouxe muito descarte nesta sessão deixa de ser comprado (prunedAssuntos); sem assunto bom, vai para o plano B.
     for (let round = 0; round < RELEVANCE_ROUNDS && result.length < count && !timedOut; round++) {
       const pruned = prunedAssuntos(verdicts);
       const live = filters.filter((f) => !pruned.has(normalizeText(f.assunto)));
       const liveIncidence = (incidence ?? []).filter((i) => !pruned.has(normalizeText(i.assunto)));
-      if (!live.length || !liveIncidence.length) break;
+      if (!live.length || !liveIncidence.length) { apiDry = true; break; }
       const need = count - result.length;
       const out: QuestQuestion[] = [];
       // Traz até `limit` questões no total, das mais recentes para as mais antigas.
@@ -419,12 +421,20 @@ Deno.serve(async (req) => {
       const ofBoard = (q: PublicQuestion) => Number(!!board && (boardIds.has(q.qid) || normalizeText(q.prova?.banca ?? '') === board));
       out.sort((a, b) => (b.provas?.length ?? 0) - (a.provas?.length ?? 0));
       const found = [...cached, ...out.slice(0, Math.max(0, need - cached.length)).map(publicQuestion)].sort((a, b) => ofBoard(b) - ofBoard(a));
-      if (!found.length) break;
+      if (!found.length) { apiDry = !timedOut; break; }
       for (const q of found) { seen.add(q.qid); served.set(normalizeText(q.assunto), (served.get(normalizeText(q.assunto)) ?? 0) + 1); }
       result.push(...await screen(found));
     }
-    // Plano B: sem questão real no tema, questões inéditas da IA, reaproveitadas entre estudantes com o mesmo tema.
-    if (sess && result.length < count && Date.now() - started < GENERATE_BEFORE_MS) result.push(...await generated(count - result.length));
+    // Plano B: questões inéditas da IA, reaproveitadas entre estudantes com o mesmo tema. Com o banco ainda rendendo no tema,
+    // no máximo 1 da IA para cada 3 da API na sessão (respondidas, na tela e deste lote; o aquecimento não conta). Lote sem
+    // nenhuma questão real nova também libera a IA: o estudante não fica sem questão.
+    const sessionQids = [
+      ...(done ?? []).filter((d) => sid && d.session_id === sid).map((d) => d.qid as string),
+      ...(Array.isArray(body.exclude) ? (body.exclude as unknown[]).map(String).slice(0, 500) : []),
+      ...result.slice(opening).map((q) => q.qid),
+    ];
+    const room = generatedRoom({ missing: count - result.length, sessionQids: [...new Set(sessionQids)], apiDry: apiDry || result.length === opening });
+    if (sess && room > 0 && Date.now() - started < GENERATE_BEFORE_MS) result.push(...await generated(room));
     await log('qbank_fetch', 'ok');
     // As questões do começo da tarefa (aquecimento, erros do tema) vêm todas, mesmo pedindo 1: saem do banco, na hora, e não
     // voltariam depois, porque o pedido seguinte já não é o começo da tarefa.
