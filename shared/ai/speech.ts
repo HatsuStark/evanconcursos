@@ -1,5 +1,7 @@
 // Texto da apostila preparado para leitura em voz alta: siglas e abreviações por extenso, em trechos curtos
 // (alguns navegadores interrompem falas longas). Cada seção corresponde a um bloco da tela (key).
+import { missingMark } from './marks.ts';
+
 export interface SpeechSection { key: string; title: string; chunks: string[] }
 
 // Campos da versão guide-v4 (objetivos, quadros, memorizar, questoes) são opcionais: apostilas antigas não os têm.
@@ -91,7 +93,7 @@ export function guideSpeech(g: SpeakableGuide): SpeechSection[] {
     ...list('banca', 'O que mais cai', g.pontos_banca),
     ...list('pegadinhas', 'Pegadinhas', g.pegadinhas),
     ...list('resumo', 'Resumo', g.resumo),
-    ...list('questoes', 'Questões de fixação', (g.questoes ?? []).map((q, i) => `Questão ${i + 1}: ${q.enunciado} ${q.alternativas.map((a, j) => `${String.fromCharCode(65 + j)}: ${a}`).join('. ')} Gabarito: ${q.gabarito === 'C' && !q.alternativas.length ? 'certo' : q.gabarito === 'E' && !q.alternativas.length ? 'errado' : q.gabarito}. ${q.comentario}`)),
+    ...list('questoes', 'Questões de fixação', (g.questoes ?? []).filter((q) => !missingMark(q.enunciado)).map((q, i) => `Questão ${i + 1}: ${q.enunciado.replace(/\*\*/g, '')}${q.alternativas.map((a, j) => `${String.fromCharCode(65 + j)}: ${a}`).join('. ')} Gabarito: ${q.gabarito === 'C' && !q.alternativas.length ? 'certo' : q.gabarito === 'E' && !q.alternativas.length ? 'errado' : q.gabarito}. ${q.comentario}`)),
     ...list('perguntas', 'Perguntas de revisão', g.perguntas.map((q, i) => `Pergunta ${i + 1}: ${q.pergunta} Resposta: ${q.resposta}`)),
   ];
 }

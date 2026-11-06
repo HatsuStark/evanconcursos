@@ -1,6 +1,7 @@
 // Apostila da sessão gerada pela IA: schema, prompt versionado e verificação das citações legais.
 // Fontes permitidas: o conteúdo do edital da sessão e os artigos oficiais fornecidos (lei seca).
 import { z } from 'zod';
+import { MARK_RULE, missingMark } from './marks.ts';
 import { roleContext } from './plan.ts';
 import { findLawRefs, inRanges, type LawRef } from '../legal/refs.ts';
 import { lawByKey, type LawEntry } from '../legal/registry.ts';
@@ -48,7 +49,7 @@ export const Guide = z.object({
   pegadinhas: z.array(z.string()),
   resumo: z.array(z.string()).describe('Revisão em tópicos curtos.'),
   questoes: z.array(z.object({
-    enunciado: z.string(),
+    enunciado: z.string().describe('Trecho chamado de "destacado" no comando vai entre **duplo asterisco**.'),
     alternativas: z.array(z.string()).describe('Alternativas sem a letra; vazio em questão de certo ou errado.'),
     gabarito: z.string().describe('Letra da alternativa correta (A, B…) ou C/E em certo ou errado.'),
     comentario: z.string().describe('Por que o gabarito está certo e o erro das outras, em até 3 frases.'),
@@ -155,7 +156,8 @@ export function mergeGuide(t: GuideText, p: GuidePractice): Guide {
     const best = score.indexOf(Math.max(...score));
     if (best >= 0 && score[best]! > 0) como[best] = c.como.trim();
   }
-  return { ...t, ...rest, mnemonicos: [], gatilhos: [], secoes: t.secoes.map((x, i) => ({ ...x, como_banca_cobra: como[i]! })) };
+  // Questão que fala em termo destacado sem marcar nenhum não tem como ser respondida: sai.
+  return { ...t, ...rest, questoes: rest.questoes.filter((q) => !missingMark(q.enunciado)), mnemonicos: [], gatilhos: [], secoes: t.secoes.map((x, i) => ({ ...x, como_banca_cobra: como[i]! })) };
 }
 
 export interface GuideSource { ref: string; text: string }
@@ -277,7 +279,7 @@ ${!full ? REVIEW_RULES : [texto && (deep ? DEEP_TEXT : FULL_TEXT), pratica && (d
 ${full ? VOICE_RULES : REVIEW_VOICE}
 ${texto ? '- quadros: compare só o que a banca costuma confundir (espécies, prazos, requisitos, diferenças entre institutos). Sem quadro se o tema não tiver o que comparar.' : ''}
 ${pratica ? '- memorizar: só números, prazos, quóruns e listas que estejam nos trechos de lei ou no conteúdo do edital, nunca de memória. Vazio se não houver.' : ''}
-${full && pratica ? `- questoes: inéditas, ${ce ? 'no formato certo ou errado (alternativas vazias; gabarito "C" ou "E")' : 'de múltipla escolha com 5 alternativas (gabarito A a E)'}, no estilo ${board.length ? 'das questões reais fornecidas' : `da ${p.banca || 'banca'}`}, cobrando os pontos principais do tema. Uma única resposta correta, sem ambiguidade; o comentário explica o gabarito pela apostila ou pelo artigo fornecido.` : ''}
+${full && pratica ? `- questoes: inéditas, ${ce ? 'no formato certo ou errado (alternativas vazias; gabarito "C" ou "E")' : 'de múltipla escolha com 5 alternativas (gabarito A a E)'}, no estilo ${board.length ? 'das questões reais fornecidas' : `da ${p.banca || 'banca'}`}, cobrando os pontos principais do tema. Uma única resposta correta, sem ambiguidade; o comentário explica o gabarito pela apostila ou pelo artigo fornecido. ${MARK_RULE}` : ''}
 ${texto ? '- legislacao: comente os artigos fornecidos mais importantes para a prova (ref exatamente como no colchete).' : ''}
 ${pratica ? `- pontos_banca e pegadinhas: o que costuma cair e as confusões comuns${p.banca ? ` da ${p.banca}` : ''}.` : ''}
 - ${!full ? 'secoes: vazio.' : p.part === 'texto' ? 'secoes: só título, prioridade, texto e exemplos (o "como a banca cobra" vem na etapa seguinte).' : board.length ? `${p.part === 'pratica' ? 'cobranca' : 'secoes[].como_banca_cobra'}: diga como as questões fornecidas abordam ${p.part === 'pratica' ? 'cada assunto' : 'o assunto da seção'} (letra da lei, caso prático, conceito, exceção, tipo de distrator). Só o que se observa nelas: sem percentuais, sem "sempre" ou "nunca", sem copiar enunciados. Deixe de fora o que nenhuma questão trata. As questões são só amostra de estilo, nunca fonte do conteúdo.` : `${p.part === 'pratica' ? 'cobranca' : 'secoes[].como_banca_cobra'}: deixe vazio.`}

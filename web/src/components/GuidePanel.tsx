@@ -1,5 +1,6 @@
 import { BookOpen, Info, CheckCircle2, Headphones, Landmark, Pause, Play, Printer, SkipBack, SkipForward, Sparkles, Square } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { missingMark, splitMarks } from '../../../shared/ai/marks.ts';
 import { guideSpeech } from '../../../shared/ai/speech.ts';
 import { localVoiceSupported } from '../lib/piper.ts';
 import { supabase } from '../lib/supabase.ts';
@@ -48,6 +49,11 @@ async function fetchGuide(taskId: string, depth: string, cancelled: () => boolea
 
 const MAP_COLORS = ['var(--cyan)', 'var(--violet)', 'var(--lime)', 'var(--orange)', 'var(--magenta)'];
 const paragraphs = (t: string) => t.split(/\n\s*\n|\n/).map((p) => p.trim()).filter(Boolean);
+
+// Trecho que o comando chama de "destacado" vem entre **…** e aparece em negrito.
+const Marked = ({ text }: { text: string }) => <>{splitMarks(text).map((p, i) => (p.bold ? <b key={i}>{p.text}</b> : <span key={i}>{p.text}</span>))}</>;
+// Apostilas gravadas antes da marca: questão que fala em termo destacado sem nenhum marcado não tem como ser respondida.
+const fixQuestions = <Q extends { enunciado: string }>(qs?: Q[]) => (qs ?? []).filter((q) => !missingMark(q.enunciado));
 
 // Apostila da sessão: completa ou revisão curta, gerada pela IA a partir do edital e da lei seca oficial.
 export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { taskId: string; hasSession: boolean; initialDepth?: 'completa' | 'revisao' | 'aprofundamento' }) {
@@ -176,14 +182,14 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
           {!!g.pontos_banca.length && <section {...reading('banca')}><h3>O que mais cai</h3><ul>{g.pontos_banca.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
           {!!g.pegadinhas.length && <section data-voice="pegadinhas" className={'guide-traps' + (voice.activeKey === 'pegadinhas' ? ' speaking' : '')}><h3>Pegadinhas</h3><ul>{g.pegadinhas.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
           {!!g.resumo.length && <section {...reading('resumo')}><h3>Resumo</h3><ul>{g.resumo.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
-          {!!g.questoes?.length && (
+          {!!fixQuestions(g.questoes).length && (
             <section {...reading('questoes')}><h3>Questões de fixação</h3>
-              {g.questoes.map((q, i) => {
+              {fixQuestions(g.questoes).map((q, i) => {
                 const options = q.alternativas.length ? q.alternativas.map((a, j) => ({ letra: String.fromCharCode(65 + j), texto: a })) : [{ letra: 'C', texto: 'Certo' }, { letra: 'E', texto: 'Errado' }];
                 const chosen = shown[i], right = q.gabarito.trim().slice(0, 1).toUpperCase();
                 return (
                   <div key={i} className="guide-q guide-fix">
-                    <p style={{ margin: '0 0 6px' }}><b>{i + 1}.</b> {q.enunciado}</p>
+                    <p style={{ margin: '0 0 6px' }}><b>{i + 1}.</b> <Marked text={q.enunciado} /></p>
                     <div className="guide-options no-print">
                       {options.map((o) => (
                         <button key={o.letra} className={'guide-option' + (chosen ? (o.letra === right ? ' right' : o.letra === chosen ? ' wrong' : '') : '')} disabled={!!chosen} onClick={() => setShown({ ...shown, [i]: o.letra })}>

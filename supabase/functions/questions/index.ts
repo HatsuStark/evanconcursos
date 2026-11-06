@@ -8,6 +8,7 @@
 import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { arrangeBatch, GENERATED_EXAMPLES, GENERATED_MAX, GENERATED_PROMPT_VERSION, GeneratedQuestions, generatedJsonSchema, generatedPrompt, generatedTheme, guideDigest, toPublic } from '../../../shared/qbank/generated.ts';
 import { guideCacheKey, roleSpecific } from '../../../shared/ai/guide.ts';
+import { missingMark } from '../../../shared/ai/marks.ts';
 import { loadLawSources } from '../_shared/law.ts';
 import { DEEP_PREFIX, PRACTICE_PREFIX } from '../../../shared/ai/plan.ts';
 import { ownLaws } from '../_shared/legal.ts';
@@ -282,7 +283,8 @@ Deno.serve(async (req) => {
       let madeQuery = admin.from('qbank_questions').select('payload').eq('payload->>ia_tema', theme).eq('payload->>ia_versao', GENERATED_PROMPT_VERSION);
       if (grounded) madeQuery = madeQuery.gt('payload->ia_fontes', 0);
       const { data: made } = await madeQuery.limit(200);
-      const all = (made ?? []).map((r) => r.payload as PublicQuestion);
+      // As feitas antes da marca de destaque e que falam em termo destacado não têm como ser respondidas: ficam de fora.
+      const all = (made ?? []).map((r) => r.payload as PublicQuestion).filter((q) => !missingMark(q.enunciado));
       const reuse = all.filter((q) => !seen.has(q.qid)).slice(0, n);
       for (const q of reuse) seen.add(q.qid);
       if (reuse.length >= n) return reuse;
