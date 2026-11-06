@@ -154,6 +154,9 @@ Deno.serve(async (req) => {
     if (body.action !== 'next') return json(400, { error: 'Ação inválida.' });
     if (!task) return json(400, { error: 'Informe a tarefa.' });
     const count = Math.max(1, Math.min(10, Number(body.count) || 5));
+    // Lote previsto (`batch`): o app pede 1 questão para abrir a aba na hora e o resto em segundo plano. O aquecimento e a
+    // revisão dos erros do aprofundamento são dimensionados pelo lote, não pela primeira questão.
+    const planned = Math.max(count, Math.min(10, Number(body.batch) || count));
 
     // Revisão semanal: os erros vencidos do caderno deste concurso, do cache, sem créditos. As sessões não intercalam erros:
     // eles esperam por esta tarefa.
@@ -339,8 +342,8 @@ Deno.serve(async (req) => {
       return ids.map((id) => byId.get(id)).filter((q): q is PublicQuestion => !!q).map((q) => (warmup ? { ...q, warmupOf: sessionId } : q));
     };
     if (fresh && task.kind === 'theory' && sid) {
-      if (deep && own?.source_session_id) result.push(...await replay(sid, Math.ceil(count / 2), false));
-      else if (!deep && own && count >= 4) {
+      if (deep && own?.source_session_id) result.push(...await replay(sid, Math.ceil(planned / 2), false));
+      else if (!deep && own && planned >= 4) {
         // Parte 2 em diante de um tema: recorda a parte anterior (a base do conteúdo de hoje), com mais questões.
         const part = partOf(own.title);
         let prevId: string | undefined;
@@ -359,11 +362,12 @@ Deno.serve(async (req) => {
             : { data: [] };
           prevId = (prev?.[0] as { id?: string } | undefined)?.id;
         }
-        const warm = part && part.part > 1 ? Math.min(PART_WARMUP_QUESTIONS, Math.floor(count / 2)) : WARMUP_QUESTIONS;
+        const warm = part && part.part > 1 ? Math.min(PART_WARMUP_QUESTIONS, Math.floor(planned / 2)) : WARMUP_QUESTIONS;
         if (prevId) result.push(...await replay(prevId, warm, true));
       }
       for (const q of result) seen.add(q.qid);
     }
+    const opening = result.length;
     // Até 3 rodadas: as questões descartadas pela triagem são repostas no mesmo pedido.
     // Assunto que trouxe muito descarte nesta sessão deixa de ser comprado (prunedAssuntos); sem assunto bom, vai para o plano B.
     for (let round = 0; round < RELEVANCE_ROUNDS && result.length < count && !timedOut; round++) {
@@ -420,7 +424,9 @@ Deno.serve(async (req) => {
     // Plano B: sem questão real no tema, questões inéditas da IA, reaproveitadas entre estudantes com o mesmo tema.
     if (sess && result.length < count && Date.now() - started < GENERATE_BEFORE_MS) result.push(...await generated(count - result.length));
     await log('qbank_fetch', 'ok');
-    const batch = await withStatus(admin, auth.user.id, result.slice(0, count));
+    // As questões do começo da tarefa (aquecimento, erros do tema) vêm todas, mesmo pedindo 1: saem do banco, na hora, e não
+    // voltariam depois, porque o pedido seguinte já não é o começo da tarefa.
+    const batch = await withStatus(admin, auth.user.id, result.slice(0, Math.max(count, opening)));
     return json(200, { questions: batch, filter: { materia: filter.materia, assuntos: filter.assuntos, how: filter.how }, reason: batch.length ? null : timedOut ? 'demorou' : 'esgotado-dificeis' });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

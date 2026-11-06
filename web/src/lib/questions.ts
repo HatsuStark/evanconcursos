@@ -25,7 +25,8 @@ async function call<T>(body: Record<string, unknown>): Promise<T> {
 }
 
 // exclude: questões já mostradas (a revisão semanal tira delas os próximos erros).
-export const nextQuestions = (taskId: string, count = 5, exclude: string[] = []) => call<NextResult>({ action: 'next', taskId, count, exclude });
+// batch: tamanho previsto do lote quando se pede menos para abrir mais rápido (o aquecimento é dimensionado por ele).
+export const nextQuestions = (taskId: string, count = 5, exclude: string[] = [], batch = count) => call<NextResult>({ action: 'next', taskId, count, exclude, batch });
 // Resposta corrigida direto no banco (answer_question): uma ida e volta, sem passar pela Edge Function.
 // sessionId: questão de aquecimento, que conta para a sessão anterior.
 export async function answerQuestion(taskId: string | null, qid: string, chosen: string, context: 'plan' | 'free' | 'review' = 'plan', sessionId?: string) {

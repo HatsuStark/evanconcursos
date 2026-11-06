@@ -73,7 +73,8 @@ export function QuestionsPanel({ source, goal = 0, answered = 0, paged = false }
     try {
       // Cada questão nova custa créditos: a busca livre traz só o que a página vai mostrar.
       // Na revisão semanal, os erros já mostrados não voltam no mesmo lote.
-      const r = source.kind === 'task' ? await nextQuestions(source.taskId, 5, queueRef.current.map((q) => q.qid))
+      // Tarefa do cronograma: abre com 1 questão (as do aquecimento vêm todas) e o resto chega em segundo plano.
+      const r = source.kind === 'task' ? await nextQuestions(source.taskId, initial ? 1 : 5, queueRef.current.map((q) => q.qid), 5)
         : source.kind === 'free' ? await searchFree(source.filters, Math.max(sizeRef.current, 5), queueRef.current.map((q) => q.qid))
         : source.kind === 'id' ? await questionById(source.qid)
         : { ...(await reviewDue(20)), reason: 'revisao' as string | null };
