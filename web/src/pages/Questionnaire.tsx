@@ -34,8 +34,8 @@ export function QuestionnairePage() {
       return data as SubjectRow[];
     },
   });
-  // Normas citadas no edital que o app não tem (nem no registro, nem enviadas): o estudante pode enviar o PDF antes de
-  // montar o cronograma, para as sessões delas serem medidas e terem lei seca, apostila e questões com o texto.
+  // Normas citadas no edital que o app não tem (nem no registro, nem enviadas): o estudante envia o PDF antes de montar o
+  // cronograma (obrigatório), para as sessões delas serem medidas e terem lei seca, apostila e questões com o texto.
   const own = useOwnLaws();
   // Antes, o servidor busca sozinho o texto das normas citadas (federais e estaduais); só as que não achar pedem o PDF.
   const lawSearch = useQuery({
@@ -55,7 +55,9 @@ export function QuestionnairePage() {
       return (data as { notice_topics: { text: string }[] }[]).flatMap((s) => s.notice_topics.map((t) => t.text)).join('\n');
     },
   });
-  const missingLaws = topicText.data && own.data && !lawSearch.isLoading ? unlistedNorms(topicText.data, own.data.entries) : [];
+  const unlisted = topicText.data && own.data && !lawSearch.isLoading ? unlistedNorms(topicText.data, own.data.entries) : [];
+  // Enquanto confere as normas, o cronograma também espera (sem isso, daria para gerar antes do pedido aparecer).
+  const lawsChecking = topicText.isPending || own.isPending || lawSearch.isLoading;
   const notice = useQuery({
     queryKey: ['notice-exam-date', noticeId],
     queryFn: async () => {
@@ -78,10 +80,16 @@ export function QuestionnairePage() {
     setInputs({
       hours: prev?.hours ?? [...DEFAULT_HOURS], startDate: ymd(new Date()), weeklyReview: prev?.weeklyReview ?? true, profile: prev?.profile ?? '',
       levels: Object.fromEntries(subjects.data.map((s) => [s.id, prev?.levels[s.id] ?? carried[s.id] ?? 1])),
+      ...(prev?.skippedNorms?.length ? { skippedNorms: prev.skippedNorms } : {}),
     });
   }, [subjects.data, existing.isLoading, existing.data, previous.isLoading, previous.data, previousId, inputs]);
 
   if (!inputs || !subjects.data) return <Shell title="Questionário"><div className="spinner" /></Shell>;
+  // "Não encontro esta norma": sai da lista de pendentes e fica registrada nas respostas do plano.
+  const skipped = inputs.skippedNorms ?? [];
+  const missingLaws = unlisted.filter((n) => !skipped.some((k) => k.key === n.key));
+  const skippedHere = skipped.filter((k) => unlisted.some((n) => n.key === k.key));
+  const lawsBlocked = lawsChecking || missingLaws.length > 0;
   const weekly = inputs.hours.reduce((a, h) => a + h, 0);
   const set = (patch: Partial<PlanInputs>) => setInputs({ ...inputs, ...patch });
   const regenerate = !!existing.data;
@@ -92,6 +100,7 @@ export function QuestionnairePage() {
   async function submit() {
     if (!inputs || !noticeId) return;
     if (!weekly) return setError('Informe horas de estudo em pelo menos um dia.');
+    if (lawsBlocked) return setError('Envie o PDF das normas do edital antes de gerar o cronograma.');
     if (regenerate && !confirm('Refazer o cronograma a partir de hoje? Tarefas concluídas e o histórico ficam guardados.')) return;
     setError('');
     // A geração leva cerca de 1 minuto: a tela não apaga, para o celular não suspender a aba e derrubar a conexão.
@@ -212,10 +221,22 @@ export function QuestionnairePage() {
         <>
           <div className="section-title"><h2>Normas do edital sem texto no app</h2></div>
           <div className="glass card" style={{ display: 'grid', gap: 14 }}>
-            <p className="muted small" style={{ margin: 0 }}>Opcional. Se você enviar o PDF oficial destas normas antes de gerar o cronograma, as sessões delas são ajustadas ao tamanho do texto, e a lei seca, a apostila e as questões da IA passam a usar os artigos. O PDF fica só para você. Dá para enviar depois, na aba Lei seca da sessão.</p>
-            {missingLaws.map((n) => <LawUpload key={n.key} norm={n} compact />)}
+            <p className="small" style={{ margin: 0 }}><strong>Obrigatório para gerar o cronograma.</strong> <span className="muted">O app não achou o texto destas normas sozinho. Envie o PDF oficial e completo de cada uma (com texto selecionável): as sessões delas são ajustadas ao tamanho do texto, e a lei seca, a apostila e as questões da IA passam a usar os artigos. O PDF fica só para você. Se não achar uma delas, marque "Não encontro esta norma".</span></p>
+            {missingLaws.map((n) => (
+              <div key={n.key} style={{ display: 'grid', gap: 6 }}>
+                <LawUpload norm={n} compact />
+                <button type="button" className="link-btn small" style={{ justifySelf: 'start' }}
+                  onClick={() => set({ skippedNorms: [...skipped, { key: n.key, citation: n.citation }] })}>Não encontro esta norma</button>
+              </div>
+            ))}
           </div>
         </>
+      )}
+      {skippedHere.length > 0 && (
+        <p className="muted small">
+          Sem o PDF: {skippedHere.map((k) => k.citation).join(', ')}. As sessões delas ficam sem lei seca, e a apostila e as questões da IA não terão o texto oficial.{' '}
+          <button type="button" className="link-btn small" onClick={() => set({ skippedNorms: skipped.filter((k) => !skippedHere.includes(k)) })}>Desfazer</button>
+        </p>
       )}
 
       <div className="section-title"><h2>Conte um pouco sobre você</h2></div>
@@ -223,8 +244,9 @@ export function QuestionnairePage() {
         placeholder="Ex.: trabalho 8h por dia; sou formado em Administração; nunca estudei Direito; já fiz provas da VUNESP; tenho dificuldade em Matemática." />
 
       <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', marginTop: 24 }}>
-        <button className="btn" onClick={submit}><Sparkles size={18} /> {updating ? 'Atualizar meu plano com IA' : regenerate ? 'Refazer cronograma com IA' : 'Gerar cronograma com IA'}</button>
+        <button className="btn" disabled={lawsBlocked} onClick={submit}><Sparkles size={18} /> {updating ? 'Atualizar meu plano com IA' : regenerate ? 'Refazer cronograma com IA' : 'Gerar cronograma com IA'}</button>
         <button className="btn ghost" onClick={() => navigate(`/concursos/${noticeId}/conferencia`)}>Voltar à conferência</button>
+        {!lawsChecking && missingLaws.length > 0 && <span className="muted small">Falta enviar o PDF de {missingLaws.length === 1 ? '1 norma' : `${missingLaws.length} normas`} acima.</span>}
         {error && <span className="error" role="alert">{error}</span>}
       </div>
     </Shell>
