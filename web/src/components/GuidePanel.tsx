@@ -96,7 +96,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
 
   if (!hasSession) return <div className="glass card muted">A apostila é gerada para as tarefas de teoria. Nos dias de revisão e reforço, use as questões e a lei seca.</div>;
   return (
-    <div className="grid" style={{ gap: 14 }}>
+    <div className="grid guide-wrap" style={{ gap: 14 }}>
       <div className="guide-bar no-print">
         <div className="segmented">
           <button className={depth === 'completa' ? 'on' : ''} onClick={() => setDepth('completa')}>Completa</button>

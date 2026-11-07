@@ -56,6 +56,31 @@ function useTimer(taskId: string, initial: number) {
   return { running, seconds, toggle: () => { if (running) flush(); setRunning(!running); } };
 }
 
+// Barra flutuante que acompanha a leitura: presa no topo ao rolar, some depois de `delay` ms parada e volta ao rolar
+// para cima, ao passar o mouse perto do topo ou ao tocar nela. No lugar de origem (antes de rolar), fica sempre visível.
+function useAutoHide(delay = 2500) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => {
+    let last = window.scrollY, timer: number | undefined;
+    // Presa: a barra chegou ao topo da tela (o sticky a segura ali).
+    const stuck = () => !!ref.current && window.scrollY > 0 && ref.current.getBoundingClientRect().top <= 16;
+    const arm = () => { window.clearTimeout(timer); timer = window.setTimeout(() => { if (stuck()) setHidden(true); }, delay); };
+    const reveal = () => { setHidden(false); arm(); };
+    const onScroll = () => {
+      const y = window.scrollY;
+      if (y < last - 4 || !stuck()) reveal();
+      last = y;
+    };
+    const onMove = (e: MouseEvent) => { if (e.clientY < 90) reveal(); };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('mousemove', onMove, { passive: true });
+    arm();
+    return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('mousemove', onMove); window.clearTimeout(timer); };
+  }, [delay]);
+  return { ref, hidden, reveal: () => setHidden(false) };
+}
+
 export function StudyPage() {
   const { taskId } = useParams();
   const study = useStudy(taskId);
@@ -77,6 +102,7 @@ function StudyView({ d }: { d: StudyData }) {
   // Lei seca abre direto nos artigos.
   const [tab, setTab] = useState<TabKey>(d.task.kind === 'lei_seca' && tabs.some((t) => t.key === 'lei') ? 'lei' : tabs[0]!.key);
   const [videosOpened, setVideosOpened] = useState(false);
+  const floating = useAutoHide();
   const color = d.subjectIndex >= 0 ? subjectColor(d.subjectIndex) : 'var(--magenta)';
   // Meta e desempenho da tarefa: as questões de aquecimento (da sessão anterior) ficam de fora.
   const mine = latestAnswers(d.attempts.filter((a) => a.task_id === d.task.id && !isWarmupAnswer(a, d.task)));
@@ -184,7 +210,7 @@ function StudyView({ d }: { d: StudyData }) {
       {d.task.kind === 'simulado' ? <SimuladoStarter planId={d.task.plan_id} taskId={d.task.id} /> : (
         <>
           <TheoryReviewCard taskId={d.task.id} sessionId={d.task.session_id} />
-          {!focus && tabBar}
+          {!focus && <div ref={floating.ref} className={'tabs-float no-print' + (floating.hidden ? ' hide' : '')} onPointerDown={floating.reveal}>{tabBar}</div>}
           {videosOpened && (
             <div hidden={tab !== 'videos'}>
               <VideosPanel taskId={d.task.id} noticeId={d.noticeId} visible={tab === 'videos'} query={videoQuery({ subject: d.subject?.name ?? '', title: d.session?.title ?? d.task.title, topics: d.topics, keyword: d.session?.keyword }).q} />

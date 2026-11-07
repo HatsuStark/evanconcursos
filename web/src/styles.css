@@ -394,6 +394,16 @@ a.task-title:hover { color: var(--cyan); }
 .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 26px 0 16px; padding: 5px; border-radius: 16px; background: var(--well); border: 1px solid var(--line); }
 .tab { display: inline-flex; align-items: center; gap: 7px; border: 0; background: none; color: var(--muted); padding: 9px 14px; border-radius: 12px; cursor: pointer; font-weight: 600; font-size: 14px; }
 .tab.on { background: var(--surface-3); color: var(--text); box-shadow: var(--glow-violet); }
+/* Abas do modo estudo flutuando sobre a leitura: presas no topo, somem paradas (Study.tsx, useAutoHide). */
+.tabs-float { position: sticky; top: 8px; z-index: 6; margin: 26px 0 16px; transition: transform .25s ease, opacity .25s ease; }
+.tabs-float .tabs { margin: 0; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 6px 20px rgb(0 0 0 / .25); }
+.tabs-float.hide { transform: translateY(calc(-100% - 12px)); opacity: 0; pointer-events: none; }
+@media (max-width: 720px) {
+  /* No celular: uma linha que rola para o lado, sem ocupar meia tela. */
+  .tabs-float .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .tabs-float .tab { flex: none; }
+}
+@media (prefers-reduced-motion: reduce) { .tabs-float { transition: none; } }
 .timer { display: grid; gap: 10px; }
 .timer strong { font-size: 40px; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
 .register { display: grid; gap: 12px; }
@@ -462,9 +472,15 @@ a.task-title:hover { color: var(--cyan); }
 
 /* ---------- E4.4: apostila ---------- */
 .guide-bar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
-.guide { padding: 28px; display: grid; gap: 22px; line-height: var(--lh-read); font-size: var(--fs-guide); }
-/* Linhas de no máximo ~75 caracteres: leitura longa cansa menos. */
-.guide :is(.lead, section > p, section li, .guide-examples p) { max-width: 75ch; }
+/* O texto ocupa toda a largura do cartão. Coluna minmax(0, 1fr): tabela ou palavra longa não alarga a apostila além da
+   tela (no celular, só se rola para cima e para baixo; a tabela rola dentro do quadro dela). */
+.guide { padding: 28px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; line-height: var(--lh-read); font-size: var(--fs-guide); overflow-wrap: break-word; }
+.guide-wrap { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 720px) {
+  .guide { padding: 18px 16px; gap: 18px; }
+  .guide h2 { font-size: 22px; }
+  .guide ul { padding-left: 18px; }
+}
 .guide h2 { margin: 10px 0 6px; font-size: 26px; line-height: 1.25; }
 .guide h3 { margin: 0 0 8px; font-size: 18px; color: var(--cyan); }
 .guide .lead { margin: 0; color: var(--muted); font-size: 17px; }
