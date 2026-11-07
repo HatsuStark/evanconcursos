@@ -64,9 +64,18 @@ export async function fromCache(admin: SupabaseClient, f: CacheFilter, want: num
 
 // Questões novas para o estudante, das provas mais recentes para as mais antigas, com uma posição guardada por escopo e filtro.
 // O prefixo separa estas posições dos cursores antigos, que apontavam para ids.
-export async function takeNewest(admin: SupabaseClient, quest: QuestClient, ownerId: string, scope: string, key: string, params: Record<string, string>, want: number, isNew: (q: QuestQuestion) => boolean) {
+// Posições já lidas do escopo (`loadCursors`), para não ir ao banco por filtro: a sessão testa dezenas deles por pedido.
+export type Cursors = Map<string, { after_id: string; exhausted: boolean }>;
+export async function loadCursors(admin: SupabaseClient, ownerId: string, scope: string): Promise<Cursors> {
+  const { data } = await admin.from('qbank_cursors').select('filter_key, after_id, exhausted').eq('owner_id', ownerId).eq('scope', scope).limit(5000);
+  return new Map((data ?? []).map((c) => [c.filter_key as string, { after_id: String(c.after_id), exhausted: !!c.exhausted }]));
+}
+export const cursorExhausted = (cursors: Cursors, key: string) => !!cursors.get(`n:${key}`)?.exhausted;
+
+export async function takeNewest(admin: SupabaseClient, quest: QuestClient, ownerId: string, scope: string, key: string, params: Record<string, string>, want: number, isNew: (q: QuestQuestion) => boolean, cursors?: Cursors) {
   const out: QuestQuestion[] = [], filterKey = `n:${key}`;
-  const { data: cur } = await admin.from('qbank_cursors').select('after_id, exhausted').eq('owner_id', ownerId).eq('scope', scope).eq('filter_key', filterKey).maybeSingle();
+  const cur = cursors ? cursors.get(filterKey) ?? null
+    : (await admin.from('qbank_cursors').select('after_id, exhausted').eq('owner_id', ownerId).eq('scope', scope).eq('filter_key', filterKey).maybeSingle()).data;
   if (cur?.exhausted) return out;
   let position = cur ? Number(cur.after_id) : await quest.usableTotal(params);
   for (let round = 0; round < 4 && out.length < want && position > 0; round++) {
@@ -77,6 +86,7 @@ export async function takeNewest(admin: SupabaseClient, quest: QuestClient, owne
     position -= perPage;
   }
   await admin.from('qbank_cursors').upsert({ owner_id: ownerId, scope, filter_key: filterKey, after_id: String(position), exhausted: position <= 0, updated_at: new Date().toISOString() });
+  cursors?.set(filterKey, { after_id: String(position), exhausted: position <= 0 });
   return out;
 }
 

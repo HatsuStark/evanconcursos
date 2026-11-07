@@ -24,7 +24,9 @@ import {
 } from '../../../shared/qbank/map.ts';
 import { conceptKey, MNEMONIC_PROMPT_VERSION, MnemonicChoice, mnemonicJsonSchema, mnemonicPrompt, pickExisting } from '../../../shared/qbank/mnemonic.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-import { activePlan, ensureBoardFormat, ensureCarreiras, ensureNarrowing, fromCache, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, questFailure, recordAnswer, takeNewest, upsertFlashcard, withStatus, type PublicQuestion } from '../_shared/qbank.ts';
+import { activePlan, cursorExhausted, ensureBoardFormat, loadCursors, ensureCarreiras, ensureNarrowing, fromCache, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, questFailure, recordAnswer, takeNewest, upsertFlashcard, withStatus, type PublicQuestion } from '../_shared/qbank.ts';
+
+declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
 // Com alguma questão pronta, não faz o estudante esperar por mais; sem nenhuma, desiste antes do limite da função.
 const SOFT_LIMIT_MS = 15_000, HARD_LIMIT_MS = 90_000;
@@ -49,6 +51,9 @@ Deno.serve(async (req) => {
   const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash', apiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
   const usage: GeminiUsage = { inputTokens: 0, outputTokens: 0, thinkingTokens: 0 };
   const started = Date.now();
+  // Tempo de cada etapa do pedido (devolvido só com `debug`, para medir onde a busca demora).
+  const marks: [string, number][] = [];
+  const mark = (step: string) => { marks.push([step, Date.now() - started]); };
   const deps = mapDeps(admin, quest, usage);
   const log = (operation: string, status: 'ok' | 'error', error?: string) => logUsage(admin, {
     ownerId: auth.user.id, operation, model: usage.inputTokens ? model : 'quest-api', promptVersion: operation === 'qbank_explain' ? EXPLAIN_PROMPT_VERSION : operation === 'qbank_mnemonic' ? MNEMONIC_PROMPT_VERSION : QMAP_PROMPT_VERSION,
@@ -172,36 +177,39 @@ Deno.serve(async (req) => {
       return json(200, { questions, reason: questions.length ? null : exclude.length ? 'fim-revisao' : 'sem-erros' });
     }
     if (!subject) return json(200, { questions: [], reason: 'sem-materia' });
+    mark('tarefa');
     const topics = ((subject.notice_topics ?? []) as { text: string; position: number }[]).sort((a, b) => a.position - b.position).map((t) => t.text);
 
-    // Matéria da disciplina (uma vez) e banca do edital.
-    const sm = await ensureSubjectMap(admin, quest, deps, auth.user.id, subject.id, async () => {
-      const { data: notice } = await auth.client.from('notices').select('board, organization').eq('id', subject.notice_id).single();
-      return { name: subject.name, board: String(notice?.board ?? ''), topics, organization: String(notice?.organization ?? '') };
-    });
-
+    // Matéria da disciplina (uma vez) e banca do edital, junto com a sessão da tarefa.
     // Dia de aprofundamento: o tema escolhido na hora (source_session_id) dá o mapa de assuntos, a triagem e o título; as
     // questões são só médias-difíceis a muito difíceis e começam pelos erros do estudante nele.
-    const { data: own } = task.session_id
-      ? await auth.client.from('study_sessions').select('source_session_id, title, position, plan_version_id').eq('id', task.session_id).maybeSingle()
-      : { data: null };
+    const [sm, { data: own }] = await Promise.all([
+      ensureSubjectMap(admin, quest, deps, auth.user.id, subject.id, async () => {
+        const { data: notice } = await auth.client.from('notices').select('board, organization').eq('id', subject.notice_id).single();
+        return { name: subject.name, board: String(notice?.board ?? ''), topics, organization: String(notice?.organization ?? '') };
+      }),
+      task.session_id
+        ? auth.client.from('study_sessions').select('source_session_id, title, position, plan_version_id').eq('id', task.session_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+    mark('mapa-materia');
     const deep = !!own && (own.title.startsWith(DEEP_PREFIX) || own.title.startsWith(PRACTICE_PREFIX));
     const sid: string | null = (own?.source_session_id as string | null) ?? task.session_id;
     const diffs = deep ? DEEP_DIFFICULTIES : SESSION_DIFFICULTIES;
+    const scope = sid ?? `subject:${subject.id}`;
 
     // Filtro: assuntos da sessão (uma vez por sessão); em dias de reforço, os assuntos em que o estudante mais erra.
-    let filter: SessionFilter = { materia: null, assuntos: [], how: '' };
-    let incidence: Incidence[] | null = null;
-    const scope = sid ?? `subject:${subject.id}`;
-    if (sid) {
-      const m = await ensureSessionMap(admin, deps, auth.user.id, sid, sm.materia, async () => {
-        const { data: ss } = await auth.client.from('study_sessions').select('title, keyword, topic_ids').eq('id', sid).single();
-        const { data: tt } = ss?.topic_ids?.length ? await auth.client.from('notice_topics').select('text').in('id', ss.topic_ids) : { data: [] };
-        const { data: n } = await auth.client.from('notices').select('organization').eq('id', subject.notice_id).single();
-        return { subject: subject.name, title: ss?.title ?? '', keyword: ss?.keyword ?? '', topics: (tt ?? []).map((t) => t.text), organization: String(n?.organization ?? '') };
-      });
-      filter = m; incidence = m.incidence;
-    } else if (sm.materia) {
+    const sessionFilter = async (): Promise<{ filter: SessionFilter; incidence: Incidence[] | null }> => {
+      if (sid) {
+        const m = await ensureSessionMap(admin, deps, auth.user.id, sid, sm.materia, async () => {
+          const { data: ss } = await auth.client.from('study_sessions').select('title, keyword, topic_ids').eq('id', sid).single();
+          const { data: tt } = ss?.topic_ids?.length ? await auth.client.from('notice_topics').select('text').in('id', ss.topic_ids) : { data: [] };
+          const { data: n } = await auth.client.from('notices').select('organization').eq('id', subject.notice_id).single();
+          return { subject: subject.name, title: ss?.title ?? '', keyword: ss?.keyword ?? '', topics: (tt ?? []).map((t) => t.text), organization: String(n?.organization ?? '') };
+        });
+        return { filter: m, incidence: m.incidence };
+      }
+      if (!sm.materia) return { filter: { materia: null, assuntos: [], how: '' }, incidence: null };
       const { data: tries } = await admin.from('question_attempts').select('assunto, correct').eq('owner_id', auth.user.id).eq('subject_id', subject.id).limit(2000);
       const acc = new Map<string, { c: number; t: number }>();
       for (const a of tries ?? []) { const e = acc.get(a.assunto) ?? { c: 0, t: 0 }; e.t++; if (a.correct) e.c++; acc.set(a.assunto, e); }
@@ -210,13 +218,31 @@ Deno.serve(async (req) => {
         const { data: maps } = await admin.from('qbank_session_maps').select('assuntos').eq('owner_id', auth.user.id).eq('materia', sm.materia).limit(30);
         weak = [...new Set((maps ?? []).flatMap((m) => m.assuntos as string[]))].slice(0, 5);
       }
-      filter = { materia: sm.materia, assuntos: weak, how: 'reforço' };
-    }
-    const { data: notice } = await auth.client.from('notices').select('education_level, role_name, organization').eq('id', subject.notice_id).single();
-    const format = await ensureBoardFormat(admin, quest, subject.id, sm);
+      return { filter: { materia: sm.materia, assuntos: weak, how: 'reforço' }, incidence: null };
+    };
+    // Tudo o que só depende da sessão vai junto, em paralelo: cada consulta ao banco leva ~200 ms.
+    // Pula o que o estudante já respondeu neste concurso, em qualquer lugar (cronograma, aba Questões, simulado); as erradas
+    // só voltam nos momentos delas (aquecimento, aprofundamento, revisão semanal). O que ele respondeu nesta sessão define a
+    // vez de cada assunto. Triagem de relevância da sessão: o que já foi julgado não é julgado de novo, e o que ficou fora do
+    // tema nunca volta. Posições de busca do escopo: lidas de uma vez, para os filtros esgotados não irem ao banco.
+    const [fm, { data: notice }, format, carreiras, { data: done }, { data: inPlan }, { data: sess }, { data: rel }, { count: answeredHere }, cursors] = await Promise.all([
+      sessionFilter(),
+      auth.client.from('notices').select('education_level, role_name, organization').eq('id', subject.notice_id).single(),
+      ensureBoardFormat(admin, quest, subject.id, sm),
+      ensureCarreiras(admin, quest, deps, subject.notice_id),
+      admin.from('question_attempts').select('qid, assunto, session_id').eq('owner_id', auth.user.id).eq('subject_id', subject.id).limit(5000),
+      admin.from('question_attempts').select('qid').eq('owner_id', auth.user.id).eq('plan_id', task.plan_id).limit(20000),
+      sid ? auth.client.from('study_sessions').select('title, keyword, law_refs').eq('id', sid).maybeSingle() : Promise.resolve({ data: null }),
+      sid ? admin.from('qbank_relevance').select('qid, assunto, relevant').eq('session_id', sid) : Promise.resolve({ data: [] as { qid: string; assunto: string; relevant: boolean }[] }),
+      admin.from('question_attempts').select('id', { count: 'exact', head: true }).eq('owner_id', auth.user.id).eq('task_id', task.id),
+      loadCursors(admin, auth.user.id, scope),
+    ]);
+    const filter = fm.filter;
+    let incidence = fm.incidence;
+    mark('mapa-sessao-e-vistas');
     // Órgão, cargo, carreira e escolaridade só entram na busca se rendem nesta matéria (sem eles, cada assunto passa por 2 níveis, não 10).
-    const carreiras = await ensureCarreiras(admin, quest, deps, subject.notice_id);
     const narrow = await ensureNarrowing(admin, quest, subject.id, sm.materia, roleKeyword(String(notice?.role_name ?? '')), String(notice?.education_level ?? ''), orgaoKeyword(String(notice?.organization ?? '')), carreiras);
+    mark('estreitamento');
     const allFilters = searchFilters(filter, sm.banca, { ...narrow, format, difficulties: diffs });
     // Sessão sem assunto no banco de questões vai direto para as questões inéditas da IA.
     if (!allFilters.length && !sid) { await log('qbank_fetch', 'ok'); return json(200, { questions: [], reason: 'sem-assunto' }); }
@@ -230,24 +256,13 @@ Deno.serve(async (req) => {
         } catch { incidence = equalIncidence(filter.assuntos.slice(0, SESSION_ASSUNTOS)); }
       } else incidence = equalIncidence(filter.assuntos);
     }
-    // Assunto sem questão em banca nenhuma ficou fora da medição: nem entra na busca.
+    mark('incidencia');
+    // Assunto sem questão em banca nenhuma ficou fora da medição: nem entra na busca. Filtro já esgotado também não.
     const measured = new Set((incidence ?? []).map((i) => normalizeText(i.assunto)));
-    const filters = allFilters.filter((f) => measured.has(normalizeText(f.assunto)));
+    const filters = allFilters.filter((f) => measured.has(normalizeText(f.assunto)) && !cursorExhausted(cursors, f.key));
 
-    // Pula o que o estudante já respondeu neste concurso, em qualquer lugar (cronograma, aba Questões, simulado); as erradas
-    // só voltam nos momentos delas (aquecimento, aprofundamento, revisão semanal). O que ele respondeu nesta sessão define a
-    // vez de cada assunto.
-    const [{ data: done }, { data: inPlan }] = await Promise.all([
-      admin.from('question_attempts').select('qid, assunto, session_id').eq('owner_id', auth.user.id).eq('subject_id', subject.id).limit(5000),
-      admin.from('question_attempts').select('qid').eq('owner_id', auth.user.id).eq('plan_id', task.plan_id).limit(20000),
-    ]);
-    // Triagem de relevância da sessão: o que já foi julgado não é julgado de novo, e o que ficou fora do tema nunca volta.
     const judged = new Set<string>(), rejected = new Set<string>(), verdicts: { assunto: string; relevant: boolean }[] = [];
-    const { data: sess } = sid ? await auth.client.from('study_sessions').select('title, keyword, law_refs').eq('id', sid).maybeSingle() : { data: null };
-    if (sess) {
-      const { data: rel } = await admin.from('qbank_relevance').select('qid, assunto, relevant').eq('session_id', sid);
-      for (const r of rel ?? []) { judged.add(r.qid); verdicts.push({ assunto: r.assunto, relevant: r.relevant }); if (!r.relevant) rejected.add(r.qid); }
-    }
+    if (sess) for (const r of rel ?? []) { judged.add(r.qid); verdicts.push({ assunto: r.assunto, relevant: r.relevant }); if (!r.relevant) rejected.add(r.qid); }
     // Também as que já estão na tela, ainda sem resposta (o app manda em `exclude`).
     const seen = new Set([...(done ?? []).map((d) => d.qid as string), ...(inPlan ?? []).map((d) => d.qid as string), ...(Array.isArray(body.exclude) ? (body.exclude as unknown[]).map(String).slice(0, 500) : []), ...rejected]);
     const served = new Map<string, number>();
@@ -330,7 +345,6 @@ Deno.serve(async (req) => {
     const result: PublicQuestion[] = [];
     // Começo da tarefa (nada respondido nela e nada na tela): no aprofundamento, os erros do tema; nas demais sessões,
     // aquecimento com questões da sessão anterior da matéria (recordar antes do conteúdo novo).
-    const { count: answeredHere } = await admin.from('question_attempts').select('id', { count: 'exact', head: true }).eq('owner_id', auth.user.id).eq('task_id', task.id);
     const fresh = !answeredHere && !(Array.isArray(body.exclude) && body.exclude.length);
     const replay = async (sessionId: string, n: number, warmup: boolean) => {
       const { data: tries } = await admin.from('question_attempts').select('qid, correct, created_at').eq('owner_id', auth.user.id).eq('session_id', sessionId).order('created_at', { ascending: false }).limit(200);
@@ -370,6 +384,7 @@ Deno.serve(async (req) => {
       for (const q of result) seen.add(q.qid);
     }
     const opening = result.length;
+    mark('aquecimento');
     // Banco sem mais nada no tema para este pedido (sem assunto vivo ou busca vazia): libera a IA sem a proporção.
     let apiDry = false;
     // Até 3 rodadas: as questões descartadas pela triagem são repostas no mesmo pedido.
@@ -386,7 +401,9 @@ Deno.serve(async (req) => {
         if (out.length >= limit) return;
         const elapsed = Date.now() - started;
         if (elapsed > HARD_LIMIT_MS || ((out.length || result.length) && elapsed > SOFT_LIMIT_MS)) { timedOut = true; return; }
-        out.push(...await takeNewest(admin, quest, auth.user.id, scope, f.key, f.params, limit - out.length, (q) => !seen.has(q.id) && !out.some((o) => o.id === q.id)));
+        const before = out.length;
+        out.push(...await takeNewest(admin, quest, auth.user.id, scope, f.key, f.params, limit - out.length, (q) => !seen.has(q.id) && !out.some((o) => o.id === q.id), cursors));
+        mark(`api:${f.key}:${out.length - before}`);
       };
       // Cada assunto busca a sua parte em duas passadas: primeiro só a banca do edital (as já compradas, sem créditos, e
       // depois a API), em todos os assuntos; só o que faltar vem das outras bancas (cache, depois API). O que ainda faltar
@@ -402,6 +419,7 @@ Deno.serve(async (req) => {
           if (n <= 0 || timedOut) continue;
           const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, dificuldades: diffs, tipo: format, preferOrgao: narrow.orgao, preferCarreiras: carreiras, ...(board ? { banca: sm.banca } : { preferBanca: sm.banca }) }, n, isNewCached);
           cached.push(...got);
+          mark(`cache:${board ? 'banca' : 'outras'}:${got.length}`);
           let left = n - got.length;
           const fs = live.filter((x) => x.assunto === assunto && x.board === board);
           for (; left > 0 && fs.length && !timedOut; left--, turn++) {
@@ -424,6 +442,7 @@ Deno.serve(async (req) => {
       if (!found.length) { apiDry = !timedOut; break; }
       for (const q of found) { seen.add(q.qid); served.set(normalizeText(q.assunto), (served.get(normalizeText(q.assunto)) ?? 0) + 1); }
       result.push(...await screen(found));
+      mark(`triagem:${found.length}`);
     }
     // Plano B: questões inéditas da IA, reaproveitadas entre estudantes com o mesmo tema. Com o banco ainda rendendo no tema,
     // no máximo 1 da IA para cada 3 da API na sessão (respondidas, na tela e deste lote; o aquecimento não conta). Lote sem
@@ -434,12 +453,14 @@ Deno.serve(async (req) => {
       ...result.slice(opening).map((q) => q.qid),
     ];
     const room = generatedRoom({ missing: count - result.length, sessionQids: [...new Set(sessionQids)], apiDry: apiDry || result.length === opening });
-    if (sess && room > 0 && Date.now() - started < GENERATE_BEFORE_MS) result.push(...await generated(room));
-    await log('qbank_fetch', 'ok');
+    if (sess && room > 0 && Date.now() - started < GENERATE_BEFORE_MS) { result.push(...await generated(room)); mark(`ia:${room}`); }
+    // O registro de uso fica para depois da resposta: o estudante não espera por ele.
+    EdgeRuntime.waitUntil(log('qbank_fetch', 'ok').catch(() => {}));
     // As questões do começo da tarefa (aquecimento, erros do tema) vêm todas, mesmo pedindo 1: saem do banco, na hora, e não
     // voltariam depois, porque o pedido seguinte já não é o começo da tarefa.
     const batch = await withStatus(admin, auth.user.id, result.slice(0, Math.max(count, opening)));
-    return json(200, { questions: batch, filter: { materia: filter.materia, assuntos: filter.assuntos, how: filter.how }, reason: batch.length ? null : timedOut ? 'demorou' : 'esgotado-dificeis' });
+    mark('fim');
+    return json(200, { questions: batch, filter: { materia: filter.materia, assuntos: filter.assuntos, how: filter.how }, reason: batch.length ? null : timedOut ? 'demorou' : 'esgotado-dificeis', ...(body.debug ? { timing: marks } : {}) });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await log(body.action === 'explain' ? 'qbank_explain' : body.action === 'mnemonic' ? 'qbank_mnemonic' : 'qbank_fetch', 'error', message).catch(() => {});
