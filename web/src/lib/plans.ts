@@ -6,8 +6,8 @@ import { prioritize, RUSH_WEEKS } from '../../../shared/domain/priority.ts';
 import type { PrioritizeSummary } from '../../../shared/domain/coverage.ts';
 import type { RebalanceSummary, Replan } from '../../../shared/domain/replan.ts';
 import { isOpenEnded, openEndDate, type RoundAttempt, type RoundSummary, type ShiftSummary } from '../../../shared/domain/rounds.ts';
-import { buildPlanPayload, calendarSummary, carryOverSessions, GENERATOR_VERSION, theoryPlan, type PlanBase } from '../../../shared/ai/plan-build.ts';
-import { fallbackSessions, PLAN_PROMPT_VERSION, type PlanInputs, type Session } from '../../../shared/ai/plan.ts';
+import { buildPlanPayload, calendarSummary, carryOverSessions, fitOpenEnded, GENERATOR_VERSION, theoryPlan, type PlanBase } from '../../../shared/ai/plan-build.ts';
+import { allocateSessions, fallbackSessions, PLAN_PROMPT_VERSION, type PlanInputs, type Session } from '../../../shared/ai/plan.ts';
 import { remapMaterial, type Material } from './materials.ts';
 import { loadNoticeUpdate, type Draft } from './notices.ts';
 import { supabase } from './supabase.ts';
@@ -102,8 +102,10 @@ export async function generatePlan(noticeId: string, inputs: PlanInputs, onProgr
       const r = await invoke<{ sessions: Session[] }>('plan-design', {
         step: 'sessions', noticeId, subjectId: s.id, n, minutes: counts[s.id]!.avgMinutes,
         level: inputs.levels[s.id] ?? 1, profile: inputs.profile, focus: strategy.subjects.find((x) => x.subjectId === s.id)?.focus ?? '',
+        // Sem prazo: o servidor devolve as sessões que o conteúdo pede (lei longa em partes), nunca menos que n.
+        grow: openEnded,
       });
-      if (r.sessions.length !== n) throw new Error('quantidade de sessões diferente da pedida');
+      if (openEnded ? r.sessions.length < n : r.sessions.length !== n) throw new Error('quantidade de sessões diferente da pedida');
       sessions[s.id] = r.sessions;
     } catch (e) {
       sessions[s.id] = fallbackSessions(s.topics.map((t) => t.text), n);
@@ -111,6 +113,16 @@ export async function generatePlan(noticeId: string, inputs: PlanInputs, onProgr
     }
     onProgress({ step: 'sessions', done: ++done, total: base.subjects.length });
   });
+
+  // Sem prazo: o calendário cresce até caber as sessões que o conteúdo pediu; bloco a mais vira aprofundamento.
+  if (openEnded && base.subjects.some((s) => sessions[s.id]!.length !== counts[s.id]!.days)) {
+    const fit = fitOpenEnded(base, Object.fromEntries(base.subjects.map((s) => [s.id, sessions[s.id]!.length])));
+    for (const s of base.subjects) {
+      const list = sessions[s.id]!, days = fit[s.id]!.days;
+      // Sessão de lei já dividida não se divide de novo (tamanho vazio): o que sobra é aprofundamento.
+      if (list.length !== days) sessions[s.id] = allocateSessions(list, list.map((x) => (x.refs?.length ? [] : null)), days, fit[s.id]!.avgMinutes).sessions;
+    }
+  }
 
   // Prazo curto: em cada matéria, os temas mais cobrados primeiro (partes juntas, aprofundamentos no lugar).
   if (!openEnded && cal.weeks <= RUSH_WEEKS) {

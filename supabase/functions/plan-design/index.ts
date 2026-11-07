@@ -8,7 +8,7 @@
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { aiLawRefs, findLawRefs, inRanges, type LawRef, mergeLawRefs, rangesLabel, rangesOrFilter, sessionLawRefs } from '../../../shared/legal/refs.ts';
 import { LAWS, lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
-import { type LawSize, mergeShortLawSessions, PLAN_PROMPT_VERSION, PlanInputs, PlanStrategy, repairSessions, sessionsJsonSchema, sessionsPrompt, strategyJsonSchema, strategyPrompt, SubjectSessions } from '../../../shared/ai/plan.ts';
+import { contentNeed, type LawSize, mergeShortLawSessions, PLAN_PROMPT_VERSION, PlanInputs, PlanStrategy, repairSessions, sessionsJsonSchema, sessionsPrompt, strategyJsonSchema, strategyPrompt, SubjectSessions } from '../../../shared/ai/plan.ts';
 import { isOpenEnded } from '../../../shared/domain/rounds.ts';
 import { aiFor, defaultModel, keyFor } from '../_shared/ai.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
@@ -16,6 +16,8 @@ import { ensureLaw, ownLaws } from '../_shared/legal.ts';
 import { resolveCitedNorms } from '../_shared/resolve-laws.ts';
 import { localKey, localNormsCited, ufOf } from '../../../shared/legal/resolve.ts';
 
+// Teto de sessões por matéria no plano sem prazo (conteúdo medido): um código inteiro dividido em partes cabe.
+const MAX_GROW = 400;
 const int = (v: unknown, min: number, max: number) => Math.max(min, Math.min(max, Math.round(Number(v) || 0)));
 
 // Tamanho do texto vigente dos artigos da sessão (texto oficial no banco). Sem artigo, ou lei fora do banco, null: a
@@ -142,7 +144,13 @@ Deno.serve(async (req) => {
       // divide a maior para manter as n sessões.
       const sized = await Promise.all(r.data.sessions.map((x) => sessionRefs(admin, x, topics, subject.name, own)));
       const short = mergeShortLawSessions(r.data.sessions.map((x, i) => ({ ...x, ...(sized[i]!.refs.length ? { refs: sized[i]!.refs } : {}) })), sized.map((z) => z.size));
-      const { sessions, fixes } = repairSessions({ ...r.data, sessions: short.sessions }, n, topics, { sizes: short.sizes, minutes: int(body.minutes, 15, 960) });
+      const minutes = int(body.minutes, 15, 960);
+      // Plano sem prazo (grow): tantas sessões quanto o conteúdo pede (lei longa em partes), nunca menos que n; o app
+      // estende o calendário até caber. Com prazo, exatamente n.
+      const need = body.grow === true ? contentNeed(short.sessions.map((x) => ({ ...x, ...(x.days ? { effort: x.days } : {}) })), short.sizes, minutes) : 0;
+      const target = Math.min(MAX_GROW, Math.max(n, need));
+      const { sessions, fixes } = repairSessions({ ...r.data, sessions: short.sessions }, target, topics, { sizes: short.sizes, minutes });
+      if (target > n) fixes.unshift(`sem prazo: ${target} sessões para o conteúdo (pedidas ${n})`);
       fixes.unshift(...short.merged.map((m) => `lei curta: ${m}`));
       await logUsage(admin, { ownerId: auth.user.id, operation, model: used, promptVersion: PLAN_PROMPT_VERSION, usage, latencyMs, status: 'ok' });
       return json(200, { sessions, fixes });

@@ -12,9 +12,10 @@ export const REVIEW_PREFIX = 'Revisão: ';
 // questions: questões na prova; weight: peso no edital; minPct: nota mínima do bloco da prova (eliminatória).
 // block: bloco da prova; blocks: questões de cada bloco (para dividir entre as matérias sem número no edital).
 export interface PlanSubject { id: string; name: string; core: boolean; questions: number; weight: number; minPct?: number; block?: string; topics: { id: string; text: string }[] }
+// minBlocks: sessões que o conteúdo de cada matéria pede (plano sem prazo, depois de medir as leis); vira o mínimo de blocos.
 export interface PlanBase {
   examDate: string; openEnded?: boolean; totalQuestions: number; subjects: PlanSubject[]; inputs: PlanInputs; weights: Record<string, number>;
-  blocks?: { name: string; questions: number }[];
+  blocks?: { name: string; questions: number }[]; minBlocks?: Record<string, number>;
 }
 
 export type TaskKind = BlockKind | 'weekly_review' | 'simulado' | 'eve' | 'exam';
@@ -63,7 +64,7 @@ function scheduleArgs(b: PlanBase, sessions?: Record<string, Session[]>): [Sched
         const list = sessions?.[s.id] ?? [];
         return [s.id, {
           weight: b.weights[s.id] ?? s.weight, level: b.inputs.levels[s.id] ?? 1, topics: list.map((x) => x.title),
-          topicCount: s.topics.length, questions: questions[s.id], stake: s.weight, minPct: s.minPct,
+          topicCount: s.topics.length, questions: questions[s.id], stake: s.weight, minPct: s.minPct, minBlocks: b.minBlocks?.[s.id],
           lawItems: list.map((x) => !!x.refs?.length || findLawRefs(x.title, s.name).some((r) => r.ranges.length)), incidence: list.map((x) => x.incidence ?? 2),
         }];
       })),
@@ -85,6 +86,25 @@ function firstPass(b: PlanBase) {
     return [s.id, { days: m.length, avgMinutes: m.length ? Math.round(m.reduce((a, x) => a + x, 0) / m.length) : 75 }];
   })) as Record<string, { days: number; avgMinutes: number }>;
   return { counts, summary: sched.summary };
+}
+
+// Plano sem prazo: as sessões vieram do tamanho do conteúdo (lei longa em partes), e não do calendário. Cada matéria passa
+// a ter pelo menos as suas, e o fim da primeira volta anda semana a semana até caber. Devolve os blocos de cada matéria
+// (podem passar das sessões: o que sobra vira aprofundamento).
+export const MAX_OPEN_WEEKS = 260;
+export function fitOpenEnded(b: PlanBase, need: Record<string, number>) {
+  b.minBlocks = need;
+  const start = parseYmd(b.inputs.startDate) ?? new Date();
+  for (let i = 0; i < 40; i++) {
+    const { counts, summary } = firstPass(b);
+    const deficit = b.subjects.reduce((a, s) => a + Math.max(0, (need[s.id] ?? 0) - counts[s.id]!.days), 0);
+    if (!deficit) return counts;
+    const end = parseYmd(b.examDate)!, perWeek = Math.max(1, summary.theory / Math.max(1, summary.weeks));
+    if ((end.getTime() - start.getTime()) / (7 * 86_400_000) >= MAX_OPEN_WEEKS) return counts;
+    end.setDate(end.getDate() + 7 * Math.max(1, Math.ceil(deficit / perWeek)));
+    b.examDate = ymd(end);
+  }
+  return firstPass(b).counts;
 }
 
 // Novo edital: em cada matéria, o conteúdo novo vem antes, e vira revisão a sessão cujos tópicos já foram todos estudados.

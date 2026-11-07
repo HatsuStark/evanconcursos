@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { theoryGoal } from '../domain/scheduler.ts';
-import { buildPlanPayload, carryOverSessions, questionsOf, theoryPlan, type PlanBase } from './plan-build.ts';
-import { allocateSessions, fallbackSessions, isShortLaw, mergeShortLawSessions, repairSessions, type SubjectSessions } from './plan.ts';
+import { buildPlanPayload, carryOverSessions, fitOpenEnded, questionsOf, theoryPlan, type PlanBase } from './plan-build.ts';
+import { allocateSessions, contentNeed, fallbackSessions, isShortLaw, mergeShortLawSessions, repairSessions, type SubjectSessions } from './plan.ts';
 import { findLawRefs } from '../legal/refs.ts';
 
 function rng(seed: number) { return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32; }; }
@@ -275,5 +275,41 @@ describe('artigos gravados na sessão (refs) acompanham junções e partes', () 
     const p = buildPlanPayload(base, { a: list });
     expect(p.sessions[0]!.lawRefs).toEqual(refs);
     expect(p.sessions[1]!.lawRefs).toBeNull();
+  });
+});
+
+describe('plano sem prazo dimensionado pelo conteúdo', () => {
+  const lawSize = (count: number, chars: number) => [{ law: 'cpc', short: 'CPC', cite: 'CPC', ranges: '', liveChars: count * chars, liveArticles: count, revokedArticles: 0,
+    articles: Array.from({ length: count }, (_, i) => ({ label: String(139 + i), num: 139 + i, suffix: '', chars, revoked: false })) }];
+
+  it('contentNeed: lei longa pede várias sessões; tópico curto, uma', () => {
+    const list = [{ title: 'Juiz e atos: CPC arts. 139 a 258', keyword: 'Juiz', topics: [0] }, { title: 'Noções', keyword: 'Noções', topics: [1] }];
+    // 120 artigos × 600 caracteres em sessões de 75 min (11.250 caracteres por sessão): 7 sessões, mais 1.
+    expect(contentNeed(list, [lawSize(120, 600), null], 75)).toBe(8);
+  });
+
+  it('fitOpenEnded estende a primeira volta até cada matéria ter as sessões que o conteúdo pede', () => {
+    const base: PlanBase = { examDate: '2027-01-04', openEnded: true, totalQuestions: 10, weights: {}, inputs: { hours: [2, 2, 2, 2, 2, 0, 0], startDate: '2026-11-02', weeklyReview: false, profile: '', levels: {} },
+      subjects: [
+        { id: 'cpc', name: 'Processo Civil', core: true, questions: 5, weight: 3, topics: [{ id: 't0', text: 'CPC' }] },
+        { id: 'pt', name: 'Português', core: false, questions: 5, weight: 2, topics: [{ id: 't1', text: 'Crase' }] },
+      ] };
+    const before = theoryPlan(base);
+    expect(before.cpc!.days).toBeLessThan(150);
+    const counts = fitOpenEnded(base, { cpc: 150, pt: 5 });
+    expect(counts.cpc!.days).toBeGreaterThanOrEqual(150);
+    expect(counts.pt!.days).toBeGreaterThanOrEqual(5);
+    expect(base.examDate > '2027-01-04').toBe(true);
+    // As sessões encaixam: com a quantidade dos blocos, o cronograma é montado.
+    const fill = (id: string) => Array.from({ length: counts[id]!.days }, (_, i) => ({ title: `${id} ${i}`, keyword: id, topics: [0] }));
+    const p = buildPlanPayload(base, { cpc: fill('cpc'), pt: fill('pt') });
+    expect(p.sessions.filter((s) => s.subjectId === 'cpc')).toHaveLength(counts.cpc!.days);
+  });
+
+  it('sem conteúdo medido, o plano sem prazo continua como antes', () => {
+    const base: PlanBase = { examDate: '2027-03-01', openEnded: true, totalQuestions: 10, weights: {}, inputs: { hours: [2, 2, 2, 2, 2, 0, 0], startDate: '2026-11-02', weeklyReview: false, profile: '', levels: {} },
+      subjects: [{ id: 'a', name: 'A', core: true, questions: 5, weight: 3, topics: [{ id: 't0', text: 'x' }] }] };
+    const counts = fitOpenEnded({ ...base }, { a: 1 });
+    expect(counts.a!.days).toBe(theoryPlan(base).a!.days);
   });
 });

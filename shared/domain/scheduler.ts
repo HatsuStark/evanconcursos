@@ -36,10 +36,11 @@ export interface ScheduleInput { startDate: string; examDate: string; subjects: 
 // weight: prioridade da IA (1–5); level: nível do candidato (0 iniciante … 3 avançado); topics: o que cada bloco de teoria
 // cobre, em ordem; topicCount: tópicos do edital (mínimo de blocos); questions/stake: questões na prova e peso no edital;
 // minPct: nota mínima do bloco da prova (eliminatória); lawItems: quais itens de `topics` citam lei (para a lei seca);
-// incidence: 1 a 3 por item, quanto a banca cobra (os mais cobrados são relidos mais vezes).
+// incidence: 1 a 3 por item, quanto a banca cobra (os mais cobrados são relidos mais vezes); minBlocks: mínimo de blocos
+// de teoria que o conteúdo pede (plano sem prazo: sessões de lei longa divididas em partes).
 export interface SubjectConfig {
   weight: number; level: number; topics: string[];
-  topicCount?: number; questions?: number; stake?: number; minPct?: number; lawItems?: boolean[]; incidence?: number[];
+  topicCount?: number; questions?: number; stake?: number; minPct?: number; lawItems?: boolean[]; incidence?: number[]; minBlocks?: number;
 }
 // lawReading: reservar a lei seca diária (concurso com muita legislação).
 export interface ScheduleConfig { hours: number[]; weeklyReview: boolean; lawReading?: boolean; subjects: Record<string, SubjectConfig> }
@@ -91,6 +92,7 @@ export function normalizeConfig(raw: unknown, input: ScheduleInput): ScheduleCon
       topicCount: num(s.topicCount, 0, 400), questions: num(s.questions, 0, 500), stake: num(s.stake, 0, 100), minPct: num(s.minPct, 0, 100),
       lawItems: Array.isArray(s.lawItems) ? s.lawItems.map(Boolean) : undefined,
       incidence: Array.isArray(s.incidence) ? s.incidence.map((x) => num(x, 1, 3) ?? 2) : undefined,
+      minBlocks: num(s.minBlocks, 0, 2000),
     };
   }
   return { hours, weeklyReview: c.weeklyReview !== false, lawReading: !!c.lawReading, subjects };
@@ -142,8 +144,10 @@ export function apportion(weights: number[], total: number): number[] {
 }
 
 // Como `apportion`, mas cada item recebe antes o seu mínimo (`floors`), limitado a 60% do total.
-export function apportionWithFloors(weights: number[], floors: number[], total: number): number[] {
-  const sum = floors.reduce((a, b) => a + b, 0), cap = Math.floor(total * 0.6);
+// capShare: parte do total que os mínimos podem ocupar (o resto vai pela demanda); 1 no plano sem prazo, em que o
+// calendário é que se estende para caber o conteúdo.
+export function apportionWithFloors(weights: number[], floors: number[], total: number, capShare = 0.6): number[] {
+  const sum = floors.reduce((a, b) => a + b, 0), cap = Math.floor(total * capShare);
   const f = sum > cap ? floors.map((x) => Math.max(1, Math.floor((x * cap) / sum))) : floors.map((x) => Math.max(1, x));
   const rest = total - f.reduce((a, b) => a + b, 0) + weights.length;
   if (rest < weights.length) return apportion(weights, total);
@@ -317,10 +321,13 @@ export function generateSchedule(input: ScheduleInput, rawConfig: unknown): Sche
   const theoryBlocks = blocks.filter((b) => b.kind === 'theory');
   if (theoryBlocks.length < names.length) throw tooShort();
 
-  // Teoria por matéria: demanda, com o mínimo para cobrir o edital (um bloco a cada 4 tópicos: a sessão junta tópicos pequenos).
+  // Teoria por matéria: demanda, com o mínimo para cobrir o edital (um bloco a cada 4 tópicos: a sessão junta tópicos
+  // pequenos) ou o que o conteúdo pede (minBlocks). Sem prazo e com o conteúdo medido, os mínimos podem ocupar todo o
+  // calendário (ele foi estendido para caber).
   const demand = names.map((n) => subjectDemand(cfg.subjects[n]!));
-  const floors = names.map((n) => { const s = cfg.subjects[n]!; return Math.ceil((s.topicCount ?? s.topics.length) / 4); });
-  const counts = apportionWithFloors(demand, floors, theoryBlocks.length);
+  const floors = names.map((n) => { const s = cfg.subjects[n]!; return Math.max(Math.ceil((s.topicCount ?? s.topics.length) / 4), s.minBlocks ?? 0); });
+  const sized = input.openEnded && names.some((n) => cfg.subjects[n]!.minBlocks);
+  const counts = apportionWithFloors(demand, floors, theoryBlocks.length, sized ? 1 : 0.6);
   const queues = names.map((n, i) => subjectTasks(n, cfg.subjects[n]!.topics, counts[i]!));
   // Matéria de cada bloco de teoria: a ordem suave do `interleave`, corrigida trocando blocos com dias próximos para não
   // repetir matéria no dia e para alternar específica e básica. Quando uma matéria domina o plano, a repetição que sobra

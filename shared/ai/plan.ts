@@ -188,6 +188,11 @@ const contentDays = <T extends Session>(it: Sized<T>, minutes: number) => (it.si
   : it.x.effort ?? Math.min(2, Math.max(1, it.x.topics.length)));
 const weightOf = <T extends Session>(it: Sized<T>, minutes: number) => (it.x.incidence ?? 2) * Math.max(0.5, loadOf(it, minutes));
 
+// Sessões que o conteúdo pede, pela mesma régua da divisão em partes (plano sem prazo: o calendário se estende até caber).
+export function contentNeed<T extends Session>(list: T[], sizes: (LawSize[] | null)[], minutes: number) {
+  return list.reduce((a, x, i) => a + contentDays({ x, size: sizes[i] ?? null, days: 1, deep: 0 }, minutes), 0);
+}
+
 export function allocateSessions<T extends Session>(list: T[], sizes: (LawSize[] | null)[], n: number, minutes: number): { sessions: T[]; fixes: string[] } {
   const fixes: string[] = [];
   const items: Sized<T>[] = list.map((x, i) => ({ x, size: sizes[i] ?? null, days: 1, deep: 0 }));
