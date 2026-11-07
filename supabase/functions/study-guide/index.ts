@@ -15,6 +15,9 @@ import { materiaOf, measureIncidence, QMAP_PROMPT_VERSION } from '../../../share
 import { aiFor } from '../_shared/ai.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { loadLawSources } from '../_shared/law.ts';
+import { ensureHot, hotLaws } from '../_shared/hot.ts';
+import { hotArticleKeys, hotGuideNote, type HotInput } from '../../../shared/ai/hot.ts';
+import { lawByKey } from '../../../shared/legal/registry.ts';
 import { cacheQuestions, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, type PublicQuestion } from '../_shared/qbank.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
@@ -40,13 +43,22 @@ async function resolve(auth: Auth, admin: Admin, task: { subject_id: string | nu
   const { data: notice } = await auth.client.from('notices').select('board, role_name, organization, role_duties, structure').eq('id', subject!.notice_id).single();
   const { data: tt } = session?.topic_ids?.length ? await auth.client.from('notice_topics').select('id, text').in('id', session.topic_ids) : { data: [] };
   const topics = (tt ?? []).sort((a, b) => session!.topic_ids.indexOf(a.id) - session!.topic_ids.indexOf(b.id)).map((t) => t.text);
-  const { articles, law, extra } = await loadLawSources(admin, { title: session!.title, topics, subject: subject!.name, ownerId: auth.user.id, lawRefs: session!.law_refs });
-  const input = { depth, banca: notice?.board ?? '', subject: subject!.name, title: session!.title, topics, law };
+  // Mais cobrados (IA, em cache compartilhado): na sessão com mais artigos do que cabem, já escolhem os trechos; em toda
+  // apostila, viram destaques no prompt (fora da chave do cache).
+  const banca = String(notice?.board ?? ''), ownerId = auth.user.id;
+  const hotInput = (...a: Parameters<typeof hotLaws>): HotInput => ({ banca, subject: subject!.name, title: session!.title, topics, laws: hotLaws(...a) });
+  const { articles, law, extra, omitted, refs, all } = await loadLawSources(admin, { title: session!.title, topics, subject: subject!.name, ownerId, lawRefs: session!.law_refs,
+    hot: async (rs, arts, own) => {
+      const h = await ensureHot(admin, ownerId, hotInput(rs, arts, own));
+      return h ? hotArticleKeys(h, arts, (k) => lawByKey(k, own)?.short ?? k) : [];
+    } });
+  const input = { depth, banca, subject: subject!.name, title: session!.title, topics, law };
   return {
     extra, input, key: guideCacheKey({ ...input, cargo: String(notice?.role_name ?? '') }), articles, noticeId: subject!.notice_id as string, cargo: (notice?.role_name ?? '') as string,
     duties: String(notice?.role_duties ?? ''), otherRoles: ((notice?.structure as { otherRoles?: string[] } | null)?.otherRoles ?? []) as string[],
     sessionId: task.session_id, subjectId: task.subject_id, keyword: (session?.keyword ?? '') as string,
     organization: String(notice?.organization ?? ''),
+    hot: hotInput(refs, all, extra), omitted,
   };
 }
 type GuideContext = NonNullable<Awaited<ReturnType<typeof resolve>>>;
@@ -125,8 +137,12 @@ async function boardEvidence(admin: Admin, ownerId: string, ctx: GuideContext): 
 }
 
 async function generate(admin: Admin, ownerId: string, jobId: string, ctx: GuideContext) {
-  const { input, key, articles, cargo, duties, otherRoles } = ctx;
+  const { key, articles, cargo, duties, otherRoles } = ctx;
   const { model, apiKey } = aiFor('guide'), started = Date.now();
+  // Destaques dos mais cobrados e seções sem trecho: só no prompt (a chave do cache não muda).
+  const hot = await ensureHot(admin, ownerId, ctx.hot);
+  const notes = [hotGuideNote(hot), ctx.omitted.length ? `A sessão tem mais artigos do que os trechos acima; ficaram de fora estas seções: ${ctx.omitted.slice(0, 20).join('; ')}. Na introdução, diga ao candidato para lê-las na lei seca.` : ''].filter(Boolean);
+  const input = { ...ctx.input, notes };
   let usage: GeminiUsage | null = null, text: GuideText | null = null, split = false;
   const add = (u: GeminiUsage) => { usage = usage ? { inputTokens: usage.inputTokens + u.inputTokens, outputTokens: usage.outputTokens + u.outputTokens, thinkingTokens: usage.thinkingTokens + u.thinkingTokens } : u; };
   const save = async (content: Guide | (Guide & { parcial: true }), board: number) => {
