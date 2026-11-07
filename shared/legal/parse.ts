@@ -107,7 +107,9 @@ export function parseLawHtml(html: string): LegalArticle[] {
 const FOOTNOTE_RE = /^(\d{1,3})\s+(Provs?\.?s?|Provimento|Res\.|Resolução|L\.|Lei|D\.|Decreto|Port\.|Portaria|Assento|Incluíd[oa]|Vide|Comunicado|Com\.|Redação|Acrescid[oa]|Revogad[oa])\b/;
 const NEW_PARAGRAPH = /^(Art\.\s|§|Parágrafo único|[IVXLC]+\s*[-–]|[a-z]\)\s)/;
 const NORM_HEADING_RE = /^(CAP[ÍI]TULO|SE[ÇC][ÃA]O|Se[çc][ãa]o|SUBSE[ÇC][ÃA]O|Subse[çc][ãa]o)\s+[IVXLC]+\b/;
-const NORM_ART_RE = /^(?:Art\.{1,2}|Artigo)\s*(\d{1,3}(?:\.\d{3})+|\d{1,4})\s*(?:º|°|o(?=\s))?\s*(?:-\s*([A-Z]{1,2})\b)?\s*\.?\s*-?\s*/;
+// Letra do artigo acrescentado ("Art. 241-A") colada no hífen e sem outra letra depois: em "Artigo 245 - O funcionário" e
+// "Artigo 241 - São deveres", o "O" e o "S" são o começo do texto.
+const NORM_ART_RE = /^(?:Art\.{1,2}|Artigo)\s*(\d{1,3}(?:\.\d{3})+|\d{1,4})\s*(?:º|°|o(?=\s))?\s*(?:-([A-Z]{1,2})(?![A-Za-zÀ-ú]))?\s*\.?\s*-?\s*/;
 const UPPER_RE = /^[A-ZÁÉÍÓÚÂÊÔÃÕÇ0-9 ,;:–\-]+$/;
 // 1235 → "1.235", como no resto do texto.
 const normLabel = (n: number) => n.toLocaleString('pt-BR').replace(/\s/g, '.');
@@ -127,7 +129,7 @@ export function parseNormsText(raw: string): LegalArticle[] {
       lines.push(l);
     }
   }
-  const firsts = lines.map((l, i) => (/^Art\.\s*1\s*º/.test(l) ? i : -1)).filter((i) => i >= 0);
+  const firsts = lines.map((l, i) => (/^(?:Art\.|Artigo)\s*1\s*(?:º|°|o\b)/.test(l) ? i : -1)).filter((i) => i >= 0);
   let start = firsts.map((i, k) => ({ i, len: (firsts[k + 1] ?? lines.length) - i })).sort((x, y) => y.len - x.len)[0]?.i ?? 0;
   // O título do capítulo fica nas linhas logo antes do Art. 1º.
   while (start > 0 && (NORM_HEADING_RE.test(lines[start - 1]!) || UPPER_RE.test(lines[start - 1]!))) start--;

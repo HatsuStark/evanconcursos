@@ -32,6 +32,11 @@ Deno.serve(async (req) => {
     if (articles.length < 2) {
       return json(422, { error: 'Não achei artigos ("Art. 1º", "Art. 2º"…) no PDF. Confira se é o texto da norma, com texto selecionável (não escaneado).' });
     }
+    // Trecho da norma (ex.: material de cursinho só com os artigos de um edital): as sessões, a apostila e as questões de
+    // outros artigos ficariam sem texto. Pede a norma inteira.
+    if (articles[0]!.num > 1) {
+      return json(422, { error: `Este PDF começa no art. ${articles[0]!.label} (vai até o art. ${articles.at(-1)!.label}): parece um trecho da norma. Envie o PDF da norma completa, do art. 1º ao último, como o publicado no site oficial.` });
+    }
     const { data: row, error: e1 } = await admin.from('legal_norms').upsert({
       urn: uploadUrn(auth.user.id, norm.key), law_key: norm.key, name: norm.citation, short_name: shortCitation(norm.citation), citation: norm.citation,
       match_pattern: norm.pattern, owner_id: auth.user.id, source_url: path, content_url: path, version: 'Current', license: 'enviado pelo estudante',

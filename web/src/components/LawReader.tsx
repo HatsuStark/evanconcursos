@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, Highlighter, Search, StickyNote } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { UnlistedNorm } from '../../../shared/legal/norms.ts';
+import { unlistedNorms, type UnlistedNorm } from '../../../shared/legal/norms.ts';
 import type { LawRef } from '../../../shared/legal/refs.ts';
 import { LAWS, lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
 import { rangesLabel, saveMark, useLawArticles, useMarks, type Article, type Mark } from '../lib/legal.ts';
@@ -41,6 +41,9 @@ function LawBlock({ lawRef, own }: { lawRef: LawRef; own: LawEntry[] }) {
     return list.filter((a) => (byNum != null ? a.num === byNum : a.text.toLowerCase().includes(s))).slice(0, 60);
   }, [q.data, search, lawRef.ranges.length]);
   const marks = useMarks(articles.map((a) => a.id));
+  const span = q.data?.span;
+  const partial = span && span.first.num > 1 ? { first: span.first.label, last: span.last.label } : null;
+  const resend = partial ? unlistedNorms(q.data!.norm.name)[0] ?? null : null;
 
   return (
     <section className="glass law-block">
@@ -56,6 +59,13 @@ function LawBlock({ lawRef, own }: { lawRef: LawRef; own: LawEntry[] }) {
       {q.isLoading && <div className="muted small" style={{ display: 'flex', gap: 8, alignItems: 'center' }}><span className="spinner" /> Carregando o texto oficial… (na primeira vez, pode levar alguns segundos)</div>}
       {q.isError && <p className="error">{(q.error as Error).message}</p>}
       {q.data && !articles.length && <p className="muted">Nenhum artigo encontrado{search ? ' para a busca' : ' nesse intervalo'}.</p>}
+      {/* PDF enviado só com parte da norma (antes de o envio recusar trechos): pede a norma completa no lugar. */}
+      {partial && resend && (
+        <div className="warning-card" style={{ display: 'grid', gap: 10 }}>
+          <span>O PDF que você enviou tem só do art. {partial.first} ao art. {partial.last}: parece um trecho da norma. Envie a norma completa para ter todos os artigos aqui, na apostila e nas questões.</span>
+          <LawUpload norm={resend} compact />
+        </div>
+      )}
       <div className="law-articles">
         {articles.map((a, i) => (
           <ArticleView key={a.id} a={a} showHeading={i === 0 || articles[i - 1]!.heading !== a.heading} mark={marks.data?.find((m) => m.article_id === a.id)} />

@@ -134,6 +134,13 @@ describe('Normas Judiciais da CGJ SP (PDF)', () => {
     expect(arts[2]!.text).toBe('Art. 49. Os níveis de acesso serão estabelecidos pela Corregedoria, com a STI.\n§ 1º É vedado ceder a senha.\nArt. 1 do CPC, citado numa linha quebrada.');
     expect(arts[5]!.revoked).toBe(true);
   });
+  it('"Artigo 241 - São": a primeira letra do texto não vira letra do artigo', () => {
+    const est = parseNormsText(['=== PÁGINA 1 ===', 'Artigo 1º - Esta lei institui o regime.', 'Artigo 241 - São deveres do funcionário:', 'I - ser assíduo;',
+      'Artigo 245 - O funcionário é responsável.', 'Artigo 245-A - Acrescido.', 'Artigo 250 - A responsabilidade não exime.'].join('\n'));
+    expect(est.map((a) => a.label)).toEqual(['1', '241', '245', '245-A', '250']);
+    expect(est[1]!.text).toBe('Art. 241. São deveres do funcionário:\nI - ser assíduo;');
+    expect(est[2]!.text).toBe('Art. 245. O funcionário é responsável.');
+  });
   it('o título da sessão e o item do edital apontam os artigos das Normas', () => {
     expect(findLawRefs('Disposições Gerais e Expediente: Normas da CGJ (arts. 1º a 4º, 33, 47 e 49)')).toEqual([{ law: 'NSCGJ', ranges: [{ from: 1, to: 4 }, { from: 33, to: 33 }, { from: 47, to: 47 }, { from: 49, to: 49 }] }]);
     expect(findLawRefs('Normas Judiciais da Corregedoria Geral da Justiça (Tomo I – Capítulo I: art. 1º a 4º)').map((r) => r.law)).toEqual(['NSCGJ']);

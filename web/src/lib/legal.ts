@@ -71,7 +71,7 @@ export const useLawArticles = (ref: LawRef | null, own: LawEntry[] = []) => useQ
   queryKey: ['law', ref?.law, JSON.stringify(ref?.ranges ?? [])],
   enabled: !!ref,
   staleTime: 10 * 60_000,
-  queryFn: async (): Promise<{ norm: Norm; articles: Article[] }> => {
+  queryFn: async (): Promise<{ norm: Norm; articles: Article[]; span: { first: Pick<Article, 'label' | 'num'>; last: Pick<Article, 'label' | 'num'> } | null }> => {
     const law = lawByKey(ref!.law, own);
     if (!law) throw new Error('Lei indisponível.');
     const pick = async () => (await supabase.from('legal_norms').select('id, law_key, name, short_name, source_url, version, fetched_at, owner_id, license').eq('urn', law.urn).maybeSingle()).data as Norm | null;
@@ -89,7 +89,14 @@ export const useLawArticles = (ref: LawRef | null, own: LawEntry[] = []) => useQ
     if (ref!.ranges.length) q = q.or(rangesOrFilter(ref!.ranges));
     const { data, error } = await q;
     if (error) throw new Error(error.message);
-    return { norm, articles: (data as Article[]).filter((a) => inRanges(ref!.ranges, a.num, a.suffix)) };
+    // Norma enviada pelo estudante: primeiro e último artigo do PDF, para avisar quando ele é só um trecho.
+    let span = null;
+    if (norm.owner_id) {
+      const edge = (asc: boolean) => supabase.from('legal_articles').select('label, num').eq('norm_id', norm!.id).order('ord', { ascending: asc }).limit(1).maybeSingle();
+      const [{ data: first }, { data: last }] = await Promise.all([edge(true), edge(false)]);
+      if (first && last) span = { first: first as Pick<Article, 'label' | 'num'>, last: last as Pick<Article, 'label' | 'num'> };
+    }
+    return { norm, articles: (data as Article[]).filter((a) => inRanges(ref!.ranges, a.num, a.suffix)), span };
   },
 });
 
