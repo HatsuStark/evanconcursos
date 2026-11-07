@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { findLawRefs, inRanges, rangesLabel, rangesOrFilter, sessionLawRefs as lawRefsOfSession, storedLawRefs, type LawRef } from '../../../shared/legal/refs.ts';
 import { ownLawEntry, preferOfficial, unlistedNorms, type OwnNormRow, type UnlistedNorm } from '../../../shared/legal/norms.ts';
 import { lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
+import { extractPages } from './pdfjs.ts';
 import { supabase } from './supabase.ts';
 
 export interface Norm { id: string; law_key: string; name: string; short_name: string; source_url: string; version: 'Current' | 'Original'; fetched_at: string; owner_id?: string | null; license?: string }
@@ -40,22 +41,26 @@ export const useOwnLaws = () => useQuery({
   },
 });
 
-// Envia o PDF da norma (pasta do estudante no bucket "leis") e separa os artigos no servidor.
+// Envia o PDF da norma (pasta do estudante no bucket "leis") e separa os artigos no servidor. O texto é extraído aqui no
+// navegador: extrair no servidor estoura o limite de CPU da função em leis grandes. Nenhuma etapa usa IA.
 export async function uploadLawPdf(file: File, citation: string, key: string) {
   if (file.type && file.type !== 'application/pdf') throw new Error('Envie um arquivo PDF.');
   if (file.size > 50 * 1024 * 1024) throw new Error('PDF maior que 50 MB.');
   const { data: u } = await supabase.auth.getUser();
   if (!u.user) throw new Error('Entre na sua conta.');
+  const bytes = await file.arrayBuffer();
+  const pages = await extractPages(bytes).catch(() => { throw new Error('Não foi possível abrir o PDF. Confira se o arquivo não está corrompido ou protegido.'); });
+  if (pages.join('').replace(/\s/g, '').length < 200) throw new Error('O PDF não tem texto selecionável (parece escaneado). Envie o PDF do site oficial.');
   const path = `${u.user.id}/${key}.pdf`;
-  const up = await supabase.storage.from('leis').upload(path, file, { contentType: 'application/pdf', upsert: true });
+  const up = await supabase.storage.from('leis').upload(path, bytes, { contentType: 'application/pdf', upsert: true });
   if (up.error) throw new Error(`Falha ao enviar o PDF: ${up.error.message}`);
-  const { data, error } = await supabase.functions.invoke('law-upload', { body: { path, citation } });
+  const { data, error } = await supabase.functions.invoke('law-upload', { body: { path, citation, pages } });
   const err = (data as { error?: string } | null)?.error;
   if (error || err) {
-    // A função devolve a mensagem no corpo mesmo com status de erro.
+    // A função devolve a mensagem no corpo mesmo com status de erro; sem corpo, ela caiu (limite de recursos).
     const ctx = (error as { context?: Response } | null)?.context;
     const body = ctx && typeof ctx.json === 'function' ? await ctx.json().catch(() => null) as { error?: string } | null : null;
-    throw new Error(err ?? body?.error ?? error?.message ?? 'Não foi possível ler o PDF.');
+    throw new Error(err ?? body?.error ?? 'O servidor não conseguiu processar este PDF agora. Tente de novo; se repetir, envie só a norma citada, sem anexos.');
   }
   return (data as { norm: { short: string; articles: number; first: string; last: string } }).norm;
 }

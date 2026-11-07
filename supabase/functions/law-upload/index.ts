@@ -1,14 +1,22 @@
 // Edge Function "law-upload": norma fora do registro enviada pelo estudante em PDF (ex.: Resolução CNJ 354/2020).
-//   POST {path, citation} → {norm: {id, key, short, articles, first, last}}
-// O PDF já está no bucket privado "leis", na pasta do estudante. A citação vem do edital ou da sessão (unlistedNorms) e
-// define a chave e como a norma é achada nos textos. O texto é separado por artigo (parseNormsText) e gravado só para
-// ele: não há como garantir que o PDF é o oficial, então a norma não vale para os outros estudantes.
-import { extractText } from 'unpdf';
+//   POST {path, citation, pages} → {norm: {id, key, short, articles, first, last}}
+// O PDF já está no bucket privado "leis", na pasta do estudante. O navegador extrai o texto de cada página (pages):
+// extrair aqui estoura o limite de CPU e memória da função em leis grandes (códigos inteiros). Não há IA nesta função.
+// A citação vem do edital ou da sessão (unlistedNorms) e define a chave e como a norma é achada nos textos. O texto é
+// separado por artigo (parseNormsText) e gravado só para ele: não há como garantir que o PDF é o oficial, então a norma
+// não vale para os outros estudantes.
 import { parseNormsText } from '../../../shared/legal/parse.ts';
 import { shortCitation, unlistedNorms, uploadUrn } from '../../../shared/legal/norms.ts';
 import { adminClient, CORS, json, requireUser } from '../_shared/http.ts';
 
-const MAX_BYTES = 50 * 1024 * 1024;
+const MAX_PAGES = 5000, MAX_PAGE_CHARS = 20_000, MAX_TOTAL_CHARS = 12_000_000;
+
+// O texto vem do navegador: aceita só o formato esperado, com limite por página e no total.
+function validPages(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_PAGES || !value.every((p) => typeof p === 'string')) return null;
+  const pages = (value as string[]).map((p) => p.slice(0, MAX_PAGE_CHARS));
+  return pages.reduce((n, p) => n + p.length, 0) <= MAX_TOTAL_CHARS ? pages : null;
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -21,14 +29,12 @@ Deno.serve(async (req) => {
   if (!path.startsWith(`${auth.user.id}/`) || path.includes('..') || !/\.pdf$/i.test(path)) return json(400, { error: 'Arquivo inválido.' });
   const norm = unlistedNorms(citation)[0];
   if (!norm) return json(400, { error: 'Não reconheci a norma. Informe como o edital a cita (ex.: "Resolução CNJ 354/2020").' });
+  const pages = validPages(body.pages);
+  if (!pages) return json(400, { error: 'O texto do PDF não chegou ou passa do limite (5.000 páginas). Recarregue a página e tente de novo.' });
 
   const admin = adminClient();
   try {
-    const { data: file, error } = await admin.storage.from('leis').download(path);
-    if (error || !file) return json(404, { error: 'PDF não encontrado. Envie de novo.' });
-    if (file.size > MAX_BYTES) return json(400, { error: 'PDF maior que 50 MB.' });
-    const { text } = await extractText(new Uint8Array(await file.arrayBuffer()), { mergePages: false });
-    const articles = parseNormsText(text.map((t, i) => `\n=== PÁGINA ${i + 1} ===\n${t}`).join(''));
+    const articles = parseNormsText(pages.map((t, i) => `\n=== PÁGINA ${i + 1} ===\n${t}`).join(''));
     if (articles.length < 2) {
       return json(422, { error: 'Não achei artigos ("Art. 1º", "Art. 2º"…) no PDF. Confira se é o texto da norma, com texto selecionável (não escaneado).' });
     }
