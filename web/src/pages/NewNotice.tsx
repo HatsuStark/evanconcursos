@@ -5,7 +5,7 @@ import type { NoticeRole } from '../../../shared/ai/notice.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { Shell } from '../components/Shell.tsx';
 import { Steps } from '../components/ui.tsx';
-import { listNoticeRoles, MAX_PDF_BYTES, rememberUpdate, startNoticeReading, uploadNoticeFile } from '../lib/notices.ts';
+import { listNoticeRoles, MAX_PDF_BYTES, NoticeRefused, rememberUpdate, startNoticeReading, uploadNoticeFile } from '../lib/notices.ts';
 
 // Fluxo: PDF → lista de cargos do edital → o candidato escolhe o dele → leitura completa só desse cargo.
 // Sem lista (falha ou edital sem quadro de cargos), o cargo é digitado, como antes.
@@ -49,7 +49,8 @@ export function NewNoticePage() {
       const ids = uploaded ?? await uploadNoticeFile(file);
       setUploaded(ids);
       setBusy('Procurando os cargos do edital…');
-      const list = await listNoticeRoles(ids.noticeId, ids.fileId).catch(() => [] as NoticeRole[]);
+      // Falha comum na lista: o cargo é digitado. PDF recusado (grande demais, ou lei): o erro aparece para trocar o arquivo.
+      const list = await listNoticeRoles(ids.noticeId, ids.fileId).catch((e) => { if (e instanceof NoticeRefused) throw e; return [] as NoticeRole[]; });
       if (list.length === 1) return await start(ids, list[0]!.name, { code: list[0]!.code, otherRoles: [] });
       setRoles(list); setBusy('');
     } catch (err) {

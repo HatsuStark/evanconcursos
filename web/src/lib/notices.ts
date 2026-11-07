@@ -69,12 +69,18 @@ export async function uploadNoticeFile(file: File): Promise<{ noticeId: string; 
   return { noticeId: notice.id, fileId: row.id };
 }
 
+// PDF recusado antes da IA (grande demais ou texto de lei): não adianta digitar o cargo, o candidato troca o arquivo.
+export class NoticeRefused extends Error {}
+
 async function invokeExtract<T>(body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke('notice-extract', { body });
   if (error) {
-    let msg = error.message;
-    try { msg = (await (error as { context?: Response }).context?.json())?.error ?? msg; } catch { /* resposta sem JSON */ }
-    throw new Error(msg);
+    let msg = error.message, refused = false;
+    try {
+      const b = await (error as { context?: Response }).context?.json() as { error?: string; refused?: boolean } | undefined;
+      msg = b?.error ?? msg; refused = !!b?.refused;
+    } catch { /* resposta sem JSON */ }
+    throw refused ? new NoticeRefused(msg) : new Error(msg);
   }
   return data as T;
 }

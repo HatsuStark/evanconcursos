@@ -4,7 +4,8 @@
 // baixa o PDF do bucket privado, pede ao Gemini os dados estruturados (validados pelo schema Zod),
 // confere contra o texto do PDF, grava a extração (notice_extractions), o consumo (ai_usage) e o job (ai_jobs).
 // O app acompanha pelo job; o usuário confere e aprova depois (approve_notice).
-import { extractText } from 'unpdf';
+import { extractText, getDocumentProxy } from 'unpdf';
+import { noticeGuard } from '../../../shared/ai/notice-guard.ts';
 import { GeminiError, generateJson, toBase64, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { checkNotice, NOTICE_PROMPT_VERSION, NoticeExtraction, type NoticeRole, NoticeRoles, noticeRolesJsonSchema, normalizeText, readNotice, ROLES_PROMPT_VERSION, rolesPrompt, uniqueRoles } from '../../../shared/ai/notice.ts';
 import { noticeRoleKey, worthSharing } from '../../../shared/ai/notice-cache.ts';
@@ -56,14 +57,28 @@ Deno.serve(async (req) => {
   }
 });
 
+// Texto de cada página e o total de páginas. PDF só com imagem ou protegido: sem texto, mas com a contagem de páginas
+// (para a barreira de tamanho), se o PDF abrir.
+async function readPdf(bytes: Uint8Array): Promise<{ pages: string[]; total: number; hasText: boolean }> {
+  try {
+    const t = await extractText(bytes.slice(), { mergePages: false });
+    return { pages: t.text, total: t.totalPages, hasText: true };
+  } catch {
+    try { return { pages: [], total: (await getDocumentProxy(bytes.slice())).numPages, hasText: false }; } catch { return { pages: [], total: 0, hasText: false }; }
+  }
+}
+
 // Lista curta, síncrona: o texto do PDF basta e sai mais barato; PDF só com imagem vai inteiro.
 async function listRoles(ownerId: string, path: string) {
   const admin = adminClient(), m = modelName();
   const { data: blob, error } = await admin.storage.from('editais').download(path);
   if (error || !blob) return json(500, { error: 'Não foi possível ler o PDF enviado.' });
   const bytes = new Uint8Array(await blob.arrayBuffer());
-  let text = '';
-  try { text = (await extractText(bytes.slice(), { mergePages: true })).text; } catch { /* PDF só com imagem */ }
+  const read = await readPdf(bytes);
+  const text = read.pages.join('\n');
+  // PDF grande demais ou que é uma lei: recusado antes da IA, sem gastar tokens.
+  const refused = noticeGuard(read.pages, read.total);
+  if (refused) return json(422, { error: refused, refused: true });
   // Mesmo edital já listado por outro candidato (mesmo arquivo, mesmo texto ou mesmo título com o texto igual): sem IA.
   const notice = await identifyNotice(bytes, text), keys = notice.keys;
   const found = await findRead(admin, 'roles', notice, '', ROLES_PROMPT_VERSION);
@@ -98,13 +113,15 @@ async function process(p: { jobId: string; ownerId: string; noticeId: string; fi
     const bytes = new Uint8Array(await blob.arrayBuffer());
 
     // Texto do PDF por página: base da leitura por linhas e da conferência dos tópicos (se falhar, a leitura vai pelo PDF).
-    let pdfText: string | null = null, pages: string[] = [];
-    try {
-      const t = await extractText(bytes.slice(), { mergePages: false });
-      pages = t.text;
-      pdfText = pages.join('\n');
-      await admin.from('notice_files').update({ pages: t.totalPages }).eq('id', p.fileId);
-    } catch { /* PDF só com imagem ou protegido */ }
+    const read = await readPdf(bytes);
+    const pages = read.pages, pdfText = read.hasText ? pages.join('\n') : null;
+    if (read.total) await admin.from('notice_files').update({ pages: read.total }).eq('id', p.fileId);
+    // PDF grande demais ou que é uma lei: o job falha com a explicação, sem chamar a IA nem registrar consumo.
+    const refused = noticeGuard(pages, read.total);
+    if (refused) {
+      await admin.from('ai_jobs').update({ status: 'failed', finished_at: new Date().toISOString(), error: refused }).eq('id', p.jobId);
+      return;
+    }
 
     await step('analyzing');
     // Mesmo edital já lido para o mesmo cargo por outro candidato: reaproveita a leitura da IA (cada um confere a sua).
