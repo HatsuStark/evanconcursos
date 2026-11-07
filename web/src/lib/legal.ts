@@ -1,7 +1,7 @@
 // Lei seca: leis citadas pela sessão, artigos (texto oficial compartilhado) e marcações pessoais.
 import { useQuery } from '@tanstack/react-query';
 import { findLawRefs, inRanges, rangesLabel, rangesOrFilter, sessionLawRefs as lawRefsOfSession, storedLawRefs, type LawRef } from '../../../shared/legal/refs.ts';
-import { ownLawEntry, unlistedNorms, type OwnNormRow, type UnlistedNorm } from '../../../shared/legal/norms.ts';
+import { ownLawEntry, preferOfficial, unlistedNorms, type OwnNormRow, type UnlistedNorm } from '../../../shared/legal/norms.ts';
 import { lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
 import { supabase } from './supabase.ts';
 
@@ -35,7 +35,8 @@ export const useOwnLaws = () => useQuery({
       .or(`owner_id.eq.${uid},and(owner_id.is.null,match_pattern.not.is.null)`).order('fetched_at').limit(500);
     if (error) throw new Error(error.message);
     const all = data as OwnNorm[];
-    return { rows: all.filter((r) => r.owner_id === uid), entries: all.map(ownLawEntry).filter((l): l is LawEntry => !!l) };
+    // A versão oficial de uma norma vale mais que o PDF que o estudante enviou dela.
+    return { rows: all.filter((r) => r.owner_id === uid), entries: preferOfficial(all.map(ownLawEntry).filter((l): l is LawEntry => !!l)) };
   },
 });
 

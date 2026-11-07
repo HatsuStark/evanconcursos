@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseLawHtml, parseNormsText } from './parse.ts';
-import { ownLawEntry, shortCitation, unlistedNorms, uploadUrn } from './norms.ts';
+import { ownLawEntry, preferOfficial, shortCitation, unlistedNorms, uploadUrn } from './norms.ts';
 import { aiLawRefs, citesUnlistedLaw, findLawRefs, inRanges, mergeLawRefs, rangesOrFilter, noticeLawKeys, parseRanges, rangesLabel, resolveSessionRefs, sessionLawRefs, storedLawRefs } from './refs.ts';
 
 // Trecho real do HTML do CPP no normas.leg.br (estrutura preservada).
@@ -30,6 +30,19 @@ describe('lei fora do registro', () => {
     expect(citesUnlistedLaw('Peculato (CP, arts. 312 a 327)')).toBe(false);
     expect(findLawRefs(title, 'Direito Penal')).toEqual([]);
     expect(findLawRefs('Peculato, arts. 312 a 327', 'Direito Penal')[0]!.law).toBe('CP');
+  });
+});
+
+describe('versão oficial antes do PDF do estudante', () => {
+  const upload = ownLawEntry({ law_key: 'lei-10261-1968', short_name: 'Lei 10.261/1968', name: 'Lei 10.261/1968', urn: uploadUrn('u1', 'lei-10261-1968'), match_pattern: unlistedNorms('Lei 10.261/1968')[0]!.pattern })!;
+  const official = ownLawEntry({ law_key: 'sp-lei-10261-1968', short_name: 'Lei SP 10.261/1968', name: 'Lei SP 10.261/1968 – Estatuto', urn: 'alesp:lei:10261:1968', match_pattern: unlistedNorms('Lei 10.261/1968')[0]!.pattern })!;
+  it('a citação acha só a oficial, e a chave do PDF aponta para ela', () => {
+    const own = preferOfficial([upload, official]);
+    expect(findLawRefs('Lei 10.261/68 (Estatuto SP), arts. 1º, 3º e 4º', '', own).map((r) => r.law)).toEqual(['sp-lei-10261-1968']);
+    expect(own.find((l) => l.key === 'lei-10261-1968')!.urn).toBe('alesp:lei:10261:1968');
+  });
+  it('sem a oficial, o PDF continua valendo', () => {
+    expect(findLawRefs('Lei 10.261/68, arts. 1º a 4º', '', preferOfficial([upload])).map((r) => r.law)).toEqual(['lei-10261-1968']);
   });
 });
 

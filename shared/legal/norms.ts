@@ -78,5 +78,17 @@ export function ownLawEntry(r: OwnNormRow): LawEntry | null {
   try { return { key: r.law_key, short: r.short_name, name: r.name, urn: r.urn, match: new RegExp(r.match_pattern, 'i') }; } catch { return null; }
 }
 export const uploadUrn = (ownerId: string, key: string) => `upload:${ownerId}:${key}`;
+export const isUpload = (l: Pick<LawEntry, 'urn'>) => l.urn.startsWith('upload:');
+// A versão oficial (registro, acervos e as achadas nos editais) vale mais que o PDF do estudante da mesma norma. As chaves
+// diferem ("sp-lei-10261-1968" × "lei-10261-1968"), então compara pela citação. A chave do PDF continua valendo (sessões
+// gravadas com ela), mas aponta para o texto oficial e não acha mais citações (senão a norma entraria duas vezes).
+const NEVER = /$^/;
+export function preferOfficial(entries: LawEntry[]): LawEntry[] {
+  const official = [...LAWS, ...entries.filter((l) => !isUpload(l))];
+  return entries.map((l) => {
+    const o = isUpload(l) ? official.find((x) => new RegExp(x.match.source, 'i').test(l.name)) : undefined;
+    return o ? { ...o, key: l.key, match: NEVER } : l;
+  });
+}
 // Nome curto para citar ("Resolução 354/2020"), sem o órgão.
 export const shortCitation = (citation: string) => citation.replace(/\s+d[oa]\s+.*$/, '');

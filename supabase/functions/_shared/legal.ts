@@ -5,7 +5,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { type LegalArticle, parseLawHtml } from '../../../shared/legal/parse.ts';
 import type { LawEntry } from '../../../shared/legal/registry.ts';
-import { ownLawEntry, type OwnNormRow } from '../../../shared/legal/norms.ts';
+import { ownLawEntry, preferOfficial, type OwnNormRow } from '../../../shared/legal/norms.ts';
 
 const API = 'https://normas.leg.br/api/public';
 export const MAX_AGE_MS = 30 * 864e5;
@@ -60,8 +60,10 @@ export async function ensureLaw(admin: SupabaseClient, law: LawEntry): Promise<s
 
 // Normas fora do registro que valem para o estudante: as que ele enviou em PDF (só dele) e as achadas nos editais
 // (sem dono, para todos), como entradas de registro.
-export async function ownLaws(admin: SupabaseClient, ownerId: string): Promise<LawEntry[]> {
+// Norma com versão oficial no app usa a oficial, mesmo que o estudante tenha enviado o PDF dela (preferOfficial).
+// `uploads: false`: só as oficiais (para a busca automática procurar a oficial também das que ele enviou).
+export async function ownLaws(admin: SupabaseClient, ownerId: string, { uploads = true } = {}): Promise<LawEntry[]> {
   const { data } = await admin.from('legal_norms').select('law_key, short_name, name, urn, match_pattern')
-    .or(`owner_id.eq.${ownerId},and(owner_id.is.null,match_pattern.not.is.null)`).limit(500);
-  return ((data ?? []) as OwnNormRow[]).map(ownLawEntry).filter((l): l is LawEntry => !!l);
+    .or(uploads ? `owner_id.eq.${ownerId},and(owner_id.is.null,match_pattern.not.is.null)` : 'and(owner_id.is.null,match_pattern.not.is.null)').limit(500);
+  return preferOfficial(((data ?? []) as OwnNormRow[]).map(ownLawEntry).filter((l): l is LawEntry => !!l));
 }

@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
       const { data: subs } = await auth.client.from('notice_subjects').select('notice_topics(text)').eq('notice_id', notice.id);
       const texts = (subs ?? []).flatMap((s) => (s.notice_topics as { text: string }[]).map((t) => t.text));
       const org = notice.organization ?? '';
-      const r = await resolveCitedNorms(admin, texts, { org, uf: ufOf(org), known: await ownLaws(admin, auth.user.id), deadline: Date.now() + 100_000 });
+      const r = await resolveCitedNorms(admin, texts, { org, uf: ufOf(org), known: await ownLaws(admin, auth.user.id, { uploads: false }), deadline: Date.now() + 100_000 });
       return json(200, r);
     }
 
@@ -115,7 +115,7 @@ Deno.serve(async (req) => {
       // Leis que a IA pode citar no campo laws: as do registro, as achadas nos editais e as que o estudante enviou em PDF.
       // Norma da matéria que o passo "laws" não alcançou (prazo, rede) ganha mais uma tentativa curta aqui.
       const org = notice.organization ?? '';
-      await resolveCitedNorms(admin, topics, { org, uf: ufOf(org), known: await ownLaws(admin, auth.user.id), deadline: Date.now() + 12_000 }).catch(() => null);
+      await resolveCitedNorms(admin, topics, { org, uf: ufOf(org), known: await ownLaws(admin, auth.user.id, { uploads: false }), deadline: Date.now() + 12_000 }).catch(() => null);
       const own = await ownLaws(admin, auth.user.id);
       // "Constituição Estadual" e "Lei Orgânica Municipal", sem nome, são as do órgão do edital.
       const local = new Set(localNormsCited(topics.join('\n'), org).filter((l) => l.generic).map(localKey));
