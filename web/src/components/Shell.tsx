@@ -2,6 +2,7 @@ import { CalendarDays, ClipboardList, FileText, LayoutDashboard, Library, ListCh
 import type { ReactNode } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { ContestSwitcher } from './ContestSwitcher.tsx';
+import { FeedbackButton } from './FeedbackButton.tsx';
 
 const NAV = [
   { to: '/', label: 'Hoje', icon: LayoutDashboard, end: true },
@@ -47,6 +48,7 @@ export function Shell({ title, subtitle, actions, rail, focus, children }: {
         {children}
       </main>
       {rail && <aside className="rail">{rail}</aside>}
+      {!focus && <FeedbackButton />}
     </div>
   );
 }

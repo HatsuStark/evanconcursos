@@ -797,3 +797,17 @@ details.card summary { cursor: pointer; font-weight: 600; }
 .guide, .law-block, .q-card, .flashcard { background: var(--paper); }
 /* Conferência: matérias agrupadas por bloco da prova. */
 .block-group > summary { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; cursor: pointer; padding: 8px 2px; font-size: 16px; }
+
+/* Balão de bug/sugestão: canto inferior direito, acima da barra inferior no celular. */
+.feedback { position: fixed; right: 20px; bottom: 20px; z-index: 30; display: grid; justify-items: end; gap: 10px; }
+.feedback-fab {
+  display: grid; place-items: center; width: 50px; height: 50px; border-radius: 50%; cursor: pointer;
+  background: var(--btn-bg); color: var(--btn-text); border: 0; box-shadow: 0 6px 20px rgb(0 0 0 / .25);
+  opacity: .85; transition: transform .15s ease, opacity .15s;
+}
+.feedback-fab:hover { opacity: 1; transform: translateY(-2px); }
+.feedback-panel { width: min(360px, calc(100vw - 32px)); padding: 16px; display: grid; gap: 10px; box-shadow: 0 12px 40px rgb(0 0 0 / .35); }
+.feedback-head { display: flex; align-items: center; justify-content: space-between; }
+.feedback-kinds { display: flex; gap: 6px; flex-wrap: wrap; }
+.feedback .textarea { min-height: 110px; }
+@media (max-width: 720px) { .feedback { right: 16px; bottom: 84px; } .feedback-fab { width: 44px; height: 44px; } .app:has(.voice-bar) .feedback { bottom: 150px; } }

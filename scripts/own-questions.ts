@@ -1,10 +1,13 @@
 // Importa o banco próprio (projeto apiQuestoes) para qbank_questions, pela conexão direta ao Postgres. As questões entram
 // com id "own-…" e passam a ser servidas pelo cache antes da Quest API (sem créditos). Reimportar atualiza o conteúdo;
 // a explicação da IA só é descartada se o gabarito mudou.
-// Uso: node --experimental-strip-types scripts/own-questions.ts [--dir <pasta _aceitas>] [--dry] [--remover]
+// Questão repetida (cargos do mesmo concurso dividem blocos de questões; mesmo enunciado, alternativas e texto-base) entra
+// uma vez só: fica a primeira na ordem dos arquivos.
+// Uso: node --experimental-strip-types scripts/own-questions.ts [--dir <pasta _aceitas>] [--dry] [--remover] [--limpar-repetidas]
 //   --dir      padrão: ../apiQuestoes/Provas/_aceitas (ou OWN_QUESTIONS_DIR no .env)
 //   --dry      só conta o que entraria, sem gravar
 //   --remover  apaga todas as questões próprias (respostas, caderno de erros e anotações delas ficam órfãs)
+//   --limpar-repetidas  apaga do banco as repetidas importadas antes desta regra (mesma ressalva das órfãs)
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
@@ -17,7 +20,7 @@ const env = Object.fromEntries(readFileSync(join(root, '.env'), 'utf8').split(/\
   .filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).trim()]));
 const args = process.argv.slice(2);
 const opt = (name: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
-const DRY = args.includes('--dry'), REMOVE = args.includes('--remover');
+const DRY = args.includes('--dry'), REMOVE = args.includes('--remover'), CLEAN = args.includes('--limpar-repetidas');
 const dir = resolve(opt('--dir') ?? env.OWN_QUESTIONS_DIR ?? join(root, '..', 'apiQuestoes', 'Provas', '_aceitas'));
 
 async function connect() {
@@ -53,12 +56,27 @@ for (const file of files) {
   rows.push(...r.rows);
   for (const [k, v] of Object.entries(r.skipped)) skipped[k] = (skipped[k] ?? 0) + v;
 }
+// Repetidas: mesma chave de conteúdo (texto sem formatação, acento nem pontuação); fica a primeira.
+const plain = (s: string) => s.replace(/<[^>]+>/g, '').normalize('NFD').replace(/[^a-z0-9]/gi, '').toLowerCase();
+const seen = new Set<string>(), repeated: string[] = [];
+const unique = rows.filter((r) => {
+  const k = sha1(`${plain(r.payload.enunciado)}|${r.payload.alternativas.map((a) => plain(a.texto)).join('|')}|${plain(r.payload.textos[0] ?? '').slice(0, 300)}`);
+  if (seen.has(k)) { repeated.push(r.qid); return false; }
+  seen.add(k);
+  return true;
+});
+rows.length = 0; rows.push(...unique);
+if (repeated.length) skipped['repetida'] = repeated.length;
 for (const r of rows) materias[r.materia] = (materias[r.materia] ?? 0) + 1;
 console.log(`${exams} provas, ${total} questões: ${rows.length} aproveitadas; fora: ${JSON.stringify(skipped)}`);
 console.log('Por matéria:', Object.entries(materias).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([m, n]) => `${m} ${n}`).join(' · '));
 if (DRY || !rows.length) process.exit(0);
 
 const db = await connect();
+if (CLEAN && repeated.length) {
+  const r = await db.query(`delete from public.qbank_questions where qid = any($1::text[])`, [repeated]);
+  console.log(`${r.rowCount} repetidas removidas do banco.`);
+}
 const BATCH = 500;
 for (let i = 0; i < rows.length; i += BATCH) {
   const chunk = rows.slice(i, i + BATCH);

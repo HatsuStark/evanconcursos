@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Check, FileText, ListChecks, Maximize2, Minimize2, Pause, Play, Scale, ScanSearch, Video } from 'lucide-react';
+import { BookOpen, Check, FileText, ListChecks, Maximize2, Minimize2, Pause, Play, RotateCcw, Scale, ScanSearch, Video } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { evaluate, latestAnswers, questionScore, scoreGoal } from '../../../shared/domain/adaptive.ts';
@@ -53,7 +53,13 @@ function useTimer(taskId: string, initial: number) {
     return () => clearInterval(t);
   }, [running, flush]);
   useEffect(() => () => flush(), [flush]);
-  return { running, seconds, toggle: () => { if (running) flush(); setRunning(!running); } };
+  // Zerar: para o cronômetro e grava 0 na hora (o tempo anterior da tarefa se perde).
+  const reset = () => {
+    setRunning(false);
+    ref.current.seconds = 0; ref.current.saved = 0; setSeconds(0);
+    void saveTimeSpent(taskId, 0);
+  };
+  return { running, seconds, reset, toggle: () => { if (running) flush(); setRunning(!running); } };
 }
 
 // Barra flutuante que acompanha a leitura: presa no topo ao rolar, some depois de `delay` ms parada e volta ao rolar
@@ -127,6 +133,9 @@ function StudyView({ d }: { d: StudyData }) {
     if (!timer.running) timer.toggle();
     if (canFocus) setFocus(true);
   }
+  function resetTimer() {
+    if (window.confirm(`Zerar o cronômetro desta tarefa? Os ${fmtClock(timer.seconds)} registrados serão apagados.`)) timer.reset();
+  }
   async function toggleDone() {
     if (focus) { if (timer.running) timer.toggle(); setFocus(false); }
     await setTaskDone(d.task.id, !d.task.done_at);
@@ -152,6 +161,7 @@ function StudyView({ d }: { d: StudyData }) {
           <span className="muted small">previsto: {fmtClock(d.task.minutes * 60)}</span>
           <div className="bar"><span style={{ width: `${Math.min(100, (timer.seconds / Math.max(60, d.task.minutes * 60)) * 100)}%`, background: 'var(--cyan)' }} /></div>
           <button className={'btn' + (timer.running ? ' ghost' : '')} onClick={timer.running ? timer.toggle : start}>{timer.running ? <><Pause size={18} /> Pausar</> : <><Play size={18} /> {timer.seconds ? 'Continuar' : 'Começar'}</>}</button>
+          {timer.seconds > 0 && <button className="btn ghost sm" onClick={resetTimer}><RotateCcw size={15} /> Zerar</button>}
         </div>
       </section>
       <section>
@@ -183,6 +193,7 @@ function StudyView({ d }: { d: StudyData }) {
           <span className="focus-clock" style={{ color: timer.running ? 'var(--cyan)' : 'var(--text)' }}>{fmtClock(timer.seconds)}</span>
           {d.task.goal_questions > 0 && <span className="muted small">{mine.length}/{d.task.goal_questions} questões</span>}
           <button className="btn ghost sm" onClick={timer.toggle}>{timer.running ? <><Pause size={15} /> Pausar</> : <><Play size={15} /> Continuar</>}</button>
+          {timer.seconds > 0 && <button className="btn ghost sm" title="Zerar cronômetro" aria-label="Zerar cronômetro" onClick={resetTimer}><RotateCcw size={15} /></button>}
           <button className="btn ghost sm" onClick={toggleDone}><Check size={15} /> {d.task.done_at ? 'Desfazer conclusão' : 'Concluir'}</button>
           <button className="btn ghost sm" title="Esc" onClick={() => setFocus(false)}><Minimize2 size={15} /> Sair do foco</button>
         </div>
