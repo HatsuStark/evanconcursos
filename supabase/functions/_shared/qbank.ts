@@ -37,33 +37,44 @@ export const questFailure = (message: string, fallback: string) => (/Quest API .
   : fallback);
 
 // Questões já compradas (cache) que servem ao filtro e o estudante ainda não viu: não gastam créditos. Antes de buscar na
-// API, usa estas: lotes buscados adiantados e amostras das apostilas ficavam pagos e nunca apareciam. Primeiro as da
-// banca (`preferBanca`), depois as provas mais recentes.
+// API, usa estas: lotes buscados adiantados e amostras das apostilas ficavam pagos e nunca apareciam.
+// O banco próprio (apiQuestoes, qid "own-…") vem antes das da Quest, e a dificuldade não o filtra (a dele é só estimada
+// pela IA na classificação): a única preferência nele é a banca (`preferBanca`), depois as provas mais recentes.
+// Nas da Quest a dificuldade filtra; primeiro o mesmo órgão, a carreira, a banca e as mais recentes.
 export interface CacheFilter { materia: string; assunto?: string; dificuldades?: string[]; banca?: string; preferBanca?: string; preferOrgao?: string; preferCarreiras?: string[]; tipo?: string; ano?: string; orgao?: string; cargo?: string; fonte?: 'propria' | 'quest' }
 export async function fromCache(admin: SupabaseClient, f: CacheFilter, want: number, isNew: (qid: string) => boolean): Promise<PublicQuestion[]> {
   if (want <= 0 || !f.materia) return [];
-  let q = admin.from('qbank_questions').select('qid, payload').eq('materia', f.materia);
-  if (f.assunto) q = q.eq('assunto', f.assunto);
-  if (f.dificuldades?.length) q = q.in('payload->>dificuldade', f.dificuldades);
-  if (f.banca) q = q.eq('payload->prova->>banca', f.banca);
-  if (f.tipo) q = q.ilike('payload->>tipo', f.tipo);
-  if (f.ano) q = q.eq('payload->prova->>ano', f.ano);
-  if (f.orgao) q = q.ilike('payload->prova->>orgao', `%${f.orgao}%`);
-  if (f.cargo) q = q.ilike('payload->prova->>cargo', `%${f.cargo}%`);
-  // Banco próprio (apiQuestoes, qid "own-…") ou só o que veio da Quest API.
-  if (f.fonte === 'propria') q = q.like('qid', `${OWN_PREFIX}%`);
-  else if (f.fonte === 'quest') q = q.not('qid', 'like', `${OWN_PREFIX}%`);
-  const { data, error } = await q.limit(300);
-  if (error) return [];
+  const query = (own: boolean) => {
+    let q = admin.from('qbank_questions').select('qid, payload').eq('materia', f.materia);
+    if (f.assunto) q = q.eq('assunto', f.assunto);
+    if (f.banca) q = q.eq('payload->prova->>banca', f.banca);
+    if (f.tipo) q = q.ilike('payload->>tipo', f.tipo);
+    if (f.ano) q = q.eq('payload->prova->>ano', f.ano);
+    if (f.orgao) q = q.ilike('payload->prova->>orgao', `%${f.orgao}%`);
+    if (f.cargo) q = q.ilike('payload->prova->>cargo', `%${f.cargo}%`);
+    if (own) return q.like('qid', `${OWN_PREFIX}%`);
+    if (f.dificuldades?.length) q = q.in('payload->>dificuldade', f.dificuldades);
+    return q.not('qid', 'like', `${OWN_PREFIX}%`);
+  };
   const board = normalizeText(f.preferBanca ?? ''), organ = normalizeText(f.preferOrgao ?? ''), careers = new Set(f.preferCarreiras ?? []);
-  // Provas do mesmo órgão primeiro, depois as da mesma carreira (só as compradas depois de o cache guardar a carreira), a
-  // banca e as mais recentes.
+  // Nas da Quest: provas do mesmo órgão primeiro, depois as da mesma carreira (só as compradas depois de o cache guardar a
+  // carreira), a banca e as mais recentes.
   const sameOrgan = (p: PublicQuestion) => Number(!!organ && normalizeText(p.prova?.orgao ?? '').includes(organ));
   const sameCareer = (p: PublicQuestion) => Number((p.carreiras ?? []).some((c) => careers.has(c)));
   const sameBoard = (p: PublicQuestion) => Number(!!board && normalizeText(p.prova?.banca ?? '') === board);
-  return (data ?? []).map((r) => r.payload as PublicQuestion).filter((p) => isNew(p.qid))
-    .sort((a, b) => sameOrgan(b) - sameOrgan(a) || sameCareer(b) - sameCareer(a) || sameBoard(b) - sameBoard(a) || (b.prova?.ano ?? 0) - (a.prova?.ano ?? 0))
-    .slice(0, want);
+  const newest = (a: PublicQuestion, b: PublicQuestion) => (b.prova?.ano ?? 0) - (a.prova?.ano ?? 0);
+  const out: PublicQuestion[] = [];
+  for (const own of [true, false]) {
+    if (out.length >= want || f.fonte === (own ? 'quest' : 'propria')) continue;
+    const { data, error } = await query(own).limit(300);
+    if (error) continue;
+    out.push(...(data ?? []).map((r) => r.payload as PublicQuestion).filter((p) => isNew(p.qid))
+      .sort(own
+        ? (a, b) => sameBoard(b) - sameBoard(a) || newest(a, b)
+        : (a, b) => sameOrgan(b) - sameOrgan(a) || sameCareer(b) - sameCareer(a) || sameBoard(b) - sameBoard(a) || newest(a, b))
+      .slice(0, want - out.length));
+  }
+  return out;
 }
 
 // Questões novas para o estudante, das provas mais recentes para as mais antigas, com uma posição guardada por escopo e filtro.

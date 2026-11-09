@@ -414,10 +414,19 @@ Deno.serve(async (req) => {
       const isNewCached = (id: string) => !seen.has(id) && !cached.some((c) => c.qid === id);
       // A dificuldade alterna a cada questão e continua de onde parou na sessão.
       let turn = [...served.values()].reduce((a, b) => a + b, 0);
+      // Antes de tudo, o banco próprio: as da banca do edital e depois as das outras, sem filtro de dificuldade (a dele é
+      // estimada). Só o que faltar vem da Quest (cache e API), com a dificuldade da sessão; por último, a IA.
+      for (const [assunto, n] of wanted) {
+        if (n <= 0) continue;
+        const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, tipo: format, preferBanca: sm.banca, fonte: 'propria' }, n, isNewCached);
+        cached.push(...got);
+        mark(`cache:propria:${got.length}`);
+        wanted.set(assunto, n - got.length);
+      }
       for (const board of [true, false]) {
         for (const [assunto, n] of wanted) {
           if (n <= 0 || timedOut) continue;
-          const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, dificuldades: diffs, tipo: format, preferOrgao: narrow.orgao, preferCarreiras: carreiras, ...(board ? { banca: sm.banca } : { preferBanca: sm.banca }) }, n, isNewCached);
+          const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, dificuldades: diffs, tipo: format, preferOrgao: narrow.orgao, preferCarreiras: carreiras, fonte: 'quest', ...(board ? { banca: sm.banca } : { preferBanca: sm.banca }) }, n, isNewCached);
           cached.push(...got);
           mark(`cache:${board ? 'banca' : 'outras'}:${got.length}`);
           let left = n - got.length;
