@@ -111,6 +111,7 @@ function FreePractice({ noticeId }: { noticeId: string | undefined }) {
           <label className="field">Tipo<select className="select" value={f.tipo ?? ''} onChange={(e) => set({ tipo: e.target.value })}><option value="">Todos</option>{(g.tiposQuestao ?? ['multipla escolha', 'Certo ou errado']).map((t) => <option key={t} value={t}>{t}</option>)}</select></label>
         </div>
         <div className="row">
+          <label className="field">Fonte<select className="select" value={f.fonte ?? ''} onChange={(e) => set({ fonte: e.target.value as FreeFilters['fonte'] })}><option value="">Todas</option><option value="propria">Banco próprio</option><option value="quest">Quest API</option></select></label>
           <label className="field">Órgão (contém)<input className="input" value={f.orgao ?? ''} onChange={(e) => set({ orgao: e.target.value })} placeholder="Ex.: TJ SP" /></label>
           <label className="field">Cargo (contém)<input className="input" value={f.cargo ?? ''} onChange={(e) => set({ cargo: e.target.value })} placeholder="Ex.: Escrevente" /></label>
           <label className="check"><input type="checkbox" checked={f.onlyNew !== false} onChange={(e) => set({ onlyNew: e.target.checked })} /> Só questões que nunca respondi</label>

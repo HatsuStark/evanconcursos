@@ -1,6 +1,6 @@
 // Edge Function "practice": prática fora do cronograma.
 //   {action:'filters', kind:'geral'|'materias'|'assuntos'|'bancas', q?, materia?} → listas de filtros (gratuitas)
-//   {action:'search', filters:{materia, assunto?, banca?, ano?, dificuldade?, orgao?, cargo?, tipo?, onlyNew?}, count}
+//   {action:'search', filters:{materia, assunto?, banca?, ano?, dificuldade?, orgao?, cargo?, tipo?, onlyNew?, fonte?}, count}
 //   {action:'by_id', qid}              → uma questão pelo id da API (do cache, se já veio; sem gabarito)
 //   {action:'review', count}           → questões do caderno de erros que vencem hoje (do cache, sem créditos)
 //   {action:'simulado_create', kind:'concurso'|'custom', planId?, taskId?, size?, subjects?, banca?, tipo?, timed, minutes?}
@@ -68,12 +68,14 @@ Deno.serve(async (req) => {
       const seen = f.onlyNew === false ? new Set<string>() : await seenQids();
       // As que já estão na tela voltam fora; depois, as já compradas que servem ao filtro, sem créditos.
       for (const id of Array.isArray(body.exclude) ? (body.exclude as unknown[]).map(String).slice(0, 500) : []) seen.add(id);
+      // fonte: 'propria' = só o banco próprio (apiQuestoes), sem ir à API; 'quest' = só a Quest API; vazio = as duas.
+      const fonte = f.fonte === 'propria' || f.fonte === 'quest' ? f.fonte as 'propria' | 'quest' : undefined;
       const cached = await fromCache(admin, {
         materia: params.materia, assunto: params.assunto, banca: params.banca, tipo: params.tipo, ano: params.ano, orgao: params.orgao, cargo: params.cargo,
-        dificuldades: f.dificuldade === MEDIUM_OR_HARD ? SESSION_DIFFICULTIES : params.dificuldade ? [params.dificuldade] : undefined,
+        dificuldades: f.dificuldade === MEDIUM_OR_HARD ? SESSION_DIFFICULTIES : params.dificuldade ? [params.dificuldade] : undefined, fonte,
       }, count, (id) => !seen.has(id));
       for (const c of cached) seen.add(c.qid);
-      const toBuy = count - cached.length;
+      const toBuy = fonte === 'propria' ? 0 : count - cached.length;
       let items: QuestQuestion[] = [];
       if (toBuy <= 0) items = [];
       else if (f.dificuldade === MEDIUM_OR_HARD) {

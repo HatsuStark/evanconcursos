@@ -5,6 +5,7 @@ import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { genericSubject } from '../../../shared/qbank/materias.ts';
+import { OWN_PREFIX } from '../../../shared/qbank/own.ts';
 import { CarreiraChoice, carreiraJsonSchema, carreiraPrompt, dominantFormat, ORGAO_MIN, mapSession, usefulCarreira, mapSubject, newestPage, pickBoard, QMAP_PROMPT_VERSION, QUESTION_FORMATS, usefulNarrowing, type Incidence, type MapDeps, type SessionFilter } from '../../../shared/qbank/map.ts';
 
 export const plain = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
@@ -38,7 +39,7 @@ export const questFailure = (message: string, fallback: string) => (/Quest API .
 // Questões já compradas (cache) que servem ao filtro e o estudante ainda não viu: não gastam créditos. Antes de buscar na
 // API, usa estas: lotes buscados adiantados e amostras das apostilas ficavam pagos e nunca apareciam. Primeiro as da
 // banca (`preferBanca`), depois as provas mais recentes.
-export interface CacheFilter { materia: string; assunto?: string; dificuldades?: string[]; banca?: string; preferBanca?: string; preferOrgao?: string; preferCarreiras?: string[]; tipo?: string; ano?: string; orgao?: string; cargo?: string }
+export interface CacheFilter { materia: string; assunto?: string; dificuldades?: string[]; banca?: string; preferBanca?: string; preferOrgao?: string; preferCarreiras?: string[]; tipo?: string; ano?: string; orgao?: string; cargo?: string; fonte?: 'propria' | 'quest' }
 export async function fromCache(admin: SupabaseClient, f: CacheFilter, want: number, isNew: (qid: string) => boolean): Promise<PublicQuestion[]> {
   if (want <= 0 || !f.materia) return [];
   let q = admin.from('qbank_questions').select('qid, payload').eq('materia', f.materia);
@@ -49,6 +50,9 @@ export async function fromCache(admin: SupabaseClient, f: CacheFilter, want: num
   if (f.ano) q = q.eq('payload->prova->>ano', f.ano);
   if (f.orgao) q = q.ilike('payload->prova->>orgao', `%${f.orgao}%`);
   if (f.cargo) q = q.ilike('payload->prova->>cargo', `%${f.cargo}%`);
+  // Banco próprio (apiQuestoes, qid "own-…") ou só o que veio da Quest API.
+  if (f.fonte === 'propria') q = q.like('qid', `${OWN_PREFIX}%`);
+  else if (f.fonte === 'quest') q = q.not('qid', 'like', `${OWN_PREFIX}%`);
   const { data, error } = await q.limit(300);
   if (error) return [];
   const board = normalizeText(f.preferBanca ?? ''), organ = normalizeText(f.preferOrgao ?? ''), careers = new Set(f.preferCarreiras ?? []);
