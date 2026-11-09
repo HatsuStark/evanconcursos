@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { theoryGoal } from '../domain/scheduler.ts';
-import { assuntoTerms, carreiraPrompt, CARREIRA_MIN, usefulCarreira, dominantFormat, localPlace, materiaQueries, orgaoKeyword, pickBoard, stem, equalIncidence, interleave, inTurn, assuntoPrompt, prefilterAssuntos, mapSession, mapSubject, measureIncidence, newestPage, usefulNarrowing, planPicks, roleKeyword, searchFilters, type MapDeps } from './map.ts';
+import { assuntoTerms, carreiraPrompt, CARREIRA_MIN, usefulCarreira, dominantFormat, localPlace, materiaQueries, orgaoKeyword, pickBoard, stem, equalIncidence, interleave, inTurn, assuntoPrompt, prefilterAssuntos, mapSession, mapSubject, measureIncidence, newestPage, recentMinYear, usefulNarrowing, planPicks, roleKeyword, searchFilters, type MapDeps } from './map.ts';
 
 const tally = (picks: string[]) => picks.reduce<Record<string, number>>((m, a) => ({ ...m, [a]: (m[a] ?? 0) + 1 }), {});
 
@@ -145,6 +145,13 @@ describe('searchFilters', () => {
     expect(new Set(r.map((f) => f.params.ano))).toEqual(new Set(['2026', '2025']));
     expect(r.every((f) => !f.params.banca && f.params.dificuldade && f.params.tipo)).toBe(true);
     expect(r[0]!.params.nivel_escolaridade).toBe('Superior');
+  });
+
+  it('ano mínimo das provas: só em atualidades', () => {
+    const now = new Date('2026-06-01T12:00:00Z');
+    expect(recentMinYear('Atualidades e Conhecimentos Gerais', now)).toBe(2025);
+    expect(recentMinYear('Direito Penal', now)).toBeUndefined();
+    expect(recentMinYear(null, now)).toBeUndefined();
   });
 });
 

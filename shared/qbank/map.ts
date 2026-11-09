@@ -304,6 +304,8 @@ export async function mapSession(d: MapDeps, subjectMateria: string | null,
 
 // Ordem de busca: banca nos assuntos (do mais relevante) e, se esgotar, os mesmos assuntos em outras bancas.
 // Atualidades: só provas recentes (este ano e o anterior), senão os fatos estão desatualizados.
+// Ano mínimo das provas no cronograma (API e cache); nas questões livres o estudante escolhe o ano.
+export const recentMinYear = (materia: string | null | undefined, now = new Date()) => (/atualidade/i.test(materia ?? '') ? now.getFullYear() - 1 : undefined);
 // Dificuldade das questões das sessões: média, difícil e muito difícil. A API só aceita um valor por busca.
 // Sem a muito difícil faltariam questões: em amostra real, a escala 4 tinha 3 das 193 questões de um assunto, e a 5, 39.
 export const SESSION_DIFFICULTIES = ['3', '4', '5'];
@@ -344,8 +346,9 @@ export function roleKeyword(role: string) {
 export function searchFilters(f: SessionFilter, banca: string, o: { level?: string; role?: string; orgao?: string; carreiras?: string[]; format?: string; difficulties?: string[] } = {}, now = new Date()): SearchFilter[] {
   if (!f.materia || !f.assuntos.length) return [];
   const m = f.materia, format: Record<string, string> = o.format ? { tipo: o.format } : {};
-  const places: { tag: string; board: boolean; params: Record<string, string> }[] = /atualidade/i.test(m)
-    ? [now.getFullYear(), now.getFullYear() - 1].map((ano) => ({ tag: String(ano), board: false, params: { ano: String(ano), ...format } }))
+  const minYear = recentMinYear(m, now);
+  const places: { tag: string; board: boolean; params: Record<string, string> }[] = minYear
+    ? [now.getFullYear(), minYear].map((ano) => ({ tag: String(ano), board: false, params: { ano: String(ano), ...format } }))
     : [{ tag: 'b', board: !!banca, params: { banca } }, { tag: '*', board: false, params: format }];
   const narrowed = (tag: string, extra: Record<string, string>) => places.map((p) => ({ tag: `${tag}|${p.tag}`, board: p.board, params: { ...p.params, ...extra } }));
   const tiers = [

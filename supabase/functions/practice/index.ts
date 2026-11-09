@@ -10,7 +10,7 @@ import type { GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import { genericSubject } from '../../../shared/qbank/materias.ts';
-import { interleave, mapSubject, MEDIUM_OR_HARD, pickBoard, QMAP_PROMPT_VERSION, SESSION_DIFFICULTIES } from '../../../shared/qbank/map.ts';
+import { interleave, mapSubject, MEDIUM_OR_HARD, pickBoard, QMAP_PROMPT_VERSION, recentMinYear, SESSION_DIFFICULTIES } from '../../../shared/qbank/map.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { activePlan, cacheQuestions, ensureCarreiras, fromCache, mapDeps, publicQuestion, questFailure, recordAnswer, takeNewest, withStatus, type PublicQuestion } from '../_shared/qbank.ts';
 
@@ -178,7 +178,10 @@ Deno.serve(async (req) => {
       for (const b of blocks) for (const s of b.subjects) {
         if (!s.materia) { missing.push(s.name); continue; }
         const base: Record<string, string> = { materia: s.materia, ...(tipo ? { tipo } : {}), ...('assunto' in s && (s as { assunto?: string }).assunto ? { assunto: (s as { assunto: string }).assunto } : {}) };
-        const places = banca ? [{ ...base, banca }, base] : [base];
+        // Atualidades: só provas deste ano e do anterior, como nas sessões do cronograma.
+        const minYear = recentMinYear(s.materia);
+        const dated = minYear ? [minYear + 1, minYear].map((ano) => ({ ...base, ano: String(ano) })) : [base];
+        const places = banca ? [...dated.map((p) => ({ ...p, banca })), ...dated] : dated;
         const steps = [...carreiras.flatMap((carreira) => places.map((p) => ({ ...p, carreira }))), ...(level ? places.map((p) => ({ ...p, nivel_escolaridade: level })) : []), ...places];
         let got: QuestQuestion[] = [];
         for (const params of steps) {

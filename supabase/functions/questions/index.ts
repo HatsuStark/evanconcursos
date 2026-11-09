@@ -20,7 +20,7 @@ import { lawByKey } from '../../../shared/legal/registry.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import {
   equalIncidence, EXPLAIN_PROMPT_VERSION, Explanation, explainPrompt, explanationJsonSchema, inTurn, measureIncidence, planPicks,
-  DEEP_DIFFICULTIES, materiaOf, orgaoKeyword, QMAP_PROMPT_VERSION, roleKeyword, searchFilters, SESSION_ASSUNTOS, SESSION_DIFFICULTIES, type Incidence, type SessionFilter,
+  DEEP_DIFFICULTIES, materiaOf, orgaoKeyword, QMAP_PROMPT_VERSION, recentMinYear, roleKeyword, searchFilters, SESSION_ASSUNTOS, SESSION_DIFFICULTIES, type Incidence, type SessionFilter,
 } from '../../../shared/qbank/map.ts';
 import { conceptKey, MNEMONIC_PROMPT_VERSION, MnemonicChoice, mnemonicJsonSchema, mnemonicPrompt, pickExisting } from '../../../shared/qbank/mnemonic.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
@@ -418,7 +418,7 @@ Deno.serve(async (req) => {
       // estimada). Só o que faltar vem da Quest (cache e API), com a dificuldade da sessão; por último, a IA.
       for (const [assunto, n] of wanted) {
         if (n <= 0) continue;
-        const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, tipo: format, preferBanca: sm.banca, fonte: 'propria' }, n, isNewCached);
+        const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, tipo: format, minAno: recentMinYear(materiaOf(filter, assunto)), preferBanca: sm.banca, fonte: 'propria' }, n, isNewCached);
         cached.push(...got);
         mark(`cache:propria:${got.length}`);
         wanted.set(assunto, n - got.length);
@@ -426,7 +426,7 @@ Deno.serve(async (req) => {
       for (const board of [true, false]) {
         for (const [assunto, n] of wanted) {
           if (n <= 0 || timedOut) continue;
-          const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, dificuldades: diffs, tipo: format, preferOrgao: narrow.orgao, preferCarreiras: carreiras, fonte: 'quest', ...(board ? { banca: sm.banca } : { preferBanca: sm.banca }) }, n, isNewCached);
+          const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, dificuldades: diffs, tipo: format, minAno: recentMinYear(materiaOf(filter, assunto)), preferOrgao: narrow.orgao, preferCarreiras: carreiras, fonte: 'quest', ...(board ? { banca: sm.banca } : { preferBanca: sm.banca }) }, n, isNewCached);
           cached.push(...got);
           mark(`cache:${board ? 'banca' : 'outras'}:${got.length}`);
           let left = n - got.length;
