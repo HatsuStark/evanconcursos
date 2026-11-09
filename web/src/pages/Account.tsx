@@ -1,5 +1,7 @@
-import { LogOut } from 'lucide-react';
+import { Inbox, LogOut } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
+import { useFeedbackList } from '../lib/feedback.ts';
 import { Shell } from '../components/Shell.tsx';
 import { useAppearance, type ThemeChoice } from '../lib/appearance.ts';
 import { useAuth } from '../lib/auth.tsx';
@@ -85,6 +87,9 @@ function AppearanceForm() {
 export function AccountPage() {
   const { session } = useAuth();
   const [saved, setSaved] = useState(false);
+  // Só admin consegue listar: para os demais a consulta falha (403) e o atalho não aparece.
+  const feedback = useFeedbackList();
+  const newCount = feedback.data?.filter((f) => f.status === 'novo').length ?? 0;
   return (
     <Shell title="Conta" subtitle={session?.user.email}>
       <div className="grid" style={{ gap: 14, maxWidth: 460 }}>
@@ -94,6 +99,9 @@ export function AccountPage() {
           <PasswordForm submitLabel="Salvar senha" onDone={() => setSaved(true)} />
           {saved && <p className="muted" role="status" style={{ margin: 0 }}>Senha alterada.</p>}
         </section>
+        {feedback.data && (
+          <Link className="btn ghost" to="/relatos"><Inbox size={16} /> Relatos de usuários{newCount ? ` (${newCount} novos)` : ''}</Link>
+        )}
         <button className="btn ghost" onClick={() => supabase.auth.signOut()}><LogOut size={16} /> Sair</button>
       </div>
     </Shell>

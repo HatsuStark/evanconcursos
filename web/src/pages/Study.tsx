@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Check, FileText, ListChecks, Maximize2, Minimize2, Pause, Play, RotateCcw, Scale, ScanSearch, Video } from 'lucide-react';
+import { BookOpen, Check, FileText, ListChecks, Maximize2, Minimize2, Pause, Play, RotateCcw, Scale, ScanSearch, Timer, Video } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { evaluate, latestAnswers, questionScore, scoreGoal } from '../../../shared/domain/adaptive.ts';
@@ -19,6 +19,7 @@ import { VideosPanel } from '../components/VideosPanel.tsx';
 import { fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
 import { missingNorms, sessionLawRefs, useOwnLaws } from '../lib/legal.ts';
 import { KIND_LABEL, setTaskDone } from '../lib/plans.ts';
+import { PRESETS, usePomodoro, type Preset } from '../lib/pomodoro.ts';
 import { saveTimeSpent, useStudy, type StudyData } from '../lib/study.ts';
 
 const fmtClock = (s: number) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ':' : ''}${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -59,7 +60,7 @@ function useTimer(taskId: string, initial: number) {
     ref.current.seconds = 0; ref.current.saved = 0; setSeconds(0);
     void saveTimeSpent(taskId, 0);
   };
-  return { running, seconds, reset, toggle: () => { if (running) flush(); setRunning(!running); } };
+  return { running, seconds, reset, pause: () => { flush(); setRunning(false); }, toggle: () => { if (running) flush(); setRunning(!running); } };
 }
 
 // Barra flutuante que acompanha a leitura: presa no topo ao rolar, some depois de `delay` ms parada e volta ao rolar
@@ -100,6 +101,8 @@ function StudyView({ d }: { d: StudyData }) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const timer = useTimer(d.task.id, d.task.time_spent_sec);
+  const pomo = usePomodoro(timer);
+  const pomoLabel = pomo.enabled ? <span className={'pomo-phase ' + pomo.phase}>{pomo.phase === 'foco' ? 'Foco' : 'Pausa'} {fmtClock(pomo.left)}</span> : null;
   const own = useOwnLaws().data?.entries ?? [];
   const lawRefs = sessionLawRefs(d.task.title, d.topics, d.subject?.name ?? '', own, d.session?.law_refs);
   const missing = missingNorms(d.task.title, own);
@@ -162,6 +165,21 @@ function StudyView({ d }: { d: StudyData }) {
           <div className="bar"><span style={{ width: `${Math.min(100, (timer.seconds / Math.max(60, d.task.minutes * 60)) * 100)}%`, background: 'var(--cyan)' }} /></div>
           <button className={'btn' + (timer.running ? ' ghost' : '')} onClick={timer.running ? timer.toggle : start}>{timer.running ? <><Pause size={18} /> Pausar</> : <><Play size={18} /> {timer.seconds ? 'Continuar' : 'Começar'}</>}</button>
           {timer.seconds > 0 && <button className="btn ghost sm" onClick={resetTimer}><RotateCcw size={15} /> Zerar</button>}
+          <div className="pomo">
+            <label className="check"><input type="checkbox" checked={pomo.enabled} onChange={pomo.toggle} /> <Timer size={15} /> Pomodoro</label>
+            {pomo.enabled && (
+              <select className="select pomo-preset" value={pomo.preset} onChange={(e) => pomo.setPreset(e.target.value as Preset)} aria-label="Ciclo do Pomodoro">
+                {Object.keys(PRESETS).map((k) => <option key={k} value={k}>{k} min</option>)}
+              </select>
+            )}
+          </div>
+          {pomo.enabled && (
+            <div className="pomo-status">
+              {pomoLabel}
+              <span className="faint small">{pomo.cycles} {pomo.cycles === 1 ? 'ciclo' : 'ciclos'}</span>
+              {pomo.phase === 'pausa' && <button className="btn ghost sm" onClick={pomo.skipBreak}>Pular pausa</button>}
+            </div>
+          )}
         </div>
       </section>
       <section>
@@ -191,6 +209,7 @@ function StudyView({ d }: { d: StudyData }) {
           {tabBar}
           <div className="focus-spacer" />
           <span className="focus-clock" style={{ color: timer.running ? 'var(--cyan)' : 'var(--text)' }}>{fmtClock(timer.seconds)}</span>
+          {pomoLabel}
           {d.task.goal_questions > 0 && <span className="muted small">{mine.length}/{d.task.goal_questions} questões</span>}
           <button className="btn ghost sm" onClick={timer.toggle}>{timer.running ? <><Pause size={15} /> Pausar</> : <><Play size={15} /> Continuar</>}</button>
           {timer.seconds > 0 && <button className="btn ghost sm" title="Zerar cronômetro" aria-label="Zerar cronômetro" onClick={resetTimer}><RotateCcw size={15} /></button>}

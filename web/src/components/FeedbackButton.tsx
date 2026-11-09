@@ -1,6 +1,6 @@
 import { Bug, Lightbulb, MessageCircle, MessageSquareText, Send, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { supabase } from '../lib/supabase.ts';
+import { sendFeedback } from '../lib/feedback.ts';
 
 const KINDS = [
   { key: 'bug', label: 'Bug', icon: Bug },
@@ -30,14 +30,8 @@ export function FeedbackButton() {
 
   async function send() {
     setStatus('sending'); setError('');
-    const { data, error } = await supabase.functions.invoke('feedback', {
-      body: { kind, message, page: location.pathname + location.search, userAgent: navigator.userAgent },
-    });
-    if (error || !data?.ok) {
-      let msg = 'Não foi possível enviar agora.';
-      try { msg = (await (error as { context?: Response })?.context?.json())?.error ?? msg; } catch { /* mantém a mensagem padrão */ }
-      setError(msg); setStatus('error'); return;
-    }
+    try { await sendFeedback(kind, message); }
+    catch (e) { setError((e as Error).message || 'Não foi possível enviar agora.'); setStatus('error'); return; }
     setStatus('sent'); setMessage('');
     setTimeout(() => { setOpen(false); setStatus('idle'); }, 1800);
   }

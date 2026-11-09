@@ -3,6 +3,7 @@ import { useAuth } from './lib/auth.tsx';
 import { AccountPage, FirstPasswordPage } from './pages/Account.tsx';
 import { AuthPage } from './pages/Auth.tsx';
 import { DiscursivePage } from './pages/Discursive.tsx';
+import { FeedbackPage } from './pages/Feedback.tsx';
 import { HomePage } from './pages/Home.tsx';
 import { MaterialsPage } from './pages/Materials.tsx';
 import { NewNoticePage } from './pages/NewNotice.tsx';
@@ -26,6 +27,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/conta" element={<AccountPage />} />
+      <Route path="/relatos" element={<FeedbackPage />} />
       <Route path="/" element={<HomePage />} />
       <Route path="/concursos" element={<NoticesPage />} />
       <Route path="/concursos/novo" element={<NewNoticePage />} />

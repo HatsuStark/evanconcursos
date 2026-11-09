@@ -24,6 +24,34 @@ async function sendEmail(subject: string, html: string, replyTo: string | undefi
   return res.ok;
 }
 
+// Admin: e-mails em ADMIN_EMAILS (padrão: FEEDBACK_EMAIL, quem recebe os relatos).
+const isAdmin = (email: string) => (env('ADMIN_EMAILS') || env('FEEDBACK_EMAIL')).split(',').map((e) => e.trim().toLowerCase()).filter(Boolean).includes(email.toLowerCase());
+const STATUSES = ['novo', 'resolvido', 'descartado'];
+
+// {action: 'list', status?} → {items} | {action: 'update', id, status?, note?} → {ok}
+async function handleAdmin(body: Record<string, unknown>, email: string) {
+  if (!isAdmin(email)) return json(403, { error: 'Acesso restrito.' });
+  const db = adminClient();
+  if (body.action === 'list') {
+    let q = db.from('feedback').select('id, email, kind, message, page, user_agent, emailed, status, admin_note, created_at, resolved_at')
+      .order('created_at', { ascending: false }).limit(200);
+    if (STATUSES.includes(String(body.status))) q = q.eq('status', String(body.status));
+    const { data, error } = await q;
+    if (error) return json(500, { error: 'Falha ao listar.', detail: error.message });
+    return json(200, { items: data });
+  }
+  const patch: Record<string, unknown> = {};
+  if (body.status !== undefined) {
+    if (!STATUSES.includes(String(body.status))) return json(400, { error: 'Status inválido.' });
+    patch.status = body.status;
+    patch.resolved_at = body.status === 'novo' ? null : new Date().toISOString();
+  }
+  if (body.note !== undefined) patch.admin_note = String(body.note).slice(0, 2000) || null;
+  const { error } = await db.from('feedback').update(patch).eq('id', String(body.id ?? ''));
+  if (error) return json(500, { error: 'Falha ao salvar.', detail: error.message });
+  return json(200, { ok: true });
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json(405, { error: 'Método não permitido.' });
@@ -31,6 +59,7 @@ Deno.serve(async (req) => {
   if (auth instanceof Response) return auth;
   const { user } = auth;
   const body = await req.json().catch(() => ({}));
+  if (body.action === 'list' || body.action === 'update') return handleAdmin(body, user.email ?? '');
   const kind = String(body.kind ?? '') as keyof typeof KINDS;
   const message = String(body.message ?? '').trim().slice(0, 4000);
   if (!(kind in KINDS)) return json(400, { error: 'Escolha o tipo do relato.' });

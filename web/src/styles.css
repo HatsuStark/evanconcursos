@@ -811,3 +811,11 @@ details.card summary { cursor: pointer; font-weight: 600; }
 .feedback-kinds { display: flex; gap: 6px; flex-wrap: wrap; }
 .feedback .textarea { min-height: 110px; }
 @media (max-width: 720px) { .feedback { right: 16px; bottom: 84px; } .feedback-fab { width: 44px; height: 44px; } .app:has(.voice-bar) .feedback { bottom: 150px; } }
+
+/* Pomodoro no card do cronômetro e na barra do modo foco. */
+.pomo { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 4px; border-top: 1px solid var(--line); }
+.pomo-preset { width: auto; padding: 6px 10px; font-size: 13px; }
+.pomo-status { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pomo-phase { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 14px; }
+.pomo-phase.foco { color: var(--orange); }
+.pomo-phase.pausa { color: var(--lime); }
