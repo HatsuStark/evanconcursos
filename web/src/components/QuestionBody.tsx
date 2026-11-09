@@ -16,6 +16,7 @@ export function QuestionBody({ q, number, chosen, struck, gabarito, locked, onSe
         <strong>Questão {number}</strong>
         <span className="faint small">ID {q.qid}</span>
         {q.assunto && <span className="badge violet">{q.assunto}</span>}
+        {q.fonte === 'propria' && <span className="badge cyan">Banco próprio</span>}
         {q.prova && <span className="muted small">{[q.prova.banca, q.prova.ano, q.prova.orgao, q.prova.cargo].filter(Boolean).join(' · ')}</span>}
       </header>
       {!!q.textos.length && <details className="q-texts"><summary>Texto associado</summary>{q.textos.map((t, i) => <div key={i} dangerouslySetInnerHTML={safe(t)} />)}</details>}

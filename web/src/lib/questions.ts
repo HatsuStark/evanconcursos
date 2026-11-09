@@ -7,6 +7,7 @@ export interface Question {
   textos: string[]; anexos: string[];
   prova: { banca: string; ano: number; orgao: string; cargo: string } | null;
   materia: string; assunto: string;
+  fonte?: 'propria';                // banco próprio (apiQuestoes); sem o campo, Quest API
   mnemo?: 'yes' | 'no' | 'maybe';   // mnemônico já existe, foi descartado ou ainda não avaliado
   warmupOf?: string;                // aquecimento: questão da sessão anterior (a resposta conta para ela)
   prev?: { ok: boolean; at: string; n: number }; // já resolvida: última resposta, quando e quantas vezes

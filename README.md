@@ -17,7 +17,7 @@ supabase/
   tests/     testes pgTAP de isolamento entre usuários (scripts/db.mjs test)
   functions/ Edge Functions: notice-extract (leitura do edital), plan-design (estratégia e sessões), study-guide (apostila), discursive (treino e correção), videos (vídeo-aulas da sessão), entre outras
 evals/       editais de referência (gabaritos) e avaliação da extração
-scripts/     legal-seed.ts (carrega as leis do registro), db.mjs (migrações e testes do banco), deploy-functions.mjs (funções e segredos), gemini-models.mjs
+scripts/     legal-seed.ts (carrega as leis do registro), own-questions.ts (importa o banco próprio), db.mjs (migrações e testes do banco), deploy-functions.mjs (funções e segredos), gemini-models.mjs
 ```
 
 Princípios:
@@ -103,6 +103,8 @@ A chave fica só no servidor (segredo `QUEST_API_KEY`) e o gabarito nunca vai ao
 **Meta e distribuição:** a sessão de teoria pede de 5 a 30 questões, mais conforme o plano avança (`theoryGoal`, ver Planejamento do cronograma); é só meta, e o estudante pode continuar. Primeiro, todos os assuntos da sessão recebem uma questão, do mais ao menos cobrado. Depois, cada questão vai para o assunto mais abaixo da sua parte na cobrança da banca (`planPicks`). A cobrança é o total de questões da banca em cada assunto, medido uma vez por sessão com 3 créditos por assunto (`qbank_session_maps.incidence`); sem nenhuma na banca, vale o total das outras. Dias de consolidação mantêm a meta maior. A API não mostra ordenação por repetição: só dentro de cada lote vêm antes as questões que caíram em mais provas.
 
 **ID da questão:** cada questão mostra o id da Quest API, e a aba Questões → Resolver abre uma questão por esse id (`action: 'by_id'`). Questão já em cache não gasta créditos; as outras custam 6. Anuladas ou sem gabarito não abrem. A resposta entra no histórico de questões livres.
+
+**Banco próprio** (`shared/qbank/own.ts`, `scripts/own-questions.ts`): as provas do projeto apiQuestoes (PCI transcrito e classificado na taxonomia da Quest) entram em `qbank_questions` com qid `own-…` e marca `fonte: 'propria'` (selo "Banco próprio" na questão). Como `fromCache` vem antes da API, elas são servidas sem créditos, com correção, explicação, mnemônico e caderno de erros iguais. Ficam de fora anuladas, dependentes de imagem, desatualizadas, sem matéria classificada e sem gabarito válido. `node --experimental-strip-types scripts/own-questions.ts` importa (ou atualiza) de `../apiQuestoes/Provas/_aceitas` (`--dir`, `--dry`; `--remover` apaga todas). Primeira carga (2026-11-08): 19.661 de 28.776 questões.
 
 `scripts/e2e-questions.ts` testa a função ponta a ponta com um usuário temporário (exige incluir `e2e@evanconcursos.test` em `ALLOWED_EMAILS`).
 
