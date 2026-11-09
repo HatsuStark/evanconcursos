@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hotArticleKeys, hotGuideNote, hotPrompt } from './hot.ts';
+import { dropHotDisclaimer, hotArticleKeys, hotGuideNote, hotPrompt } from './hot.ts';
 
 describe('mais cobrados (IA)', () => {
   const arts = [{ lawKey: 'lei-13105-2015', label: '238' }, { lawKey: 'lei-13105-2015', label: '1.015' }];
@@ -10,10 +10,19 @@ describe('mais cobrados (IA)', () => {
     expect(keys).toEqual(['lei-13105-2015:238', 'lei-13105-2015:1.015']);
   });
 
-  it('a nota da apostila avisa que é estimativa e pede a lei completa; sem resultado, nada', () => {
-    expect(hotGuideNote({ temas: ['Citação por edital'], artigos: [] })).toMatch(/estimativa.*lei seca completa/);
+  it('a nota da apostila não pede aviso no texto nem leitura da lei; sem resultado, nada', () => {
+    const note = hotGuideNote({ temas: ['Citação por edital'], artigos: [] });
+    expect(note).toContain('Citação por edital');
+    expect(note).not.toMatch(/lei seca|Na introdução/);
     expect(hotGuideNote(null)).toBe('');
     expect(hotGuideNote({ temas: [], artigos: [] })).toBe('');
+  });
+
+  it('tira da introdução antiga a frase de estimativa e lei seca, e mantém o resto', () => {
+    expect(dropHotDisclaimer('A citação chama o réu. Os destaques de banca são uma estimativa feita por IA, por isso, leia a lei seca completa antes de confiar nessas prioridades. Vamos ao tema.'))
+      .toBe('A citação chama o réu. Vamos ao tema.');
+    expect(dropHotDisclaimer('Leia a lei seca completa: os destaques são estimativa.')).toBe('');
+    expect(dropHotDisclaimer('A lei seca define o prazo. Sem aviso aqui.')).toBe('A lei seca define o prazo. Sem aviso aqui.');
   });
 
   it('o prompt leva só os nomes das seções, sem texto de lei', () => {

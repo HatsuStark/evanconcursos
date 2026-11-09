@@ -38,6 +38,13 @@ export function hotArticleKeys(r: HotTopics, articles: { lawKey: string; label: 
 }
 
 // Trechos da apostila: os temas mais cobrados, para dar mais espaço e prioridade alta, sem deixar o resto do tema de fora.
+// O aviso de que é estimativa fica na tela ("O que mais cai"), não no texto da apostila.
 export const hotGuideNote = (h: HotTopics | null) => (h?.temas.length || h?.artigos.length
-  ? `Mais cobrados pela banca, segundo levantamento da IA (estimativa, pode falhar): ${[...h.temas, ...h.artigos].slice(0, MAX_HOT_THEMES + MAX_HOT_ARTICLES).join('; ')}. Cubra o tema inteiro, mas dê prioridade alta e mais espaço a esses pontos, e destaque-os em pontos_banca. Na introdução, diga em uma frase que os destaques são uma estimativa e que o candidato deve ler a lei seca completa.`
+  ? `Mais cobrados pela banca, segundo levantamento da IA (estimativa, pode falhar): ${[...h.temas, ...h.artigos].slice(0, MAX_HOT_THEMES + MAX_HOT_ARTICLES).join('; ')}. Cubra o tema inteiro, mas dê prioridade alta e mais espaço a esses pontos, e destaque-os em pontos_banca. Não comente na apostila que esses destaques são estimativa.`
   : '');
+
+// Apostilas gravadas antes: a introdução traz uma frase dizendo que os destaques são estimativa e mandando ler a lei seca.
+export const dropHotDisclaimer = (t: string) => t
+  .replace(/[^.!?\n]*\bestimativa[^.!?\n]*\blei seca[^.!?\n]*[.!?]?/gi, '')
+  .replace(/[^.!?\n]*\blei seca[^.!?\n]*\bestimativa[^.!?\n]*[.!?]?/gi, '')
+  .trim();

@@ -1,6 +1,8 @@
 import { BookOpen, Info, CheckCircle2, Headphones, Landmark, Pause, Play, Printer, SkipBack, SkipForward, Sparkles, Square } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { dropHotDisclaimer } from '../../../shared/ai/hot.ts';
 import { missingMark, splitMarks } from '../../../shared/ai/marks.ts';
+import { MindMap } from './MindMap.tsx';
 import { guideSpeech } from '../../../shared/ai/speech.ts';
 import { localVoiceSupported } from '../lib/piper.ts';
 import { supabase } from '../lib/supabase.ts';
@@ -47,7 +49,6 @@ async function fetchGuide(taskId: string, depth: string, cancelled: () => boolea
   return null;
 }
 
-const MAP_COLORS = ['var(--cyan)', 'var(--violet)', 'var(--lime)', 'var(--orange)', 'var(--magenta)'];
 const paragraphs = (t: string) => t.split(/\n\s*\n|\n/).map((p) => p.trim()).filter(Boolean);
 
 // Trecho que o comando chama de "destacado" vem entre **…** e aparece em negrito.
@@ -84,7 +85,8 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
     return () => { loadId.current++; };
   }, [depth, taskId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const g = guide?.content;
+  // Apostilas antigas trazem na introdução o aviso de estimativa com "leia a lei seca": o aviso agora fica em "O que mais cai".
+  const g = useMemo(() => (guide ? { ...guide.content, introducao: dropHotDisclaimer(guide.content.introducao) } : undefined), [guide]);
   const speech = useMemo(() => (g ? guideSpeech(g) : []), [g]);
   const voice = useGuideVoice(speech);
   // O bloco lido fica destacado e visível.
@@ -123,15 +125,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
           </header>
           {!!g.esquema?.length && (
             <section {...reading('mapa')}><h3>Mapa mental</h3>
-              <div className="mindmap">
-                <div className="mm-center">{g.titulo}</div>
-                <div className="mm-trunk" />
-                <div className="mm-branches">{g.esquema.map((e, i) => (
-                  <div key={i} className="mm-branch" style={{ '--c': MAP_COLORS[i % MAP_COLORS.length] } as CSSProperties}>
-                    <b>{e.topico}</b><ul>{e.itens.map((x, j) => <li key={j}>{x}</li>)}</ul>
-                  </div>
-                ))}</div>
-              </div>
+              <MindMap title={g.titulo} branches={g.esquema} />
             </section>
           )}
           {/* Artigos que o app não conseguiu conferir com o texto da lei: um lembrete discreto, sem a lista, para não assustar. */}
@@ -179,7 +173,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
           )}
           {g.parcial && <div className="glass card no-print" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> {g.secoes.length ? 'Escrevendo o restante: quadros, lei comentada, o que memorizar, pegadinhas e questões de fixação…' : 'Escrevendo o restante da revisão…'} Pode ir lendo; aparece aqui em instantes.</div>}
           {!!g.memorizar?.length && <section {...reading('memorizar')} className={'guide-memo' + (voice.activeKey === 'memorizar' ? ' speaking' : '')}><h3>Para memorizar</h3><ul>{g.memorizar.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
-          {!!g.pontos_banca.length && <section {...reading('banca')}><h3>O que mais cai</h3><ul>{g.pontos_banca.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
+          {!!g.pontos_banca.length && <section {...reading('banca')}><h3>O que mais cai</h3><p className="faint small" style={{ marginTop: -4 }}>Estimativas feitas por IA.</p><ul>{g.pontos_banca.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
           {!!g.pegadinhas.length && <section data-voice="pegadinhas" className={'guide-traps' + (voice.activeKey === 'pegadinhas' ? ' speaking' : '')}><h3>Pegadinhas</h3><ul>{g.pegadinhas.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
           {!!g.resumo.length && <section {...reading('resumo')}><h3>Resumo</h3><ul>{g.resumo.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
           {!!fixQuestions(g.questoes).length && (
