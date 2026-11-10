@@ -23,6 +23,9 @@ export const PlanInputs = z.object({
   levels: z.record(z.string(), z.number().int().min(0).max(3)), // subjectId → 0 iniciante … 3 avançado
   // Normas do edital sem texto no app que o estudante disse não encontrar em PDF: liberam o cronograma e ficam registradas.
   skippedNorms: z.array(z.object({ key: z.string().max(120), citation: z.string().max(300) })).max(50).optional(),
+  // Prova sem data (ou já realizada): banca do próximo concurso, se o estudante já sabe (nome como na Quest API). Sem ela,
+  // as questões vêm de todas as bancas.
+  board: z.string().trim().max(80).optional(),
 });
 export type PlanInputs = z.infer<typeof PlanInputs>;
 export const LEVEL_NAMES = ['Iniciante', 'Básico', 'Intermediário', 'Avançado'] as const;

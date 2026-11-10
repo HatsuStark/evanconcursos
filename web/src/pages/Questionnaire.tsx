@@ -12,6 +12,8 @@ import { Shell } from '../components/Shell.tsx';
 import { fmtDate, Steps, SubjectIcon } from '../components/ui.tsx';
 import { generatePlan, isNetworkError, resolveNoticeLaws, updatePlanFromNotice, useActivePlan, type GenProgress, type SubjectRow } from '../lib/plans.ts';
 import { useOwnLaws } from '../lib/legal.ts';
+import { filterLists, useDebounced } from '../lib/practice.ts';
+import { SearchSelect } from '../components/SearchSelect.tsx';
 import { supabase } from '../lib/supabase.ts';
 import { unlistedNorms } from '../../../shared/legal/norms.ts';
 
@@ -61,14 +63,19 @@ export function QuestionnairePage() {
   const notice = useQuery({
     queryKey: ['notice-exam-date', noticeId],
     queryFn: async () => {
-      const { data, error } = await supabase.from('notices').select('exam_date').eq('id', noticeId!).single();
+      const { data, error } = await supabase.from('notices').select('exam_date, board').eq('id', noticeId!).single();
       if (error) throw new Error(error.message);
-      return data as { exam_date: string | null };
+      return data as { exam_date: string | null; board: string };
     },
   });
   const [inputs, setInputs] = useState<PlanInputs | null>(null);
   const [progress, setProgress] = useState<GenProgress | null>(null);
   const [error, setError] = useState('');
+  // Banca do próximo concurso (prova sem data): 'sim' abre a busca; só vale o nome escolhido na lista.
+  const [boardKnown, setBoardKnown] = useState<boolean | null>(null);
+  const [boardText, setBoardText] = useState('');
+  const bq = useDebounced(boardText);
+  const bancas = useQuery({ queryKey: ['f-bancas', bq], enabled: !!boardKnown && bq.trim().length >= 2, queryFn: () => filterLists.bancas(bq) });
 
   // Respostas anteriores (ao refazer) ou padrão.
   useEffect(() => {
@@ -81,7 +88,9 @@ export function QuestionnairePage() {
       hours: prev?.hours ?? [...DEFAULT_HOURS], startDate: ymd(new Date()), weeklyReview: prev?.weeklyReview ?? true, profile: prev?.profile ?? '',
       levels: Object.fromEntries(subjects.data.map((s) => [s.id, prev?.levels[s.id] ?? carried[s.id] ?? 1])),
       ...(prev?.skippedNorms?.length ? { skippedNorms: prev.skippedNorms } : {}),
+      ...(prev?.board ? { board: prev.board } : {}),
     });
+    if (prev?.board) { setBoardKnown(true); setBoardText(prev.board); }
   }, [subjects.data, existing.isLoading, existing.data, previous.isLoading, previous.data, previousId, inputs]);
 
   if (!inputs || !subjects.data) return <Shell title="Questionário"><div className="spinner" /></Shell>;
@@ -96,23 +105,30 @@ export function QuestionnairePage() {
   const pastExam = isOpenEnded(notice.data?.exam_date, ymd(new Date()));
   const openEnded = pastExam || (!!previousId && !!notice.data && !notice.data.exam_date);
   const updating = !!previousId && !regenerate;
+  // Sem data marcada (ou com a prova já realizada), a banca não é certa: o estudante diz se já sabe qual será.
+  const noDate = !!notice.data && (!notice.data.exam_date || pastExam);
 
   async function submit() {
     if (!inputs || !noticeId) return;
     if (!weekly) return setError('Informe horas de estudo em pelo menos um dia.');
     if (lawsBlocked) return setError('Envie o PDF das normas do edital antes de gerar o cronograma.');
+    if (noDate && boardKnown === null) return setError('Diga se a banca do próximo concurso já está definida.');
+    if (noDate && boardKnown && !inputs.board) return setError('Escolha a banca na lista de sugestões.');
     if (regenerate && !confirm('Refazer o cronograma a partir de hoje? Tarefas concluídas e o histórico ficam guardados.')) return;
     setError('');
     // A geração leva cerca de 1 minuto: a tela não apaga, para o celular não suspender a aba e derrubar a conexão.
     let lock: WakeLockSentinel | null = null;
     try { lock = (await navigator.wakeLock?.request('screen')) ?? null; } catch { /* sem permissão: segue sem */ }
     try {
+      // Com data marcada, vale a banca do edital: a resposta sobre a banca não vai junto.
+      const { board, ...rest } = inputs;
+      const sent: PlanInputs = noDate && boardKnown && board ? { ...rest, board } : rest;
       if (updating) {
-        const failed = await updatePlanFromNotice(noticeId, inputs, setProgress);
+        const failed = await updatePlanFromNotice(noticeId, sent, setProgress);
         await qc.invalidateQueries();
         if (failed) alert(`${failed === 1 ? '1 apostila não foi mapeada' : `${failed} apostilas não foram mapeadas`} para o plano novo. Em Meus materiais, use "Mapear de novo".`);
       } else {
-        await generatePlan(noticeId, inputs, setProgress);
+        await generatePlan(noticeId, sent, setProgress);
         await qc.invalidateQueries();
       }
       navigate('/cronograma');
@@ -194,6 +210,23 @@ export function QuestionnairePage() {
           <label className="check"><input type="checkbox" checked={inputs.weeklyReview} onChange={(e) => set({ weeklyReview: e.target.checked })} /> Último dia de estudo da semana para revisão e caderno de erros</label>
         </div>
       </div>
+
+      {noDate && (
+        <div className="glass card" style={{ display: 'grid', gap: 12, marginTop: 16 }}>
+          <h2 style={{ margin: 0, fontSize: 20 }}>A banca do próximo concurso já está definida?</h2>
+          <p className="muted small" style={{ margin: 0 }}>Com a banca definida, as questões das sessões vêm primeiro dela. Sem banca, vêm de todas as bancas, misturando os formatos.</p>
+          <div className="segmented" role="radiogroup" aria-label="Banca definida">
+            <button type="button" role="radio" aria-checked={boardKnown === false} className={boardKnown === false ? 'on' : ''} onClick={() => { setBoardKnown(false); set({ board: undefined }); }}>Ainda não</button>
+            <button type="button" role="radio" aria-checked={boardKnown === true} className={boardKnown === true ? 'on' : ''} onClick={() => { setBoardKnown(true); if (!boardText) setBoardText(notice.data?.board ?? ''); }}>Sim</button>
+          </div>
+          {boardKnown && (
+            <label className="field" style={{ maxWidth: 420 }}>Banca
+              <SearchSelect label="Banca do próximo concurso" value={boardText} options={bancas.data?.items ?? []} loading={bancas.isFetching} placeholder="Ex.: FGV, Cebraspe, VUNESP"
+                onChange={(t) => { setBoardText(t); set({ board: undefined }); }} onPick={(b) => { setBoardText(b); set({ board: b }); }} />
+            </label>
+          )}
+        </div>
+      )}
 
       <div className="section-title"><h2>Qual o seu nível em cada matéria?</h2></div>
       <div className="grid" style={{ gap: 12 }}>

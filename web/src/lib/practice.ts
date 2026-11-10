@@ -31,7 +31,7 @@ export const useMateriaOptions = (text: string) => {
   const q = useDebounced(text), found = useQuery({ queryKey: ['f-materias', q], enabled: q.trim().length >= 3, queryFn: () => filterLists.materias(q) });
   return { options: rankMaterias(text, found.data?.items ?? []), loading: found.isFetching };
 };
-function useDebounced<T>(v: T, ms = 350) {
+export function useDebounced<T>(v: T, ms = 350) {
   const [d, setD] = useState(v);
   useEffect(() => { const t = setTimeout(() => setD(v), ms); return () => clearTimeout(t); }, [v, ms]);
   return d;

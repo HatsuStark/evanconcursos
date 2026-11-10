@@ -239,15 +239,24 @@ Deno.serve(async (req) => {
     ]);
     const filter = fm.filter;
     let incidence = fm.incidence;
-    // Sem prova marcada (sem data ou já realizada), a banca não tem prioridade e os formatos se misturam: as questões vêm de
-    // todas as bancas. Com prova marcada, primeiro a banca do edital e o formato dela. As questões da IA seguem o formato medido.
+    // Com prova marcada, primeiro a banca do edital e o formato dela. Sem prova marcada (sem data ou já realizada), vale a
+    // banca que o estudante disse no questionário; sem ela, nenhuma banca tem prioridade e os formatos se misturam. O formato
+    // medido só vale para a banca do edital. As questões da IA seguem o formato medido.
     const scheduled = !!notice?.exam_date && String(notice.exam_date) >= new Date().toISOString().slice(0, 10);
-    const banca = scheduled ? sm.banca : '', tipo = scheduled ? format : '';
+    let banca = sm.banca;
+    if (!scheduled) {
+      const { data: plan } = await auth.client.from('study_plans').select('active_version_id').eq('id', task.plan_id).maybeSingle();
+      const { data: version } = plan?.active_version_id
+        ? await auth.client.from('plan_versions').select('inputs').eq('id', plan.active_version_id).maybeSingle()
+        : { data: null };
+      banca = String((version?.inputs as { board?: string } | null)?.board ?? '').slice(0, 80);
+    }
+    const anyFormat = !banca || normalizeText(banca) !== normalizeText(sm.banca), tipo = anyFormat ? '' : format;
     mark('mapa-sessao-e-vistas');
     // Órgão, cargo, carreira e escolaridade só entram na busca se rendem nesta matéria (sem eles, cada assunto passa por 2 níveis, não 10).
     const narrow = await ensureNarrowing(admin, quest, subject.id, sm.materia, roleKeyword(String(notice?.role_name ?? '')), String(notice?.education_level ?? ''), orgaoKeyword(String(notice?.organization ?? '')), carreiras);
     mark('estreitamento');
-    const allFilters = searchFilters(filter, banca, { ...narrow, format, anyFormat: !scheduled, difficulties: diffs });
+    const allFilters = searchFilters(filter, banca, { ...narrow, format, anyFormat, difficulties: diffs });
     // Sessão sem assunto no banco de questões vai direto para as questões inéditas da IA.
     if (!allFilters.length && !sid) { await log('qbank_fetch', 'ok'); return json(200, { questions: [], reason: 'sem-assunto' }); }
 
