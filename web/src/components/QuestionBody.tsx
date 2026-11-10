@@ -5,6 +5,10 @@ import { optionsOf, sameAnswer, type Question } from '../lib/questions.ts';
 // HTML das questões vem de fora: sempre limpo antes de exibir (sem scripts, eventos ou iframes).
 export const safe = (html: string) => ({ __html: DOMPurify.sanitize(html, { USE_PROFILES: { html: true }, FORBID_TAGS: ['style', 'iframe', 'form', 'input'] }) });
 
+// A Quest API manda a imagem dentro do HTML e também na lista de anexos (mesmo endereço): a lista só completa o que
+// o texto não mostra, senão a imagem aparece duas vezes.
+export const extraImages = (srcs: string[], ...html: string[]) => srcs.filter((src) => !html.some((h) => h.includes(src)));
+
 // Enunciado e alternativas com seleção e tachado. Com `gabarito`, mostra certa/errada (questão corrigida).
 export function QuestionBody({ q, number, chosen, struck, gabarito, locked, onSelect, onStrike }: {
   q: Question; number: number; chosen: string | null; struck: string[]; gabarito: string | null; locked: boolean;
@@ -21,7 +25,7 @@ export function QuestionBody({ q, number, chosen, struck, gabarito, locked, onSe
       </header>
       {!!q.textos.length && <details className="q-texts"><summary>Texto associado</summary>{q.textos.map((t, i) => <div key={i} dangerouslySetInnerHTML={safe(t)} />)}</details>}
       <div className="q-body" dangerouslySetInnerHTML={safe(q.enunciado)} />
-      {q.anexos.map((src) => <img key={src} className="q-img" src={src} alt="Imagem da questão" loading="lazy" referrerPolicy="no-referrer" />)}
+      {extraImages(q.anexos, q.enunciado, ...q.textos).map((src) => <img key={src} className="q-img" src={src} alt="Imagem da questão" loading="lazy" referrerPolicy="no-referrer" />)}
       <div className="q-options" role="radiogroup" aria-label="Alternativas">
         {optionsOf(q).map((a) => {
           const isStruck = struck.includes(a.letra);
@@ -30,7 +34,7 @@ export function QuestionBody({ q, number, chosen, struck, gabarito, locked, onSe
             <div key={a.letra} className={'q-opt-row' + (isStruck ? ' struck' : '')}>
               <button role="radio" aria-checked={chosen === a.letra} className={'q-opt' + state} disabled={locked || isStruck} onClick={() => onSelect(a.letra)}>
                 <b>{a.letra}</b><span className="q-opt-text" dangerouslySetInnerHTML={safe(a.texto)} />
-                {a.imagens.map((src) => <img key={src} className="q-img" src={src} alt="" loading="lazy" referrerPolicy="no-referrer" />)}
+                {extraImages(a.imagens, a.texto).map((src) => <img key={src} className="q-img" src={src} alt="" loading="lazy" referrerPolicy="no-referrer" />)}
               </button>
               {!locked && (
                 <button className={'q-strike' + (isStruck ? ' on' : '')} onClick={() => onStrike(a.letra)} title={isStruck ? 'Desfazer' : 'Tachar: marcar como errada'} aria-label={isStruck ? `Desfazer tachado da ${a.letra}` : `Tachar a alternativa ${a.letra}`}>
