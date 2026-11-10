@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseLawHtml, parseNormsText } from './parse.ts';
 import { ownLawEntry, preferOfficial, shortCitation, unlistedNorms, uploadUrn } from './norms.ts';
-import { aiLawRefs, citesUnlistedLaw, findLawRefs, inRanges, mergeLawRefs, rangesOrFilter, noticeLawKeys, parseRanges, rangesLabel, resolveSessionRefs, sessionLawRefs, storedLawRefs } from './refs.ts';
+import { aiLawRefs, citesUnlistedLaw, findLawRefs, inRanges, mergeLawRefs, rangesOrFilter, noticeLawKeys, parseRanges, rangesLabel, resolveSessionRefs, sessionLawRefs, storedLawRefs, withWholeTitleLaws } from './refs.ts';
 
 // Trecho real do HTML do CPP no normas.leg.br (estrutura preservada).
 const HTML = `<html><body>
@@ -268,5 +268,26 @@ describe('filtro dos artigos no banco', () => {
   it('só os intervalos citados, não do menor ao maior artigo', () => {
     const r = findLawRefs('Normas da CGJ: Atos processuais, arts. 196, 436-A, 439 a 440-A, 1137 a 1139 e 1247')[0]!;
     expect(rangesOrFilter(r.ranges)).toBe('num.eq.196,num.eq.436,and(num.gte.439,num.lte.440),and(num.gte.1137,num.lte.1139),num.eq.1247');
+  });
+});
+
+describe('lei citada no título sem artigos', () => {
+  // Lei estadual achada para todos (owner nulo), como a do edital do TJ SP.
+  const taxa = ownLawEntry({ law_key: 'sp-lei-11608-2003', short_name: 'Lei SP 11.608/2003', name: 'Lei estadual SP 11.608/2003', urn: 'ctresb:sp:lei:11608:2003', match_pattern: unlistedNorms('Lei 11.608/2003')[0]!.pattern })!;
+  const title = 'Taxa judiciária e Normas da CGJ: Lei SP 11.608/2003 e NSCGJ, Tomo I, Cap. I, arts. 1º a 4º';
+
+  it('entra inteira ao lado dos artigos gravados na montagem', () => {
+    const stored = [{ law: 'NSCGJ', ranges: [{ from: 1, to: 4 }] }];
+    expect(resolveSessionRefs(stored, title, [], 'Normas', [taxa])).toEqual([...stored, { law: 'sp-lei-11608-2003', ranges: [] }]);
+  });
+
+  it('também na leitura do título (plano antigo, sem artigos gravados)', () => {
+    expect(sessionLawRefs(title, [], '', [taxa])).toEqual([{ law: 'NSCGJ', ranges: [{ from: 1, to: 4 }] }, { law: 'sp-lei-11608-2003', ranges: [] }]);
+  });
+
+  it('não repete lei já gravada nem puxa a lei principal da matéria', () => {
+    const stored = [{ law: 'CP', ranges: [{ from: 289, to: 311 }] }];
+    expect(withWholeTitleLaws(stored, 'Crimes contra a fé pública: CP', [])).toEqual(stored);
+    expect(resolveSessionRefs([{ law: 'L11343', ranges: [{ from: 33, to: 40 }] }], 'Tráfico de drogas', [], 'Direito Penal')).toEqual([{ law: 'L11343', ranges: [{ from: 33, to: 40 }] }]);
   });
 });

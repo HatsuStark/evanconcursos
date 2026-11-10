@@ -115,7 +115,7 @@ export function inRanges(ranges: ArticleRange[], n: number, suffix = ''): boolea
 export function sessionLawRefs(title: string, topics: string[], subject = '', extra: LawEntry[] = []): LawRef[] {
   const inTitle = findLawRefs(title, subject, extra);
   const withArts = inTitle.filter((r) => r.ranges.length);
-  if (withArts.length) return withArts;
+  if (withArts.length) return withWholeTitleLaws(withArts, title, extra);
   if (citesUnlistedLaw(title, extra) || new RegExp(ART_LIST, 'i').test(title)) return [];
   const fromTopics = findLawRefs(topics.join('\n'), subject, extra).filter((r) => r.ranges.length);
   if (inTitle.length) return fromTopics.filter((r) => inTitle.some((t) => t.law === r.law));
@@ -174,7 +174,17 @@ export function storedLawRefs(v: unknown): LawRef[] | null {
   return out.length ? out : null;
 }
 
-// Artigos de lei da sessão: os gravados na montagem; sem eles (plano antigo), os lidos do título.
+// Leis que o título nomeia sem citar artigo ("Lei SP 11.608/2003 e NSCGJ, arts. 1º a 4º") e que não estão na lista:
+// entram inteiras (ranges vazio). A montagem só grava lei com artigos, e sem isto a lei curta citada por inteiro sumia
+// da lei seca e da apostila. Sem a matéria: a lei principal dela não entra por falta de lei no título.
+export function withWholeTitleLaws(refs: LawRef[], title: string, extra: LawEntry[] = []): LawRef[] {
+  const whole = findLawRefs(title, '', extra).filter((r) => !r.ranges.length && !refs.some((x) => x.law === r.law));
+  return whole.length ? [...refs, ...whole] : refs;
+}
+
+// Artigos de lei da sessão: os gravados na montagem; sem eles (plano antigo), os lidos do título. Mais as leis que o
+// título nomeia sem artigo, inteiras (quem usa decide se a lei é curta o bastante para entrar toda).
 export function resolveSessionRefs(stored: unknown, title: string, topics: string[], subject = '', extra: LawEntry[] = []): LawRef[] {
-  return storedLawRefs(stored) ?? sessionLawRefs(title, topics, subject, extra);
+  const stored2 = storedLawRefs(stored);
+  return stored2 ? withWholeTitleLaws(stored2, title, extra) : sessionLawRefs(title, topics, subject, extra);
 }
