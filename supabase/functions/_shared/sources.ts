@@ -88,8 +88,9 @@ export async function topicBooks(admin: Admin, ownerId: string, t: { subject: st
     if (!res?.ok) { console.error('google books:', res?.status); return []; } // API desativada ou cota: tenta de novo depois
     const body = await res.json() as { items?: { volumeInfo: { title?: string; subtitle?: string; authors?: string[]; publisher?: string; publishedDate?: string; infoLink?: string; language?: string; industryIdentifiers?: { type: string; identifier: string }[] } }[] };
     const vols = (body.items ?? []).map((i) => i.volumeInfo).filter((v) => bookMatches(s, v));
-    // Prefere a edição em português, a mais recente.
-    const v = vols.sort((a, b) => Number(b.language === 'pt') - Number(a.language === 'pt') || (b.publishedDate ?? '').localeCompare(a.publishedDate ?? ''))[0];
+    // Prefere a edição em português ("pt" ou "pt-BR"), com editora informada, a mais recente.
+    const pt = (x: { language?: string }) => Number(/^pt/i.test(x.language ?? ''));
+    const v = vols.sort((a, b) => pt(b) - pt(a) || Number(!!b.publisher) - Number(!!a.publisher) || (b.publishedDate ?? '').localeCompare(a.publishedDate ?? ''))[0];
     if (!v || verified.some((b) => normalizeText(b.title) === normalizeText(v.title ?? ''))) continue;
     verified.push({
       title: [v.title, v.subtitle].filter(Boolean).join(': '), authors: v.authors ?? [], publisher: v.publisher ?? '', year: (v.publishedDate ?? '').slice(0, 4),
