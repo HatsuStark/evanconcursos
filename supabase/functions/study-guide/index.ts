@@ -8,13 +8,14 @@
 // Não há "gerar de novo" pelo estudante (economia de créditos): uma apostila existente é sempre reaproveitada.
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import type { z } from 'zod';
-import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide, guideCacheKey, GuideExtras, guideExtrasJsonSchema, GuideOutline, guideOutlineJsonSchema, GuideSections, guideSectionsJsonSchema, guideStage, mergeReviewHalves, reviewHalfJsonSchema, ReviewHalves, reviewStage, sectionGroups, textFromOutline, guidePracticeJsonSchema, GuidePractice, GuideText, guideTextJsonSchema, guideVersion, guidePrompt, MAX_GUIDE_JURIS, mergeGuide, partialGuide, lawKeys, pickSimilarGuide, topicKeys, trimReview, unlistedLaws, verifyGuide, type BoardQuestion, type GuideDepth, type GuideJuris } from '../../../shared/ai/guide.ts';
+import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide, guideCacheKey, GuideExtras, guideExtrasJsonSchema, GuideOutline, guideOutlineJsonSchema, GuideSections, guideSectionsJsonSchema, guideStage, mergeReviewHalves, reviewHalfJsonSchema, ReviewHalves, reviewStage, sectionGroups, textFromOutline, guidePracticeJsonSchema, GuidePractice, GuideText, guideTextJsonSchema, guideVersion, guidePrompt, MAX_GUIDE_FONTES, MAX_GUIDE_JURIS, mergeGuide, partialGuide, lawKeys, pickSimilarGuide, topicKeys, trimReview, unlistedLaws, verifyGuide, type BoardQuestion, type GuideDepth, type GuideJuris, type GuideSource } from '../../../shared/ai/guide.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { QuestClient } from '../../../shared/qbank/client.ts';
 import { materiaOf, measureIncidence, QMAP_PROMPT_VERSION } from '../../../shared/qbank/map.ts';
 import { aiFor } from '../_shared/ai.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { topicJuris } from '../_shared/juris.ts';
+import { topicSources } from '../_shared/sources.ts';
 import { loadLawSources } from '../_shared/law.ts';
 import { ensureHot, hotLaws } from '../_shared/hot.ts';
 import { hotArticleKeys, hotGuideNote, type HotInput } from '../../../shared/ai/hot.ts';
@@ -59,7 +60,13 @@ async function resolve(auth: Auth, admin: Admin, task: { subject_id: string | nu
     ? (await topicJuris(admin, ownerId, { banca, subject: subject!.name, title: session!.title, refs }, async () => true).catch((e) => { console.error('jurisprudência:', e); return { items: [] }; }))
       .items.filter((i) => i.hot).slice(0, MAX_GUIDE_JURIS).map((i) => ({ ref: i.label, text: i.text.slice(0, 900), court: i.court, kind: i.kind, number: i.number }))
     : [];
-  const input = { depth, banca, subject: subject!.name, title: session!.title, topics, law, juris };
+  // Matéria sem lei: trechos de obras abertas que explicam o tema, só os escolhidos pela IA (em cache compartilhado).
+  const fontes: GuideSource[] = !law.length
+    ? await topicSources(admin, ownerId, { subject: subject!.name, title: session!.title, keyword: String(session?.keyword ?? ''), topics }, async () => true)
+      .then((r) => (r.ai ? r.items.slice(0, MAX_GUIDE_FONTES).map((i) => ({ ref: i.ref, text: i.text.slice(0, 1400) })) : []))
+      .catch((e) => { console.error('fontes:', e); return []; })
+    : [];
+  const input = { depth, banca, subject: subject!.name, title: session!.title, topics, law, juris, fontes };
   return {
     extra, input, key: guideCacheKey({ ...input, cargo: String(notice?.role_name ?? '') }), articles, noticeId: subject!.notice_id as string, cargo: (notice?.role_name ?? '') as string,
     duties: String(notice?.role_duties ?? ''), otherRoles: ((notice?.structure as { otherRoles?: string[] } | null)?.otherRoles ?? []) as string[],
@@ -79,7 +86,7 @@ async function findGuide(admin: Admin, { input, key }: GuideContext) {
   if (roleSpecific(input)) return null;
   const { data: similar } = await admin.from('study_guides').select('*').eq('subject_key', normalizeText(input.subject)).eq('depth', input.depth)
     .eq('banca', normalizeText(input.banca)).eq('prompt_version', guideVersion(input.depth)).order('created_at', { ascending: false }).limit(60);
-  const hit = pickSimilarGuide({ title: input.title, topics: topicKeys(input.topics), law: lawKeys(input.law, input.juris) }, similar ?? []);
+  const hit = pickSimilarGuide({ title: input.title, topics: topicKeys(input.topics), law: lawKeys(input.law, [...input.juris, ...input.fontes]) }, similar ?? []);
   return hit >= 0 ? similar![hit] : null;
 }
 
@@ -156,7 +163,7 @@ async function generate(admin: Admin, ownerId: string, jobId: string, ctx: Guide
     const v = verifyGuide(applyBoardEvidence(content, input.banca, board), articles, input.subject, ctx.extra, input.juris);
     const { error } = await admin.from('study_guides').upsert({
       cache_key: key, depth: input.depth, subject_name: input.subject, subject_key: normalizeText(input.subject), banca: normalizeText(input.banca), topic_keys: topicKeys(input.topics),
-      title: input.title, content: v.guide, sources: lawKeys(input.law, input.juris), unlisted_sources: unlistedLaws([input.title, ...input.topics].join('\n')), unverified: v.unverified,
+      title: input.title, content: v.guide, sources: lawKeys(input.law, [...input.juris, ...input.fontes]), unlisted_sources: unlistedLaws([input.title, ...input.topics].join('\n')), unverified: v.unverified,
       model, prompt_version: guideVersion(input.depth), created_at: new Date().toISOString(),
     }, { onConflict: 'cache_key' });
     if (error) throw new Error(error.message);

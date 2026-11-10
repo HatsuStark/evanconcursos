@@ -165,6 +165,8 @@ export interface GuideSource { ref: string; text: string }
 // Jurisprudência oficial fornecida à apostila (nível superior): ref é o rótulo citável ("Súmula 17/STJ").
 export interface GuideJuris extends GuideSource { court: Court; kind: PrecedentKind; number: number }
 export const MAX_GUIDE_JURIS = 6;
+// Trechos de obras de licença aberta (matérias sem lei): referência de conteúdo; ref = "Guia do Writer 7.1, p. 45".
+export const MAX_GUIDE_FONTES = 3;
 
 // ---------- perfil da banca: questões reais que embasam "como a banca cobra" ----------
 export const BOARD_SAMPLE_MAX = 8;
@@ -259,9 +261,9 @@ const REVIEW_RULES = `- Revisão curta: nada de texto corrido nem questões de f
 // part: na completa e no aprofundamento, 'texto' (sem as questões da banca) ou 'pratica'; a revisão curta sai numa
 // chamada só.
 // stage: instrução da etapa quando o texto é escrito em partes (guideStage, reviewStage); substitui a da parte.
-export function guidePrompt(p: { depth: GuideDepth; banca: string; cargo: string; subject: string; title: string; topics: string[]; law: GuideSource[]; juris?: GuideJuris[]; boardQuestions?: BoardQuestion[]; format?: string; duties?: string; otherRoles?: string[]; part?: 'texto' | 'pratica'; stage?: string; notes?: string[] }) {
+export function guidePrompt(p: { depth: GuideDepth; banca: string; cargo: string; subject: string; title: string; topics: string[]; law: GuideSource[]; juris?: GuideJuris[]; fontes?: GuideSource[]; boardQuestions?: BoardQuestion[]; format?: string; duties?: string; otherRoles?: string[]; part?: 'texto' | 'pratica'; stage?: string; notes?: string[] }) {
   const full = p.depth !== 'revisao', deep = p.depth === 'aprofundamento', board = p.boardQuestions ?? [], ce = /certo/i.test(p.format ?? '');
-  const juris = p.juris ?? [];
+  const juris = p.juris ?? [], fontes = p.fontes ?? [];
   const texto = !full || p.part !== 'pratica', pratica = !full || p.part !== 'texto';
   const step = p.stage ? p.stage : !full ? '' : p.part === 'texto'
     ? 'Nesta parte, escreva só o texto da apostila (título, introdução, objetivos, mapa, seções, quadros e lei comentada). Questões de fixação, perguntas, pegadinhas e o resto são feitos em separado.'
@@ -274,6 +276,7 @@ Tema da sessão: ${p.title}
 Item do edital de onde o tema saiu (só contexto; pode citar assuntos de outras sessões): ${p.topics.join(' | ') || '—'}
 ${p.law.length ? `Trechos oficiais da lei (lei seca, única fonte legal permitida):\n${p.law.map((l) => `[${l.ref}] ${l.text}`).join('\n\n')}` : 'Nenhum trecho de lei foi fornecido para este tema.'}
 ${juris.length ? `Jurisprudência oficial do STF e do STJ sobre esses artigos (texto publicado pelo tribunal; única jurisprudência permitida):\n${juris.map((j) => `[${j.ref}] ${j.text}`).join('\n\n')}` : ''}
+${fontes.length ? `Trechos de obras de licença aberta sobre o tema (referência de conteúdo):\n${fontes.map((f) => `[${f.ref}] ${f.text}`).join('\n\n')}` : ''}
 ${(p.notes ?? []).filter(Boolean).join('\n')}
 ${p.part === 'texto' ? '' : board.length ? `Questões reais da banca ${p.banca} sobre o tema (amostra, não o total):\n${board.map((q, i) => `Q${i + 1} (${[q.assunto, q.ano].filter(Boolean).join(', ')}): ${q.enunciado.slice(0, BOARD_TEXT_MAX)}${q.alternativas.length ? `\n${q.alternativas.map((a) => a.slice(0, BOARD_OPTION_MAX)).join(' | ')}` : ''}`).join('\n\n')}` : 'Nenhuma questão real da banca foi fornecida.'}
 Regras obrigatórias:
@@ -284,6 +287,7 @@ ${juris.length
     ? '- Jurisprudência: cite SOMENTE os itens fornecidos, pelo nome do colchete (ex.: "Súmula 17/STJ"), onde explicarem o assunto da seção, e no comentário do artigo a que se referem. Reproduza o sentido do enunciado sem acrescentar regras nem exceções. Não cite outras súmulas, teses, julgados, autores ou posições doutrinárias. Não invente leis, prazos ou números.'
     : '- Não cite jurisprudência, súmulas, autores ou posições doutrinárias. Não invente leis, prazos ou números.'}
 - Siga o texto da lei fornecido; ele é a versão vigente.
+${fontes.length ? '- Trechos de obras abertas: use como referência do conteúdo e, quando divergirem da sua memória, siga os trechos. Explique com suas palavras, sem copiar frases, e cite a obra no formato do colchete (ex.: "Guia do Writer 7.1, p. 45") onde seguir uma explicação dela.' : ''}
 ${!full ? REVIEW_RULES : [texto && (deep ? DEEP_TEXT : FULL_TEXT), pratica && (deep ? DEEP_PRACTICE : FULL_PRACTICE)].filter(Boolean).join('\n')}
 ${full ? VOICE_RULES : REVIEW_VOICE}
 ${texto ? '- quadros: compare só o que a banca costuma confundir (espécies, prazos, requisitos, diferenças entre institutos). Sem quadro se o tema não tiver o que comparar.' : ''}
@@ -344,9 +348,9 @@ export const lawKeys = (law: GuideSource[], juris: GuideSource[] = []) => [...ne
 export const roleSpecific = (p: { title?: string; topics: string[] }) => /atribui|do cargo|da fun[cç][aã]o|rotina funcional/i.test([p.title ?? '', ...p.topics].join(' '));
 
 // Jurisprudência só entra na chave quando há (apostila de nível superior): as chaves das demais não mudam.
-export function guideCacheKey(p: { depth: GuideDepth; subject: string; title?: string; topics: string[]; law: GuideSource[]; juris?: GuideSource[]; banca: string; cargo?: string }) {
+export function guideCacheKey(p: { depth: GuideDepth; subject: string; title?: string; topics: string[]; law: GuideSource[]; juris?: GuideSource[]; fontes?: GuideSource[]; banca: string; cargo?: string }) {
   const s = JSON.stringify([guideVersion(p.depth), p.depth, norm(p.banca), norm(p.subject), titleKeys(p.title ?? ''), topicKeys(p.topics), p.law.map((l) => l.ref + '|' + l.text.length).sort(),
-    ...(roleSpecific(p) ? [norm(p.cargo ?? '')] : []), ...(p.juris?.length ? [p.juris.map((j) => j.ref).sort()] : [])]);
+    ...(roleSpecific(p) ? [norm(p.cargo ?? '')] : []), ...(p.juris?.length ? [p.juris.map((j) => j.ref).sort()] : []), ...(p.fontes?.length ? [{ fontes: p.fontes.map((f) => f.ref).sort() }] : [])]);
   let h1 = 0x811c9dc5, h2 = 0;
   for (let i = 0; i < s.length; i++) { h1 = Math.imul(h1 ^ s.charCodeAt(i), 16777619) >>> 0; h2 = (h2 * 31 + s.charCodeAt(i)) >>> 0; }
   return `${h1.toString(16)}${h2.toString(16)}`;
