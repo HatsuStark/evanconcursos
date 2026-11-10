@@ -43,6 +43,15 @@ describe('busca da banca primeiro', () => {
     expect(withBoard.filter((x) => !x.board).every((x) => !x.params.banca)).toBe(true);
     expect(withBoard.some((x) => x.board) && withBoard.some((x) => !x.board)).toBe(true);
     expect(searchFilters(f, '').some((x) => x.board)).toBe(false);
+    expect(searchFilters(f, '').some((x) => 'banca' in x.params)).toBe(false);
+  });
+  it('formatos misturados: sem tipo na busca e chave do cursor própria', () => {
+    const f = { materia: 'Direito Processual Civil - CPC 2015', assuntos: ['Competência'], how: '' };
+    const typed = searchFilters(f, '', { format: 'Múltipla Escolha' });
+    const mixed = searchFilters(f, '', { format: 'Múltipla Escolha', anyFormat: true });
+    expect(mixed.every((x) => !('tipo' in x.params))).toBe(true);
+    expect(mixed.some((x) => typed.some((t) => t.key === x.key))).toBe(false);
+    expect(searchFilters(f, '').map((x) => x.key)).toEqual(['*:Competência:d3', '*:Competência:d4', '*:Competência:d5']);
   });
 });
 

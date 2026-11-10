@@ -343,13 +343,15 @@ export function roleKeyword(role: string) {
 // Busca da mais à menos específica: provas do mesmo órgão, mesmo cargo, mesma carreira (a específica, depois a geral), depois
 // escolaridade do edital, depois qualquer uma; em cada etapa, a banca e
 // depois as outras no formato dela. Nunca solta a dificuldade.
-export function searchFilters(f: SessionFilter, banca: string, o: { level?: string; role?: string; orgao?: string; carreiras?: string[]; format?: string; difficulties?: string[] } = {}, now = new Date()): SearchFilter[] {
+export function searchFilters(f: SessionFilter, banca: string, o: { level?: string; role?: string; orgao?: string; carreiras?: string[]; format?: string; anyFormat?: boolean; difficulties?: string[] } = {}, now = new Date()): SearchFilter[] {
   if (!f.materia || !f.assuntos.length) return [];
-  const m = f.materia, format: Record<string, string> = o.format ? { tipo: o.format } : {};
+  const m = f.materia, format: Record<string, string> = o.format && !o.anyFormat ? { tipo: o.format } : {};
   const minYear = recentMinYear(m, now);
+  // Formatos misturados de propósito (estudo sem prova marcada): a posição de busca é outra, então a chave muda junto.
+  const mixed = o.anyFormat ? '~' : '';
   const places: { tag: string; board: boolean; params: Record<string, string> }[] = minYear
-    ? [now.getFullYear(), minYear].map((ano) => ({ tag: String(ano), board: false, params: { ano: String(ano), ...format } }))
-    : [{ tag: 'b', board: !!banca, params: { banca } }, { tag: '*', board: false, params: format }];
+    ? [now.getFullYear(), minYear].map((ano) => ({ tag: `${ano}${mixed}`, board: false, params: { ano: String(ano), ...format } }))
+    : [...(banca ? [{ tag: 'b', board: true, params: { banca } }] : []), { tag: `*${mixed}`, board: false, params: format }];
   const narrowed = (tag: string, extra: Record<string, string>) => places.map((p) => ({ tag: `${tag}|${p.tag}`, board: p.board, params: { ...p.params, ...extra } }));
   const tiers = [
     ...(o.orgao ? narrowed(`o:${o.orgao}`, { orgao: o.orgao }) : []),

@@ -221,17 +221,17 @@ Deno.serve(async (req) => {
       return { filter: { materia: sm.materia, assuntos: weak, how: 'reforço' }, incidence: null };
     };
     // Tudo o que só depende da sessão vai junto, em paralelo: cada consulta ao banco leva ~200 ms.
-    // Pula o que o estudante já respondeu neste concurso, em qualquer lugar (cronograma, aba Questões, simulado); as erradas
+    // Pula o que o estudante já respondeu, em qualquer concurso e lugar (cronograma, aba Questões, simulado); as erradas
     // só voltam nos momentos delas (aquecimento, aprofundamento, revisão semanal). O que ele respondeu nesta sessão define a
     // vez de cada assunto. Triagem de relevância da sessão: o que já foi julgado não é julgado de novo, e o que ficou fora do
     // tema nunca volta. Posições de busca do escopo: lidas de uma vez, para os filtros esgotados não irem ao banco.
     const [fm, { data: notice }, format, carreiras, { data: done }, { data: inPlan }, { data: sess }, { data: rel }, { count: answeredHere }, cursors] = await Promise.all([
       sessionFilter(),
-      auth.client.from('notices').select('education_level, role_name, organization').eq('id', subject.notice_id).single(),
+      auth.client.from('notices').select('education_level, role_name, organization, exam_date').eq('id', subject.notice_id).single(),
       ensureBoardFormat(admin, quest, subject.id, sm),
       ensureCarreiras(admin, quest, deps, subject.notice_id),
       admin.from('question_attempts').select('qid, assunto, session_id').eq('owner_id', auth.user.id).eq('subject_id', subject.id).limit(5000),
-      admin.from('question_attempts').select('qid').eq('owner_id', auth.user.id).eq('plan_id', task.plan_id).limit(20000),
+      admin.from('question_attempts').select('qid').eq('owner_id', auth.user.id).limit(20000),
       sid ? auth.client.from('study_sessions').select('title, keyword, law_refs').eq('id', sid).maybeSingle() : Promise.resolve({ data: null }),
       sid ? admin.from('qbank_relevance').select('qid, assunto, relevant').eq('session_id', sid) : Promise.resolve({ data: [] as { qid: string; assunto: string; relevant: boolean }[] }),
       admin.from('question_attempts').select('id', { count: 'exact', head: true }).eq('owner_id', auth.user.id).eq('task_id', task.id),
@@ -239,11 +239,15 @@ Deno.serve(async (req) => {
     ]);
     const filter = fm.filter;
     let incidence = fm.incidence;
+    // Sem prova marcada (sem data ou já realizada), a banca não tem prioridade e os formatos se misturam: as questões vêm de
+    // todas as bancas. Com prova marcada, primeiro a banca do edital e o formato dela. As questões da IA seguem o formato medido.
+    const scheduled = !!notice?.exam_date && String(notice.exam_date) >= new Date().toISOString().slice(0, 10);
+    const banca = scheduled ? sm.banca : '', tipo = scheduled ? format : '';
     mark('mapa-sessao-e-vistas');
     // Órgão, cargo, carreira e escolaridade só entram na busca se rendem nesta matéria (sem eles, cada assunto passa por 2 níveis, não 10).
     const narrow = await ensureNarrowing(admin, quest, subject.id, sm.materia, roleKeyword(String(notice?.role_name ?? '')), String(notice?.education_level ?? ''), orgaoKeyword(String(notice?.organization ?? '')), carreiras);
     mark('estreitamento');
-    const allFilters = searchFilters(filter, sm.banca, { ...narrow, format, difficulties: diffs });
+    const allFilters = searchFilters(filter, banca, { ...narrow, format, anyFormat: !scheduled, difficulties: diffs });
     // Sessão sem assunto no banco de questões vai direto para as questões inéditas da IA.
     if (!allFilters.length && !sid) { await log('qbank_fetch', 'ok'); return json(200, { questions: [], reason: 'sem-assunto' }); }
 
@@ -251,7 +255,7 @@ Deno.serve(async (req) => {
     if (!incidence && allFilters.length) {
       if (sid) {
         try {
-          incidence = await measureIncidence((params) => quest.count(params), filter, sm.banca);
+          incidence = await measureIncidence((params) => quest.count(params), filter, banca);
           await admin.from('qbank_session_maps').update({ incidence }).eq('session_id', sid);
         } catch { incidence = equalIncidence(filter.assuntos.slice(0, SESSION_ASSUNTOS)); }
       } else incidence = equalIncidence(filter.assuntos);
@@ -418,15 +422,15 @@ Deno.serve(async (req) => {
       // estimada). Só o que faltar vem da Quest (cache e API), com a dificuldade da sessão; por último, a IA.
       for (const [assunto, n] of wanted) {
         if (n <= 0) continue;
-        const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, tipo: format, minAno: recentMinYear(materiaOf(filter, assunto)), preferBanca: sm.banca, fonte: 'propria' }, n, isNewCached);
+        const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, tipo, minAno: recentMinYear(materiaOf(filter, assunto)), preferBanca: banca, fonte: 'propria' }, n, isNewCached);
         cached.push(...got);
         mark(`cache:propria:${got.length}`);
         wanted.set(assunto, n - got.length);
       }
-      for (const board of [true, false]) {
+      for (const board of banca ? [true, false] : [false]) {
         for (const [assunto, n] of wanted) {
           if (n <= 0 || timedOut) continue;
-          const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, dificuldades: diffs, tipo: format, minAno: recentMinYear(materiaOf(filter, assunto)), preferOrgao: narrow.orgao, preferCarreiras: carreiras, fonte: 'quest', ...(board ? { banca: sm.banca } : { preferBanca: sm.banca }) }, n, isNewCached);
+          const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, dificuldades: diffs, tipo, minAno: recentMinYear(materiaOf(filter, assunto)), preferOrgao: narrow.orgao, preferCarreiras: carreiras, fonte: 'quest', ...(board ? { banca } : { preferBanca: banca }) }, n, isNewCached);
           cached.push(...got);
           mark(`cache:${board ? 'banca' : 'outras'}:${got.length}`);
           let left = n - got.length;
@@ -442,7 +446,7 @@ Deno.serve(async (req) => {
       const short = [...wanted.values()].reduce((a, b) => a + b, 0);
       if (short > 0) for (const f of inTurn(live, turn)) await take(f, out.length + short);
       // No lote, primeiro as questões da banca do edital; entre elas, as que caíram em mais provas.
-      const board = normalizeText(sm.banca);
+      const board = normalizeText(banca);
       // A questão pode ter caído em várias provas: conta qualquer uma da banca (no cache só fica a primeira).
       const boardIds = new Set(out.filter((q) => q.provas?.some((p) => normalizeText(p.banca) === board)).map((q) => q.id));
       const ofBoard = (q: PublicQuestion) => Number(!!board && (boardIds.has(q.qid) || normalizeText(q.prova?.banca ?? '') === board));
