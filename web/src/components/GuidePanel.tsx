@@ -87,6 +87,8 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
 
   // Apostilas antigas trazem na introdução o aviso de estimativa com "leia a lei seca": o aviso agora fica em "O que mais cai".
   const g = useMemo(() => (guide ? { ...guide.content, introducao: dropHotDisclaimer(guide.content.introducao) } : undefined), [guide]);
+  // Fontes: artigos ("CP, art. 171") e, no nível superior, súmulas e teses ("Súmula 17/STJ").
+  const arts = guide?.sources.filter((s) => /, art\. /.test(s)) ?? [], juris = guide?.sources.filter((s) => !/, art\. /.test(s)) ?? [];
   const speech = useMemo(() => (g ? guideSpeech(g) : []), [g]);
   const voice = useGuideVoice(speech);
   // O bloco lido fica destacado e visível.
@@ -213,7 +215,8 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
           )}
           <footer className="faint small">
             <Sparkles size={12} /> Gerada por IA ({guide!.model}) em {new Date(guide!.created_at).toLocaleDateString('pt-BR')} a partir do conteúdo do edital
-            {guide!.sources.length ? ` e do texto oficial da lei (normas.leg.br): ${guide!.sources.length} artigo(s)` : ''}.
+            {arts.length ? ` e do texto oficial da lei (normas.leg.br): ${arts.length} artigo(s)` : ''}
+            {juris.length ? `, com ${juris.length} ${juris.length === 1 ? 'súmula ou tese' : 'súmulas e teses'} do STF e do STJ (${juris.join('; ')})` : ''}.
             {g.perfil_banca ? ` "Como a ${g.perfil_banca.banca} cobra" vem de uma amostra de ${g.perfil_banca.questoes} ${g.perfil_banca.questoes === 1 ? 'questão real' : 'questões reais'}, não de toda a banca.` : ''}
             {g.depende_legislacao ? ' Depende de legislação que pode ser alterada: confira se houve mudança após essa data.' : ''} Não substitui a leitura da lei seca.
           </footer>

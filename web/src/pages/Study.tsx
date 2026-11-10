@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Check, FileText, ListChecks, Maximize2, Minimize2, Pause, Play, RotateCcw, Scale, ScanSearch, Timer, Video } from 'lucide-react';
+import { BookOpen, Check, FileText, Gavel, ListChecks, Maximize2, Minimize2, Pause, Play, RotateCcw, Scale, ScanSearch, Timer, Video } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { evaluate, latestAnswers, questionScore, scoreGoal } from '../../../shared/domain/adaptive.ts';
@@ -8,6 +8,7 @@ import { DEEP_PREFIX, PRACTICE_PREFIX } from '../../../shared/ai/plan.ts';
 import { isWarmupAnswer } from '../../../shared/domain/goals.ts';
 import { videoQuery } from '../../../shared/domain/videos.ts';
 import { GuidePanel } from '../components/GuidePanel.tsx';
+import { JurisPanel } from '../components/JurisPanel.tsx';
 import { LawReader } from '../components/LawReader.tsx';
 import { PenteFinoPanel } from '../components/PenteFinoPanel.tsx';
 import { QuestionsPanel } from '../components/QuestionsPanel.tsx';
@@ -23,12 +24,13 @@ import { PRESETS, usePomodoro, type Preset } from '../lib/pomodoro.ts';
 import { saveTimeSpent, useStudy, type StudyData } from '../lib/study.ts';
 
 const fmtClock = (s: number) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ':' : ''}${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-// Ordem de estudo: teoria primeiro, questões por último. Lei seca só em assuntos de legislação.
+// Ordem de estudo: teoria primeiro, questões por último. Lei seca e jurisprudência só em assuntos de legislação.
 const TABS = [
   { key: 'pente', label: 'Pente-fino', icon: ScanSearch },
   { key: 'apostila', label: 'Apostila', icon: BookOpen },
   { key: 'videos', label: 'Vídeos', icon: Video },
   { key: 'lei', label: 'Lei seca', icon: Scale },
+  { key: 'juris', label: 'Jurisprudência', icon: Gavel },
   { key: 'material', label: 'Meus PDFs', icon: FileText },
   { key: 'questoes', label: 'Questões', icon: ListChecks },
 ] as const;
@@ -107,7 +109,7 @@ function StudyView({ d }: { d: StudyData }) {
   const lawRefs = sessionLawRefs(d.task.title, d.topics, d.subject?.name ?? '', own, d.session?.law_refs);
   const missing = missingNorms(d.task.title, own);
   const hasSession = !!d.task.session_id;
-  const tabs = TABS.filter((t) => (t.key === 'pente' ? d.task.kind === 'pente_fino' : t.key === 'lei' ? lawRefs.length > 0 || missing.length > 0 : t.key === 'apostila' || t.key === 'videos' || t.key === 'material' ? hasSession : true));
+  const tabs = TABS.filter((t) => (t.key === 'pente' ? d.task.kind === 'pente_fino' : t.key === 'lei' ? lawRefs.length > 0 || missing.length > 0 : t.key === 'juris' ? lawRefs.length > 0 : t.key === 'apostila' || t.key === 'videos' || t.key === 'material' ? hasSession : true));
   // Lei seca abre direto nos artigos.
   const [tab, setTab] = useState<TabKey>(d.task.kind === 'lei_seca' && tabs.some((t) => t.key === 'lei') ? 'lei' : tabs[0]!.key);
   const [videosOpened, setVideosOpened] = useState(false);
@@ -250,6 +252,7 @@ function StudyView({ d }: { d: StudyData }) {
             : tab === 'questoes' ? <QuestionsPanel source={{ kind: 'task', taskId: d.task.id, planId: d.task.plan_id }} goal={d.task.goal_questions} answered={mine.length} />
             : tab === 'pente' ? <PenteFinoPanel taskId={d.task.id} />
             : tab === 'lei' ? <LawReader refs={lawRefs} own={own} missing={missing} />
+            : tab === 'juris' ? <JurisPanel taskId={d.task.id} own={own} />
             : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={hasSession} initialDepth={params.has('revisao') || d.task.title.startsWith(REVIEW_PREFIX) || d.task.title.startsWith(PRACTICE_PREFIX) ? 'revisao' : d.task.title.startsWith(DEEP_PREFIX) ? 'aprofundamento' : 'completa'} />
             : <SessionMaterials sessionId={d.task.session_id} minutes={d.task.kind === 'theory' ? d.task.minutes : 0} />}
         </>

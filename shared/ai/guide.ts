@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { MARK_RULE, missingMark } from './marks.ts';
 import { roleContext } from './plan.ts';
+import { type Court, type PrecedentKind, unverifiedPrecedents } from '../legal/juris.ts';
 import { findLawRefs, inRanges, type LawRef } from '../legal/refs.ts';
 import { lawByKey, type LawEntry } from '../legal/registry.ts';
 
@@ -161,6 +162,9 @@ export function mergeGuide(t: GuideText, p: GuidePractice): Guide {
 }
 
 export interface GuideSource { ref: string; text: string }
+// Jurisprudência oficial fornecida à apostila (nível superior): ref é o rótulo citável ("Súmula 17/STJ").
+export interface GuideJuris extends GuideSource { court: Court; kind: PrecedentKind; number: number }
+export const MAX_GUIDE_JURIS = 6;
 
 // ---------- perfil da banca: questões reais que embasam "como a banca cobra" ----------
 export const BOARD_SAMPLE_MAX = 8;
@@ -255,8 +259,9 @@ const REVIEW_RULES = `- Revisão curta: nada de texto corrido nem questões de f
 // part: na completa e no aprofundamento, 'texto' (sem as questões da banca) ou 'pratica'; a revisão curta sai numa
 // chamada só.
 // stage: instrução da etapa quando o texto é escrito em partes (guideStage, reviewStage); substitui a da parte.
-export function guidePrompt(p: { depth: GuideDepth; banca: string; cargo: string; subject: string; title: string; topics: string[]; law: GuideSource[]; boardQuestions?: BoardQuestion[]; format?: string; duties?: string; otherRoles?: string[]; part?: 'texto' | 'pratica'; stage?: string; notes?: string[] }) {
+export function guidePrompt(p: { depth: GuideDepth; banca: string; cargo: string; subject: string; title: string; topics: string[]; law: GuideSource[]; juris?: GuideJuris[]; boardQuestions?: BoardQuestion[]; format?: string; duties?: string; otherRoles?: string[]; part?: 'texto' | 'pratica'; stage?: string; notes?: string[] }) {
   const full = p.depth !== 'revisao', deep = p.depth === 'aprofundamento', board = p.boardQuestions ?? [], ce = /certo/i.test(p.format ?? '');
+  const juris = p.juris ?? [];
   const texto = !full || p.part !== 'pratica', pratica = !full || p.part !== 'texto';
   const step = p.stage ? p.stage : !full ? '' : p.part === 'texto'
     ? 'Nesta parte, escreva só o texto da apostila (título, introdução, objetivos, mapa, seções, quadros e lei comentada). Questões de fixação, perguntas, pegadinhas e o resto são feitos em separado.'
@@ -268,13 +273,16 @@ Matéria: ${p.subject}
 Tema da sessão: ${p.title}
 Item do edital de onde o tema saiu (só contexto; pode citar assuntos de outras sessões): ${p.topics.join(' | ') || '—'}
 ${p.law.length ? `Trechos oficiais da lei (lei seca, única fonte legal permitida):\n${p.law.map((l) => `[${l.ref}] ${l.text}`).join('\n\n')}` : 'Nenhum trecho de lei foi fornecido para este tema.'}
+${juris.length ? `Jurisprudência oficial do STF e do STJ sobre esses artigos (texto publicado pelo tribunal; única jurisprudência permitida):\n${juris.map((j) => `[${j.ref}] ${j.text}`).join('\n\n')}` : ''}
 ${(p.notes ?? []).filter(Boolean).join('\n')}
 ${p.part === 'texto' ? '' : board.length ? `Questões reais da banca ${p.banca} sobre o tema (amostra, não o total):\n${board.map((q, i) => `Q${i + 1} (${[q.assunto, q.ano].filter(Boolean).join(', ')}): ${q.enunciado.slice(0, BOARD_TEXT_MAX)}${q.alternativas.length ? `\n${q.alternativas.map((a) => a.slice(0, BOARD_OPTION_MAX)).join(' | ')}` : ''}`).join('\n\n')}` : 'Nenhuma questão real da banca foi fornecida.'}
 Regras obrigatórias:
 - Quando o tema tratar do cargo (atribuições, rotina, conduta), use as atribuições do edital acima como base e não descreva funções de outros cargos. Sem atribuições informadas, fique no que o nome do cargo e o conteúdo do edital indicam, sem inventar funções.
 - Escreva só sobre o "Tema da sessão", e dê à apostila um título sobre ele. O item do edital costuma ser maior que o tema (ex.: tema "Substantivos e adjetivos" num item que cita todas as classes de palavras) e pode listar assuntos e leis de outras sessões: ignore o que não pertence ao tema. Trecho de lei que não trate do tema também fica de fora.
 - Cite artigos SOMENTE dos trechos fornecidos, no formato do colchete (ex.: "CP, art. 312"). Se não houver trecho, não cite números de artigos.
-- Não cite jurisprudência, súmulas, autores ou posições doutrinárias. Não invente leis, prazos ou números.
+${juris.length
+    ? '- Jurisprudência: cite SOMENTE os itens fornecidos, pelo nome do colchete (ex.: "Súmula 17/STJ"), onde explicarem o assunto da seção, e no comentário do artigo a que se referem. Reproduza o sentido do enunciado sem acrescentar regras nem exceções. Não cite outras súmulas, teses, julgados, autores ou posições doutrinárias. Não invente leis, prazos ou números.'
+    : '- Não cite jurisprudência, súmulas, autores ou posições doutrinárias. Não invente leis, prazos ou números.'}
 - Siga o texto da lei fornecido; ele é a versão vigente.
 ${!full ? REVIEW_RULES : [texto && (deep ? DEEP_TEXT : FULL_TEXT), pratica && (deep ? DEEP_PRACTICE : FULL_PRACTICE)].filter(Boolean).join('\n')}
 ${full ? VOICE_RULES : REVIEW_VOICE}
@@ -309,7 +317,7 @@ export function unverifiedLawRefs(text: string, provided: ProvidedArticle[], sub
 
 // Confere as citações: refs da seção "legislacao" precisam ser fontes fornecidas; artigos citados no texto
 // precisam cair nos intervalos fornecidos. Devolve as citações não verificáveis.
-export function verifyGuide(g: Guide, provided: ProvidedArticle[], subject = '', extra: LawEntry[] = []) {
+export function verifyGuide(g: Guide, provided: ProvidedArticle[], subject = '', extra: LawEntry[] = [], juris: GuideJuris[] = []) {
   const refs = new Set(provided.map((p) => sourceRef(p.lawKey, p.label, extra).toLowerCase()));
   const legislacao = g.legislacao.filter((l) => refs.has(l.ref.trim().toLowerCase()));
   const text = [
@@ -318,7 +326,7 @@ export function verifyGuide(g: Guide, provided: ProvidedArticle[], subject = '',
     ...(g.gatilhos ?? []).flatMap((x) => [x.pista, x.resposta]), ...g.pontos_banca, ...g.pegadinhas, ...g.resumo,
     ...(g.questoes ?? []).flatMap((q) => [q.enunciado, ...q.alternativas, q.comentario]), ...g.perguntas.flatMap((q) => [q.pergunta, q.resposta]),
   ].join('\n');
-  return { guide: { ...g, legislacao }, unverified: unverifiedLawRefs(text, provided, subject, extra), droppedRefs: g.legislacao.length - legislacao.length };
+  return { guide: { ...g, legislacao }, unverified: [...unverifiedLawRefs(text, provided, subject, extra), ...unverifiedPrecedents(text, juris)], droppedRefs: g.legislacao.length - legislacao.length };
 }
 
 // Chave de reaproveitamento: mesmo tema, mesmas fontes, mesma profundidade e versão do prompt.
@@ -328,14 +336,17 @@ const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCa
 export const topicKeys = (topics: string[]) => [...new Set(topics.map(norm).filter(Boolean))].sort();
 // Palavras do título que indicam o tema, sem artigos entre parênteses.
 export const titleKeys = (title: string) => [...new Set(norm(title.replace(/\([^)]*\)/g, ' ')).split(' ').filter((w) => w.length > 3))].sort();
-export const lawKeys = (law: GuideSource[]) => [...new Set(law.map((l) => l.ref))].sort();
+// Fontes da apostila (artigos e, no nível superior, jurisprudência): também decidem o reaproveitamento entre sessões,
+// então uma apostila com jurisprudência não serve a quem não a tem, e vice-versa.
+export const lawKeys = (law: GuideSource[], juris: GuideSource[] = []) => [...new Set([...law, ...juris].map((l) => l.ref))].sort();
 
 // Tema que depende do cargo (atribuições, rotina, funções): a apostila é do cargo e não serve para outro, mesmo com o mesmo tema.
 export const roleSpecific = (p: { title?: string; topics: string[] }) => /atribui|do cargo|da fun[cç][aã]o|rotina funcional/i.test([p.title ?? '', ...p.topics].join(' '));
 
-export function guideCacheKey(p: { depth: GuideDepth; subject: string; title?: string; topics: string[]; law: GuideSource[]; banca: string; cargo?: string }) {
+// Jurisprudência só entra na chave quando há (apostila de nível superior): as chaves das demais não mudam.
+export function guideCacheKey(p: { depth: GuideDepth; subject: string; title?: string; topics: string[]; law: GuideSource[]; juris?: GuideSource[]; banca: string; cargo?: string }) {
   const s = JSON.stringify([guideVersion(p.depth), p.depth, norm(p.banca), norm(p.subject), titleKeys(p.title ?? ''), topicKeys(p.topics), p.law.map((l) => l.ref + '|' + l.text.length).sort(),
-    ...(roleSpecific(p) ? [norm(p.cargo ?? '')] : [])]);
+    ...(roleSpecific(p) ? [norm(p.cargo ?? '')] : []), ...(p.juris?.length ? [p.juris.map((j) => j.ref).sort()] : [])]);
   let h1 = 0x811c9dc5, h2 = 0;
   for (let i = 0; i < s.length; i++) { h1 = Math.imul(h1 ^ s.charCodeAt(i), 16777619) >>> 0; h2 = (h2 * 31 + s.charCodeAt(i)) >>> 0; }
   return `${h1.toString(16)}${h2.toString(16)}`;
