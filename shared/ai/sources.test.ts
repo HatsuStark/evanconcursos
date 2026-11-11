@@ -13,6 +13,8 @@ describe('fontes da sessão', () => {
   it('referência com página ou intervalo', () => {
     expect(chunkRef('Guia do Writer 7.1', { page_from: 45, page_to: 45 })).toBe('Guia do Writer 7.1, p. 45');
     expect(chunkRef('Guia do Writer 7.1', { page_from: 45, page_to: 46 })).toBe('Guia do Writer 7.1, pp. 45-46');
+    expect(chunkRef('Guia Foca Linux', { page_from: 3, page_to: 4, href: 'https://x/p3', heading: 'Permissões' })).toBe('Guia Foca Linux, seção “Permissões”');
+    expect(chunkRef('Guia Foca Linux', { page_from: 3, page_to: 3, href: 'https://x/p3', heading: '' })).toBe('Guia Foca Linux');
   });
 
   it('escolhidos na ordem da IA, sem repetidos nem inexistentes, até o limite', () => {

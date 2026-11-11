@@ -34,7 +34,7 @@ export function SourcesPanel({ taskId }: { taskId: string }) {
             <header className="law-head">
               <div>
                 <strong style={{ fontSize: 16 }}>{i.heading || s?.title}</strong>
-                <div className="muted small">{i.ref}</div>
+                <div className="muted small">{i.ref}{i.href && <> · <a href={i.href} target="_blank" rel="noreferrer">Ler no site <ExternalLink size={12} /></a></>}</div>
               </div>
             </header>
             {i.why && <p style={{ margin: 0 }}><strong>Explica:</strong> {i.why}</p>}

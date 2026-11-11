@@ -7,7 +7,8 @@ export const SOURCES_PROMPT_VERSION = 'sources-v1', BOOKS_PROMPT_VERSION = 'book
 export const MAX_SOURCE_PICKS = 4, MAX_SOURCE_CANDIDATES = 20, MAX_BOOKS = 4;
 
 export interface SourceMeta { key: string; title: string; authors: string; license: string; license_url: string; url: string; note: string; commercial_ok: boolean }
-export interface SourceCandidate { id: string; source_key: string; page_from: number; page_to: number; heading: string; text: string; rank: number }
+// href: página do site, nas fontes em HTML (vazio nas em PDF). sim: semelhança de significado com o tema (nula sem vetor).
+export interface SourceCandidate { id: string; source_key: string; page_from: number; page_to: number; heading: string; text: string; href?: string; rank: number; sim?: number | null }
 export interface SourceItem extends SourceCandidate { why: string; ref: string }
 export interface BookRef { title: string; authors: string[]; publisher: string; year: string; link: string; isbn: string; why: string }
 
@@ -24,9 +25,12 @@ export function sourcesQuery(title: string, keyword = '') {
   return terms.join(' or ');
 }
 
-// "Guia do Writer 7.1, p. 45" / "pp. 45-46": como o trecho é citado na aba e na apostila.
-export const chunkRef = (sourceTitle: string, c: { page_from: number; page_to: number }) =>
-  `${sourceTitle}, ${c.page_to > c.page_from ? `pp. ${c.page_from}-${c.page_to}` : `p. ${c.page_from}`}`;
+// "Guia do Writer 7.1, p. 45" / "pp. 45-46": como o trecho é citado na aba e na apostila. Fonte em HTML (sem página):
+// pela seção ("Guia Foca Linux, seção “Permissões”").
+export function chunkRef(sourceTitle: string, c: { page_from: number; page_to: number; href?: string; heading?: string }) {
+  if (c.href) return c.heading ? `${sourceTitle}, seção “${c.heading}”` : sourceTitle;
+  return `${sourceTitle}, ${c.page_to > c.page_from ? `pp. ${c.page_from}-${c.page_to}` : `p. ${c.page_from}`}`;
+}
 
 export const SourcePicks = z.object({
   itens: z.array(z.object({
@@ -43,7 +47,7 @@ Matéria: ${p.subject}
 Tema: ${p.title}
 Item do edital (contexto): ${p.topics.join(' | ') || '—'}
 Trechos:
-${p.items.map((c, i) => `${i}. [${c.sourceTitle}, p. ${c.page_from}${c.heading ? ` — ${c.heading}` : ''}] ${c.text.slice(0, 900)}`).join('\n\n')}
+${p.items.map((c, i) => `${i}. [${c.href ? c.sourceTitle : `${c.sourceTitle}, p. ${c.page_from}`}${c.heading ? ` — ${c.heading}` : ''}] ${c.text.slice(0, 900)}`).join('\n\n')}
 Regras:
 - Escolha até ${MAX_SOURCE_PICKS} trechos que explicam DIRETAMENTE o tema (conceito, funcionamento, procedimento), do mais útil para o menos útil.
 - Trecho que só cita palavras do tema de passagem, exercício sem explicação, ou assunto vizinho fica de fora. Se nenhum servir, devolva a lista vazia.

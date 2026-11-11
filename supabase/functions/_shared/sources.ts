@@ -9,6 +9,7 @@ import {
   SourcePicks, sourcePicksJsonSchema, sourcesPrompt, sourcesQuery, type BookRef, type SourceCandidate, type SourceItem, type SourceMeta,
 } from '../../../shared/ai/sources.ts';
 import { sourcesForSubject } from '../../../shared/sources/catalog.ts';
+import { DEFAULT_EMBED_MODEL, embedTexts, MIN_SIMILARITY, queryEmbedText, toPgVector } from '../../../shared/sources/embed.ts';
 import { defaultModel, keyFor } from './ai.ts';
 import { logUsage } from './http.ts';
 
@@ -34,16 +35,32 @@ async function ask<T>(admin: Admin, ownerId: string, operation: string, version:
   }
 }
 
+// Vetor de significado do tema, para a busca híbrida. Falha (sem chave, cota) = busca só por palavras.
+async function queryVector(admin: Admin, ownerId: string, t: SourcesTopic, model: string) {
+  const apiKey = Deno.env.get('GEMINI_API_KEY') ?? '', started = Date.now();
+  if (!apiKey) return null;
+  try {
+    const { vectors, tokens } = await embedTexts({ apiKey, model, texts: [queryEmbedText(t)], task: 'query', timeoutMs: 8_000 });
+    await logUsage(admin, { ownerId, operation: 'source_embed', model, promptVersion: 'embed-v1', usage: { inputTokens: tokens, outputTokens: 0, thinkingTokens: 0 }, latencyMs: Date.now() - started, status: 'ok' });
+    return toPgVector(vectors[0]!);
+  } catch (e) {
+    console.error('vetor da busca:', e);
+    return null;
+  }
+}
+
 // Trechos de fontes abertas que explicam o tema. ai = a escolha da IA está aplicada (com a frase do que cada um explica).
+// Busca por palavras e pelo significado (quando os trechos das fontes têm vetor do mesmo modelo).
 export async function topicSources(admin: Admin, ownerId: string, t: SourcesTopic, canGenerate: () => Promise<boolean>) {
   const keys = sourcesForSubject(t.subject), query = sourcesQuery(t.title, t.keyword);
   if (!keys.length || !query) return { items: [] as SourceItem[], sources: [] as SourceMeta[], ai: false };
-  const [{ data: found, error }, { data: metas }] = await Promise.all([
-    admin.rpc('search_open_chunks', { p_query: query, p_sources: keys, p_limit: MAX_SOURCE_CANDIDATES }),
-    admin.from('open_sources').select('key, title, authors, license, license_url, url, note, commercial_ok').in('key', keys),
-  ]);
+  const model = Deno.env.get('EMBED_MODEL') || DEFAULT_EMBED_MODEL;
+  const { data: metas } = await admin.from('open_sources').select('key, title, authors, license, license_url, url, note, commercial_ok, embed_model').in('key', keys);
+  const sources = ((metas ?? []) as (SourceMeta & { embed_model: string })[]).map(({ embed_model: _, ...m }) => m);
+  const vector = (metas ?? []).some((m) => m.embed_model === model) ? await queryVector(admin, ownerId, t, model) : null;
+  const { data: found, error } = await admin.rpc('search_open_chunks_hybrid', { p_query: query, p_embedding: vector, p_sources: keys, p_limit: MAX_SOURCE_CANDIDATES, p_min_sim: MIN_SIMILARITY });
   if (error) throw new Error(`fontes: ${error.message}`);
-  const candidates = (found ?? []) as SourceCandidate[], sources = (metas ?? []) as SourceMeta[];
+  const candidates = (found ?? []) as SourceCandidate[];
   const titleOf = (k: string) => sources.find((s) => s.key === k)?.title ?? k;
   if (!candidates.length) return { items: [], sources, ai: false };
   const key = await sha256Hex(JSON.stringify([normalizeText(t.subject), normalizeText(t.title), candidates.map((c) => c.id)]));
