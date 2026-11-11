@@ -819,3 +819,8 @@ details.card summary { cursor: pointer; font-weight: 600; }
 .pomo-phase { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 14px; }
 .pomo-phase.foco { color: var(--orange); }
 .pomo-phase.pausa { color: var(--lime); }
+
+/* iPhone: o Safari dá zoom na página ao tocar num campo com letra menor que 16px, e a tela fica ampliada. */
+@media (max-width: 720px) {
+  :is(input, textarea, select):not([type="checkbox"], [type="radio"], [type="range"], [type="file"]) { font-size: 16px !important; }
+}

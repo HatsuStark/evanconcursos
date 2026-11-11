@@ -19,16 +19,26 @@ function load(): { enabled: boolean; preset: Preset } {
 }
 function save(v: { enabled: boolean; preset: Preset }) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch { /* sem armazenamento */ } }
 
+// Áudio do bipe: um só contexto, criado num toque do estudante. O Safari (iPhone) deixa mudo o contexto criado fora de
+// um toque, como o do fim do foco, que vem do cronômetro.
+let audioCtx: AudioContext | null = null;
+function primeAudio() {
+  try {
+    audioCtx ??= new AudioContext();
+    if (audioCtx.state === 'suspended') void audioCtx.resume();
+  } catch { /* sem áudio */ }
+}
+
 // Aviso: bipe curto (Web Audio) e notificação do navegador, se permitida.
 function alarm(title: string, body: string) {
   try {
-    const ctx = new AudioContext();
+    primeAudio();
+    const ctx = audioCtx!;
     [0, 0.25, 0.5].forEach((t) => {
       const o = ctx.createOscillator(), g = ctx.createGain();
       o.frequency.value = 880; g.gain.setValueAtTime(0.2, ctx.currentTime + t); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.2);
       o.connect(g).connect(ctx.destination); o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.2);
     });
-    setTimeout(() => void ctx.close(), 1000);
   } catch { /* sem áudio */ }
   try { if ('Notification' in window && Notification.permission === 'granted') new Notification(title, { body, icon: '/icon-192.png' }); } catch { /* sem notificação */ }
 }
@@ -43,22 +53,36 @@ export function usePomodoro(timer: { running: boolean; seconds: number; pause: (
   const pauseRef = useRef(timer.pause);
   pauseRef.current = timer.pause;
 
-  // Foco: cada segundo a mais no cronômetro desconta do foco. Zerar o cronômetro (salto para trás) não conta.
+  // Com o pomodoro ligado, o primeiro toque na página libera o bipe (iPhone).
+  useEffect(() => {
+    if (!cfg.enabled) return;
+    window.addEventListener('pointerdown', primeAudio, { once: true });
+    return () => window.removeEventListener('pointerdown', primeAudio);
+  }, [cfg.enabled]);
+
+  // Foco: cada segundo a mais no cronômetro desconta do foco; depois da tela bloqueada, vários de uma vez. Zerar o
+  // cronômetro (salto para trás) não conta.
   useEffect(() => {
     const step = timer.seconds - prev.current;
     prev.current = timer.seconds;
-    if (!cfg.enabled || phase !== 'foco' || !timer.running || step !== 1) return;
-    if (left > 1) { setLeft(left - 1); return; }
+    if (!cfg.enabled || phase !== 'foco' || !timer.running || step < 1) return;
+    if (left > step) { setLeft(left - step); return; }
     const done = cycles + 1, long = done % p.every === 0;
     pauseRef.current();
     setCycles(done); setPhase('pausa'); setLeft((long ? p.long : p.short) * 60);
     alarm('Hora da pausa', `${done} ${done === 1 ? 'foco concluído' : 'focos concluídos'}. Pausa de ${long ? p.long : p.short} min.`);
   }, [timer.seconds]);
 
-  // Pausa: corre sozinha. Voltar a estudar durante a pausa encerra a pausa.
+  // Pausa: corre sozinha, pelo relógio (com a tela bloqueada os tiques param). Voltar a estudar encerra a pausa.
   useEffect(() => {
     if (!cfg.enabled || phase !== 'pausa' || timer.running) return;
-    const t = setInterval(() => setLeft((l) => Math.max(0, l - 1)), 1000);
+    let last = Date.now();
+    const t = setInterval(() => {
+      const step = Math.floor((Date.now() - last) / 1000);
+      if (step < 1) return;
+      last += step * 1000;
+      setLeft((l) => Math.max(0, l - step));
+    }, 1000);
     return () => clearInterval(t);
   }, [cfg.enabled, phase, timer.running]);
   useEffect(() => {
@@ -76,6 +100,7 @@ export function usePomodoro(timer: { running: boolean; seconds: number; pause: (
   return {
     enabled: cfg.enabled, preset: cfg.preset, phase, left, cycles,
     toggle: () => {
+      if (!cfg.enabled) primeAudio();
       if (!cfg.enabled && 'Notification' in window && Notification.permission === 'default') void Notification.requestPermission();
       update({ ...cfg, enabled: !cfg.enabled });
     },

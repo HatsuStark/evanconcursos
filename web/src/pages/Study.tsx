@@ -53,12 +53,28 @@ function useTimer(taskId: string, initial: number) {
   const flush = useCallback(() => {
     if (Math.abs(ref.current.seconds - ref.current.saved) >= 1) { ref.current.saved = ref.current.seconds; void saveTimeSpent(taskId, ref.current.seconds); }
   }, [taskId]);
+  // Conta pelo relógio, não pelos tiques: com a tela bloqueada ou o app em segundo plano (iPhone), o navegador para os
+  // tiques, e o tempo passado entra de uma vez quando a página volta.
   useEffect(() => {
     if (!running) return;
-    const t = setInterval(() => { ref.current.seconds += 1; setSeconds(ref.current.seconds); if (ref.current.seconds % 30 === 0) flush(); }, 1000);
+    let last = Date.now();
+    const t = setInterval(() => {
+      const step = Math.floor((Date.now() - last) / 1000);
+      if (step < 1) return;
+      last += step * 1000;
+      const before = ref.current.seconds;
+      ref.current.seconds += step; setSeconds(ref.current.seconds);
+      if (Math.floor(before / 30) !== Math.floor(ref.current.seconds / 30)) flush();
+    }, 1000);
     return () => clearInterval(t);
   }, [running, flush]);
   useEffect(() => () => flush(), [flush]);
+  // O iPhone pode descartar a aba em segundo plano sem desmontar nada: salva ao sair da tela.
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === 'hidden') flush(); };
+    document.addEventListener('visibilitychange', onHide);
+    return () => document.removeEventListener('visibilitychange', onHide);
+  }, [flush]);
   // Zerar: para o cronômetro e grava 0 na hora (o tempo anterior da tarefa se perde).
   const reset = () => {
     setRunning(false);

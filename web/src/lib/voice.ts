@@ -11,6 +11,18 @@ export const CADU = 'cadu', BROWSER_DEFAULT = 'navegador';
 const stored = (key: string) => { try { return localStorage.getItem(key); } catch { return null; } };
 const store = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch { /* sem armazenamento */ } };
 
+// Áudio mudo (WAV de 0,05 s) para liberar o <audio> num toque. Gerado aqui: a política do site só aceita mídia blob:.
+let silent: string | null = null;
+function silentUrl() {
+  if (silent) return silent;
+  const n = 1200, b = new DataView(new ArrayBuffer(44 + n * 2));
+  const tag = (at: number, s: string) => { for (let i = 0; i < s.length; i++) b.setUint8(at + i, s.charCodeAt(i)); };
+  tag(0, 'RIFF'); b.setUint32(4, 36 + n * 2, true); tag(8, 'WAVE'); tag(12, 'fmt ');
+  b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true); b.setUint32(24, 24000, true); b.setUint32(28, 48000, true);
+  b.setUint16(32, 2, true); b.setUint16(34, 16, true); tag(36, 'data'); b.setUint32(40, n * 2, true);
+  return (silent = URL.createObjectURL(new Blob([b.buffer], { type: 'audio/wav' })));
+}
+
 // Sem escolha salva (ou com uma voz antiga: Faber ou de IA), usa a Cadu quando o aparelho aceita.
 const isCadu = (choice: string) => localVoiceSupported() && (!choice || choice === CADU || choice === 'faber' || choice.startsWith('ai:'));
 
@@ -134,7 +146,13 @@ export function useGuideVoice(sections: SpeechSection[]) {
     halt();
     const mine = run.current;
     setError(''); setStatus('playing');
-    if (prefs.current.cadu) void playCadu(mine);
+    if (prefs.current.cadu) {
+      // Libera o <audio> no próprio toque (Safari do iPhone): o primeiro trecho da Cadu só fica pronto segundos depois,
+      // e um play() fora do toque seria bloqueado.
+      const el = (audio.current ??= new Audio());
+      if (!el.getAttribute('src')) { el.src = silentUrl(); el.play().catch(() => {}); }
+      void playCadu(mine);
+    }
     else if (voiceSupported()) playBrowser(mine);
     else fail('Este navegador não tem voz disponível.');
   }, [halt, playCadu, playBrowser, fail]);
