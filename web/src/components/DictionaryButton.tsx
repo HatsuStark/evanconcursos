@@ -1,11 +1,14 @@
 import { BookA, Search, Sparkles, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { findExact, searchGlossary, type GlossaryEntry } from '../../../shared/glossary/search.ts';
-import { askGlossaryAi, DICT_EVENT, loadGlossary, lookupInDictionary, pushRecent, readRecent } from '../lib/glossary.ts';
+import { askGlossaryAi, DICT_EVENT, loadGlossary, lookupInDictionary, pushRecent, readDictPos, readRecent, saveDictPos, type DictPos } from '../lib/glossary.ts';
 
 type Shown = { entry: GlossaryEntry; ai: boolean };
+const DRAG_THRESHOLD = 6;
+const bottomGap = () => (window.innerWidth <= 720 ? 84 : 12); // no celular, acima da barra inferior
 
-// Dicionário de termos: botão translúcido no meio da borda esquerda, acompanha a tela. Busca no glossário próprio
+// Dicionário de termos: botão translúcido preso a uma borda da tela (esquerda por padrão, no meio). O estudante arrasta
+// para onde quiser; ao soltar, gruda na borda mais próxima, na altura escolhida (salvo no navegador). Busca no glossário próprio
 // enquanto digita; o que não estiver lá pode ser perguntado à IA (cache compartilhado na função "glossary").
 export function DictionaryButton() {
   const [open, setOpen] = useState(false);
@@ -17,6 +20,53 @@ export function DictionaryButton() {
   const pending = useRef<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
+  const [pos, setPos] = useState<DictPos>(readDictPos);
+  const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
+  const [fitTop, setFitTop] = useState<number | null>(null);
+  const press = useRef<{ id: number; dx: number; dy: number; sx: number; sy: number; moved: boolean } | null>(null);
+  const draggedAt = useRef(0); // o clique que vem logo após soltar o arraste não abre o painel
+
+  // Painel aberto perto do topo ou do fim da tela: desloca o conjunto para caber inteiro.
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!open || !el) { setFitTop(null); return; }
+    const fit = () => {
+      const h = el.offsetHeight, want = pos.y * window.innerHeight;
+      const top = Math.min(Math.max(want, h / 2 + 12), window.innerHeight - h / 2 - bottomGap());
+      setFitTop(Math.abs(top - want) < 1 ? null : top);
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    window.addEventListener('resize', fit);
+    return () => { ro.disconnect(); window.removeEventListener('resize', fit); };
+  }, [open, pos]);
+
+  function onPointerDown(e: ReactPointerEvent<HTMLButtonElement>) {
+    if (e.button !== 0) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    press.current = { id: e.pointerId, dx: e.clientX - r.left, dy: e.clientY - (r.top + r.height / 2), sx: e.clientX, sy: e.clientY, moved: false };
+  }
+  function onPointerMove(e: ReactPointerEvent<HTMLButtonElement>) {
+    const p = press.current;
+    if (!p || p.id !== e.pointerId) return;
+    if (!p.moved) {
+      if (Math.hypot(e.clientX - p.sx, e.clientY - p.sy) < DRAG_THRESHOLD) return;
+      p.moved = true;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setOpen(false);
+    }
+    setDrag({ x: e.clientX - p.dx, y: e.clientY - p.dy });
+  }
+  function onPointerUp(e: ReactPointerEvent<HTMLButtonElement>) {
+    const p = press.current;
+    press.current = null;
+    if (!p?.moved) return;
+    draggedAt.current = Date.now();
+    const h = window.innerHeight, min = 56 / h, max = 1 - (bottomGap() + 40) / h;
+    const next: DictPos = { side: e.clientX < window.innerWidth / 2 ? 'left' : 'right', y: Math.min(Math.max((e.clientY - p.dy) / h, min), max) };
+    setDrag(null); setPos(next); saveDictPos(next);
+  }
 
   const results = useMemo(() => (glossary && !shown ? searchGlossary(glossary, query) : []), [glossary, query, shown]);
 
@@ -75,8 +125,11 @@ export function DictionaryButton() {
   const typed = query.trim().length >= 2;
   return (
     <>
-    <div className={'dict' + (open ? ' open' : '')} ref={box}>
-      <button className="dict-fab" onClick={() => setOpen(!open)} aria-label="Dicionário de termos" aria-expanded={open}>
+    <div className={'dict' + (open ? ' open' : '') + (pos.side === 'right' && !drag ? ' right' : '') + (drag ? ' dragging' : '')} ref={box}
+      style={drag ? { left: drag.x, right: 'auto', top: drag.y } : { top: fitTop ?? `${pos.y * 100}%` }}>
+      <button className="dict-fab" aria-label="Dicionário de termos (arraste para mudar de lugar)" aria-expanded={open}
+        onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={() => { press.current = null; setDrag(null); }}
+        onClick={() => { if (Date.now() - draggedAt.current > 350) setOpen(!open); }}>
         <BookA size={19} />
         <span className="dict-tip" aria-hidden>Dicionário de termos</span>
       </button>

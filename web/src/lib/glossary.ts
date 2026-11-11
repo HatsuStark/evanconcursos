@@ -27,3 +27,17 @@ export function pushRecent(term: string): string[] {
   try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch { /* armazenamento bloqueado */ }
   return next;
 }
+
+// Lugar do botão escolhido pelo estudante: borda e altura (fração da tela). Padrão: esquerda, no meio.
+export interface DictPos { side: 'left' | 'right'; y: number }
+const POS_KEY = 'dict-pos';
+export function readDictPos(): DictPos {
+  try {
+    const v = JSON.parse(localStorage.getItem(POS_KEY) ?? 'null');
+    if (v && (v.side === 'left' || v.side === 'right') && typeof v.y === 'number' && v.y > 0 && v.y < 1) return { side: v.side, y: v.y };
+  } catch { /* armazenamento bloqueado ou valor inválido */ }
+  return { side: 'left', y: 0.5 };
+}
+export function saveDictPos(p: DictPos) {
+  try { localStorage.setItem(POS_KEY, JSON.stringify(p)); } catch { /* armazenamento bloqueado */ }
+}
