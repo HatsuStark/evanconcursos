@@ -1,8 +1,10 @@
-import { BookOpen, Info, CheckCircle2, Headphones, Landmark, Pause, Play, Printer, SkipBack, SkipForward, Sparkles, Square } from 'lucide-react';
+import { BookOpen, GalleryHorizontal, Info, CheckCircle2, Headphones, Landmark, Pause, Play, Printer, SkipBack, SkipForward, Sparkles, Square } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { dropHotDisclaimer } from '../../../shared/ai/hot.ts';
 import { missingMark, splitMarks } from '../../../shared/ai/marks.ts';
 import { MindMap } from './MindMap.tsx';
+import { ReviewCards } from './ReviewCards.tsx';
+import { allReviewCards } from '../../../shared/domain/review-cards.ts';
 import { guideSpeech } from '../../../shared/ai/speech.ts';
 import { localVoiceSupported } from '../lib/piper.ts';
 import { supabase } from '../lib/supabase.ts';
@@ -57,8 +59,9 @@ const Marked = ({ text }: { text: string }) => <>{splitMarks(text).map((p, i) =>
 const fixQuestions = <Q extends { enunciado: string }>(qs?: Q[]) => (qs ?? []).filter((q) => !missingMark(q.enunciado));
 
 // Apostila da sessão: completa ou revisão curta, gerada pela IA a partir do edital e da lei seca oficial.
-export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { taskId: string; hasSession: boolean; initialDepth?: 'completa' | 'revisao' | 'aprofundamento' }) {
+export function GuidePanel({ taskId, hasSession, initialDepth = 'completa', onGoQuestions }: { taskId: string; hasSession: boolean; initialDepth?: 'completa' | 'revisao' | 'aprofundamento'; onGoQuestions?: () => void }) {
   const [depth, setDepth] = useState(initialDepth);
+  const [sheetView, setSheetView] = useState(false); // revisão curta: folha completa em vez dos cartões
   const [guide, setGuide] = useState<GuideRow | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -98,6 +101,8 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
   useEffect(() => {
     if (voice.activeKey) article.current?.querySelector(`[data-voice="${voice.activeKey}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [voice.activeKey]);
+  // Revisão curta pronta abre em cartões; a folha completa fica a um clique.
+  const cardsMode = depth === 'revisao' && guide?.depth === 'revisao' && !!g && !g.parcial && !loading && !sheetView && allReviewCards(g).length > 0;
   const reading = (key: string) => ({ 'data-voice': key, className: voice.activeKey === key ? 'speaking' : undefined });
 
   if (!hasSession) return <div className="glass card muted">A apostila é gerada para as tarefas de teoria. Nos dias de revisão e reforço, use as questões e a lei seca.</div>;
@@ -109,8 +114,9 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
           <button className={depth === 'revisao' ? 'on' : ''} onClick={() => setDepth('revisao')}>Revisão curta</button>
           <button className={depth === 'aprofundamento' ? 'on' : ''} onClick={() => setDepth('aprofundamento')}>Aprofundamento</button>
         </div>
-        {g && (
+        {g && !cardsMode && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {depth === 'revisao' && sheetView && <button className="btn ghost sm" onClick={() => setSheetView(false)}><GalleryHorizontal size={15} /> Revisar em cartões</button>}
             {/* Seções ainda em escrita: o áudio sairia só com os títulos. */}
             {voice.status === 'idle' && !g.pendentes?.length && <button className="btn ghost sm" onClick={voice.play}><Headphones size={15} /> Ouvir</button>}
             <button className="btn ghost sm" onClick={() => window.print()}><Printer size={15} /> Imprimir / PDF</button>
@@ -119,7 +125,8 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa' }: { 
       </div>
       {loading && <div className="glass card" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> Montando a apostila com base no edital e na lei seca… (o começo aparece em alguns segundos; pode sair desta tela, ela continua sendo feita)</div>}
       {error && <div className="glass card"><p className="error" style={{ margin: 0 }}>{error}</p><button className="btn sm" style={{ marginTop: 10 }} onClick={() => load()}>Tentar de novo</button></div>}
-      {g && !loading && (
+      {cardsMode && <ReviewCards taskId={taskId} title={g!.titulo} sheet={g!} onShowSheet={() => setSheetView(true)} onGoQuestions={onGoQuestions} />}
+      {g && !loading && !cardsMode && (
         <article ref={article} className="glass guide printable">
           <header {...reading('intro')}>
             <span className="badge violet"><BookOpen size={12} /> Apostila · {guide!.depth === 'completa' ? 'completa' : guide!.depth === 'aprofundamento' ? 'aprofundamento' : 'revisão curta'}</span>

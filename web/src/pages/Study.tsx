@@ -273,7 +273,7 @@ function StudyView({ d }: { d: StudyData }) {
             : tab === 'lei' ? <LawReader refs={lawRefs} own={own} missing={missing} />
             : tab === 'juris' ? <JurisPanel taskId={d.task.id} own={own} />
             : tab === 'fontes' ? <SourcesPanel taskId={d.task.id} />
-            : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={hasSession} initialDepth={params.has('revisao') || d.task.title.startsWith(REVIEW_PREFIX) || d.task.title.startsWith(PRACTICE_PREFIX) ? 'revisao' : d.task.title.startsWith(DEEP_PREFIX) ? 'aprofundamento' : 'completa'} />
+            : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={hasSession} initialDepth={params.has('revisao') || d.task.title.startsWith(REVIEW_PREFIX) || d.task.title.startsWith(PRACTICE_PREFIX) ? 'revisao' : d.task.title.startsWith(DEEP_PREFIX) ? 'aprofundamento' : 'completa'} onGoQuestions={tabs.some((t) => t.key === 'questoes') ? () => setTab('questoes') : undefined} />
             : <SessionMaterials sessionId={d.task.session_id} minutes={d.task.kind === 'theory' ? d.task.minutes : 0} />}
         </>
       )}
