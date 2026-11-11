@@ -1,16 +1,16 @@
 import { useId, useState, type KeyboardEvent } from 'react';
 
 // Campo com lista de sugestões. Substitui o <datalist>, que refiltra as opções pelo texto digitado: "Português" escondia
-// "Língua Portuguesa", e sem acento não sobrava nada.
-export function SearchSelect({ value, options, loading, placeholder, label, onChange, onPick, onBlur }: {
-  value: string; options: string[]; loading?: boolean; placeholder?: string; label: string;
+// "Língua Portuguesa", e sem acento não sobrava nada. stayOpen: a lista continua aberta depois de escolher (várias escolhas).
+export function SearchSelect({ value, options, loading, placeholder, label, onChange, onPick, onBlur, stayOpen }: {
+  value: string; options: string[]; loading?: boolean; placeholder?: string; label: string; stayOpen?: boolean;
   onChange: (text: string) => void; onPick: (option: string) => void; onBlur?: () => void;
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const list = options.filter((o) => o !== value), show = open && (list.length > 0 || !!loading);
-  const pick = (o: string) => { onPick(o); setOpen(false); setActive(-1); };
+  const pick = (o: string) => { onPick(o); if (!stayOpen) setOpen(false); setActive(-1); };
   function onKey(e: KeyboardEvent) {
     if (e.key === 'Escape') { setOpen(false); return; }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -22,7 +22,7 @@ export function SearchSelect({ value, options, loading, placeholder, label, onCh
     <div className="search-select">
       <input className="input" role="combobox" aria-label={label} aria-expanded={show} aria-controls={id} aria-autocomplete="list" autoComplete="off" value={value} placeholder={placeholder}
         aria-activedescendant={show && list[active] ? `${id}-${active}` : undefined}
-        onChange={(e) => { onChange(e.target.value); setOpen(true); setActive(-1); }} onFocus={() => setOpen(true)} onKeyDown={onKey}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); setActive(-1); }} onFocus={() => setOpen(true)} onClick={() => setOpen(true)} onKeyDown={onKey}
         onBlur={() => { setOpen(false); onBlur?.(); }} />
       {show && (
         <ul className="search-options" id={id} role="listbox" aria-label={label}>

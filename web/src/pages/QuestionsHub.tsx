@@ -74,7 +74,7 @@ function AssuntosField({ value, options, onChange }: { value: string[]; options:
   const list = full ? [] : (options ?? []).filter((o) => !value.includes(o) && (!q || fold(o).includes(q))).slice(0, 60);
   return (
     <div className="assuntos-field">
-      <SearchSelect label="Assuntos" value={text} options={list} onChange={setText} onPick={(a) => { onChange([...value, a]); setText(''); }}
+      <SearchSelect label="Assuntos" stayOpen value={text} options={list} onChange={setText} onPick={(a) => { onChange([...value, a]); setText(''); }}
         placeholder={!options ? 'Escolha a matéria primeiro' : full ? `Máximo de ${MAX_ASSUNTOS} assuntos` : value.length ? 'Adicionar outro assunto' : 'Todos · digite para escolher'} />
       {value.length > 0 && (
         <div className="chips-row">
