@@ -815,6 +815,55 @@ details.card summary { cursor: pointer; font-weight: 600; }
 .feedback .textarea { min-height: 110px; }
 @media (max-width: 720px) { .feedback { right: 16px; bottom: 84px; } .feedback-fab { width: 44px; height: 44px; } .app:has(.voice-bar) .feedback { bottom: 150px; } }
 
+/* Dicionário de termos: botão translúcido no meio da borda esquerda (logo após a barra lateral), painel ao lado. */
+.dict { position: fixed; left: 96px; top: 50%; transform: translateY(-50%); z-index: 30; display: flex; align-items: center; gap: 10px; }
+.app.focus .dict { left: 12px; }
+.dict-fab {
+  position: relative; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; border: 0; flex: none;
+  background: var(--cyan); color: var(--on-accent); box-shadow: 0 4px 14px rgb(0 0 0 / .18); opacity: .5; transition: opacity .15s, transform .15s;
+}
+.dict-fab:hover, .dict.open .dict-fab, .dict-fab:focus-visible { opacity: 1; }
+.dict-tip {
+  position: absolute; left: 50px; top: 50%; transform: translateY(-50%); white-space: nowrap; pointer-events: none;
+  background: var(--surface-3); color: var(--text); font-size: 12px; padding: 5px 9px; border-radius: 8px; box-shadow: var(--popover-shadow); display: none;
+}
+@media (hover: hover) { .dict:not(.open) .dict-fab:hover .dict-tip { display: block; } }
+.dict-panel {
+  width: min(300px, calc(100vw - 168px)); max-height: calc(100vh - 32px); overflow-y: auto; padding: 12px; display: grid; gap: 10px;
+  background: var(--surface); border: var(--bw) solid var(--line-2); border-radius: 18px; box-shadow: 0 12px 40px rgb(0 0 0 / .35);
+}
+.dict-head { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.dict-head > svg { color: var(--cyan); }
+.dict-search { display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 12px; background: var(--well); border: var(--bw) solid var(--line); color: var(--faint); }
+.dict-search:focus-within { border-color: var(--cyan); }
+.dict-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 16px; padding: 9px 0; }
+.dict-clear { display: grid; place-items: center; border: 0; background: none; color: var(--faint); cursor: pointer; padding: 4px; }
+.dict-results { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.dict-results button { width: 100%; text-align: left; border: 0; background: none; color: var(--text); font: inherit; font-size: 14px; padding: 7px 8px; border-radius: 8px; cursor: pointer; }
+.dict-results button:hover, .dict-results button:focus-visible { background: var(--surface-2); }
+.dict-results small { color: var(--faint); }
+.dict-entry { display: grid; gap: 6px; padding: 12px; border-radius: 14px; background: var(--surface-2); }
+.dict-entry p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--muted); }
+.dict-term { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 16px; }
+.dict-area { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: var(--orange); background: color-mix(in srgb, var(--orange) 18%, transparent); }
+.dict-entry .dict-note { font-size: 13px; color: var(--faint); border-left: 2px solid var(--line-2); padding-left: 8px; }
+.dict-see { font-size: 12.5px; color: var(--faint); }
+.dict-see button { border: 0; background: none; padding: 0; font: inherit; color: var(--cyan); cursor: pointer; }
+.dict-see button:hover { text-decoration: underline; }
+.dict-ai-flag { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--faint); }
+.dict-recent { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dict-chip { font: inherit; font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); cursor: pointer; }
+.dict-pick {
+  position: fixed; z-index: 40; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer;
+  font: inherit; font-size: 13px; padding: 7px 12px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--surface-3); color: var(--text); box-shadow: var(--popover-shadow);
+}
+.dict-pick svg { color: var(--cyan); }
+@media (max-width: 720px) {
+  .dict { left: 8px; }
+  .dict-fab { width: 36px; height: 36px; }
+  .dict-panel { width: calc(100vw - 62px); max-height: calc(100vh - 120px); }
+}
+
 /* Pomodoro no card do cronômetro e na barra do modo foco. */
 .pomo { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 4px; border-top: 1px solid var(--line); }
 .pomo-preset { width: auto; padding: 6px 10px; font-size: 13px; }

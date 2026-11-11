@@ -2,6 +2,7 @@ import { CalendarDays, ClipboardList, FileText, LayoutDashboard, Library, ListCh
 import type { ReactNode } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { ContestSwitcher } from './ContestSwitcher.tsx';
+import { DictionaryButton } from './DictionaryButton.tsx';
 import { FeedbackButton } from './FeedbackButton.tsx';
 
 const NAV = [
@@ -48,6 +49,7 @@ export function Shell({ title, subtitle, actions, rail, focus, children }: {
         {children}
       </main>
       {rail && <aside className="rail">{rail}</aside>}
+      <DictionaryButton />
       {!focus && <FeedbackButton />}
     </div>
   );

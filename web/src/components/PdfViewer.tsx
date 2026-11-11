@@ -1,9 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Copy, Highlighter, Maximize2, Pencil, ZoomIn, ZoomOut } from 'lucide-react';
+import { BookA, ChevronLeft, ChevronRight, Copy, Highlighter, Maximize2, Pencil, ZoomIn, ZoomOut } from 'lucide-react';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { mergeRects, type MarkRect } from '../../../shared/domain/pdf-reading.ts';
 import { addMaterialNotes, deleteMaterialNote, updateMaterialNote, useMaterialNotes, type MaterialNote, type NoteColor } from '../lib/materials.ts';
+import { lookupInDictionary } from '../lib/glossary.ts';
 import { openPdf } from '../lib/pdfjs.ts';
 import { NOTE_COLORS, PdfNotes } from './PdfNotes.tsx';
 
@@ -265,6 +266,7 @@ export function PdfViewer({ url, range, storageKey, materialId }: { url: string;
           {NOTE_COLORS.map((c) => <button key={c.id} className={`pdf-swatch ${c.id}`} aria-label={`Marcar de ${c.label}`} title={`Marcar de ${c.label}`} onClick={() => mark(c.id, false)} />)}
           <button className="btn ghost sm" onClick={() => mark('yellow', true)}><Pencil size={14} /> Anotar</button>
           <button className="btn ghost sm" onClick={copy}><Copy size={14} /> Copiar</button>
+          {selected.text.trim().length <= 60 && <button className="btn ghost sm" onClick={() => { lookupInDictionary(selected.text.replace(/\s+/g, ' ').trim()); document.getSelection()?.removeAllRanges(); }}><BookA size={14} /> Dicionário</button>}
         </div>
       )}
       {error ? <p className="error">{error}</p> : (
