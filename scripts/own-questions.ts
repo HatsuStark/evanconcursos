@@ -4,7 +4,9 @@
 // Questão repetida (cargos do mesmo concurso dividem blocos de questões; mesmo enunciado, alternativas e texto-base) entra
 // uma vez só: fica a primeira na ordem dos arquivos.
 // Uso: node --experimental-strip-types scripts/own-questions.ts [--dir <pasta _aceitas>] [--dry] [--remover] [--limpar-repetidas]
-//   --dir      padrão: ../apiQuestoes/Provas/_aceitas (ou OWN_QUESTIONS_DIR no .env)
+//   --dir      padrão: ../apiQuestoes/Provas/_aceitas e ../apiQuestoes/Provas/_soltas (ou OWN_QUESTIONS_DIR no .env)
+//              _soltas: provas montadas com questões soltas (npm run soltas no apiQuestoes); _aceitas vem antes, então
+//              questão que também está numa prova completa fica com o id da completa
 //   --dry      só conta o que entraria, sem gravar
 //   --remover  apaga todas as questões próprias (respostas, caderno de erros e anotações delas ficam órfãs)
 //   --limpar-repetidas  apaga do banco as repetidas importadas antes desta regra (mesma ressalva das órfãs)
@@ -21,7 +23,8 @@ const env = Object.fromEntries(readFileSync(join(root, '.env'), 'utf8').split(/\
 const args = process.argv.slice(2);
 const opt = (name: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
 const DRY = args.includes('--dry'), REMOVE = args.includes('--remover'), CLEAN = args.includes('--limpar-repetidas');
-const dir = resolve(opt('--dir') ?? env.OWN_QUESTIONS_DIR ?? join(root, '..', 'apiQuestoes', 'Provas', '_aceitas'));
+const provas = join(root, '..', 'apiQuestoes', 'Provas');
+const dirs = (opt('--dir') ?? env.OWN_QUESTIONS_DIR) ? [resolve((opt('--dir') ?? env.OWN_QUESTIONS_DIR)!)] : [join(provas, '_aceitas'), join(provas, '_soltas')];
 
 async function connect() {
   const url = new URL(readFileSync(join(root, 'supabase', '.temp', 'pooler-url'), 'utf8').trim());
@@ -39,10 +42,11 @@ if (REMOVE) {
   process.exit(0);
 }
 
-if (!existsSync(dir)) throw new Error(`Pasta não encontrada: ${dir}`);
+if (!existsSync(dirs[0])) throw new Error(`Pasta não encontrada: ${dirs[0]}`);
 const files: string[] = [];
-const walk = (d: string) => { for (const f of readdirSync(d)) { const p = join(d, f); if (statSync(p).isDirectory()) walk(p); else if (f.endsWith('.json')) files.push(p); } };
-walk(dir);
+// _entrada (dentro de _soltas) é a matéria-prima das provas soltas, não prova.
+const walk = (d: string) => { for (const f of readdirSync(d)) { const p = join(d, f); if (statSync(p).isDirectory()) { if (f !== '_entrada') walk(p); } else if (f.endsWith('.json')) files.push(p); } };
+for (const d of dirs) if (existsSync(d)) walk(d);
 
 const sha1 = (s: string) => createHash('sha1').update(s).digest('hex');
 const rows: OwnRow[] = [], skipped: Record<string, number> = {}, materias: Record<string, number> = {};
@@ -56,15 +60,29 @@ for (const file of files) {
   rows.push(...r.rows);
   for (const [k, v] of Object.entries(r.skipped)) skipped[k] = (skipped[k] ?? 0) + v;
 }
-// Repetidas: mesma chave de conteúdo (texto sem formatação, acento nem pontuação); fica a primeira.
+// Repetidas: mesma chave de conteúdo (texto sem formatação, acento nem pontuação). Fica a que já está no banco (o id que
+// os alunos já usaram: histórico, caderno de erros), senão a primeira (_aceitas antes de _soltas). Sem isso, questão solta
+// importada antes da prova completa viraria linha sobrando quando a completa chegasse.
 const plain = (s: string) => s.replace(/<[^>]+>/g, '').normalize('NFD').replace(/[^a-z0-9]/gi, '').toLowerCase();
-const seen = new Set<string>(), repeated: string[] = [];
-const unique = rows.filter((r) => {
+let noBanco = new Set<string>();
+try {
+  const db = await connect();
+  const { rows: r } = await db.query(`select qid from public.qbank_questions where qid like $1`, [`${OWN_PREFIX}%`]);
+  noBanco = new Set((r as { qid: string }[]).map((x) => x.qid));
+  await db.end();
+} catch (e) {
+  if (!DRY) throw e;
+  console.log(`(--dry sem banco: ${(e as Error).message}; repetidas ficam com a primeira)`);
+}
+const winner = new Map<string, OwnRow>(), keyOf = new Map<OwnRow, string>();
+for (const r of rows) {
   const k = sha1(`${plain(r.payload.enunciado)}|${r.payload.alternativas.map((a) => plain(a.texto)).join('|')}|${plain(r.payload.textos[0] ?? '').slice(0, 300)}`);
-  if (seen.has(k)) { repeated.push(r.qid); return false; }
-  seen.add(k);
-  return true;
-});
+  keyOf.set(r, k);
+  const w = winner.get(k);
+  if (!w || (!noBanco.has(w.qid) && noBanco.has(r.qid))) winner.set(k, r);
+}
+const repeated = rows.filter((r) => winner.get(keyOf.get(r)!) !== r).map((r) => r.qid);
+const unique = rows.filter((r) => winner.get(keyOf.get(r)!) === r);
 rows.length = 0; rows.push(...unique);
 if (repeated.length) skipped['repetida'] = repeated.length;
 for (const r of rows) materias[r.materia] = (materias[r.materia] ?? 0) + 1;
