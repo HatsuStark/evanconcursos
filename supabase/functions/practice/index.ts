@@ -1,6 +1,6 @@
 // Edge Function "practice": prática fora do cronograma.
 //   {action:'filters', kind:'geral'|'materias'|'assuntos'|'bancas', q?, materia?} → listas de filtros (gratuitas)
-//   {action:'search', filters:{materia, assunto?, banca?, ano?, dificuldade?, orgao?, cargo?, tipo?, onlyNew?, fonte?}, count}
+//   {action:'search', filters:{materia, assuntos?: string[] (qualquer um; ou assunto), banca?, ano?, dificuldade?, orgao?, cargo?, tipo?, onlyNew?, fonte?}, count}
 //   {action:'by_id', qid}              → uma questão pelo id da API (do cache, se já veio; sem gabarito)
 //   {action:'review', count}           → questões do caderno de erros que vencem hoje (do cache, sem créditos)
 //   {action:'simulado_create', kind:'concurso'|'custom', planId?, taskId?, size?, subjects?, banca?, tipo?, timed, minutes?}
@@ -14,6 +14,8 @@ import { interleave, mapSubject, MEDIUM_OR_HARD, pickBoard, QMAP_PROMPT_VERSION,
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { activePlan, cacheQuestions, ensureCarreiras, fromCache, mapDeps, publicQuestion, questFailure, recordAnswer, takeNewest, withStatus, type PublicQuestion } from '../_shared/qbank.ts';
 
+const MAX_FREE_ASSUNTOS = 10;
+const PARAM_ORDER = ['materia', 'assunto', 'banca', 'ano', 'orgao', 'cargo', 'tipo', 'dificuldade'];
 const str = (v: unknown, n = 160) => String(v ?? '').trim().slice(0, n);
 const hash = (s: string) => { let h = 0; for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) >>> 0; return h.toString(36); };
 // "mínimo de 50% de acertos" → 50.
@@ -61,7 +63,9 @@ Deno.serve(async (req) => {
     if (body.action === 'search') {
       const f = body.filters ?? {};
       const params: Record<string, string> = {};
-      for (const k of ['materia', 'assunto', 'banca', 'ano', 'orgao', 'cargo', 'tipo'] as const) if (str(f[k], 200)) params[k] = str(f[k], 200);
+      for (const k of ['materia', 'banca', 'ano', 'orgao', 'cargo', 'tipo'] as const) if (str(f[k], 200)) params[k] = str(f[k], 200);
+      // Vários assuntos valem como OU. A Quest API filtra um assunto por busca: o pedido é dividido entre eles.
+      const assuntos = [...new Set((Array.isArray(f.assuntos) ? f.assuntos as unknown[] : [f.assunto]).map((a) => str(a, 200)).filter(Boolean))].slice(0, MAX_FREE_ASSUNTOS);
       if (Number(f.dificuldade) >= 1 && Number(f.dificuldade) <= 5) params.dificuldade = String(Number(f.dificuldade));
       if (!params.materia) return json(400, { error: 'Escolha ao menos a matéria.' });
       const count = Math.max(1, Math.min(20, Number(body.count) || 10));
@@ -71,25 +75,28 @@ Deno.serve(async (req) => {
       // fonte: 'propria' = só o banco próprio (apiQuestoes), sem ir à API; 'quest' = só a Quest API; vazio = as duas.
       const fonte = f.fonte === 'propria' || f.fonte === 'quest' ? f.fonte as 'propria' | 'quest' : undefined;
       const cached = await fromCache(admin, {
-        materia: params.materia, assunto: params.assunto, banca: params.banca, tipo: params.tipo, ano: params.ano, orgao: params.orgao, cargo: params.cargo,
+        materia: params.materia, assuntos, banca: params.banca, tipo: params.tipo, ano: params.ano, orgao: params.orgao, cargo: params.cargo,
         dificuldades: f.dificuldade === MEDIUM_OR_HARD ? SESSION_DIFFICULTIES : params.dificuldade ? [params.dificuldade] : undefined, fonte,
       }, count, (id) => !seen.has(id));
       for (const c of cached) seen.add(c.qid);
       const toBuy = fonte === 'propria' ? 0 : count - cached.length;
-      let items: QuestQuestion[] = [];
-      if (toBuy <= 0) items = [];
-      else if (f.dificuldade === MEDIUM_OR_HARD) {
-        // A API só aceita uma dificuldade por busca: divide o pedido entre elas, e a que faltar passa para as seguintes.
-        const lists: QuestQuestion[][] = [];
-        let left = toBuy;
-        for (const [i, dificuldade] of SESSION_DIFFICULTIES.entries()) {
-          const got = await fetchFresh('free', { ...params, dificuldade }, Math.ceil(left / (SESSION_DIFFICULTIES.length - i)), seen);
-          lists.push(got);
-          left -= got.length;
-          if (left <= 0) break;
-        }
-        items = interleave(lists);
-      } else items = await fetchFresh('free', params, toBuy, seen);
+      // A API só aceita um assunto e uma dificuldade por busca: divide o pedido entre as combinações, a que faltar passa
+      // para as seguintes, e o resultado vem intercalado (um de cada assunto por vez).
+      const { dificuldade: _d, ...base } = params;
+      const diffs = f.dificuldade === MEDIUM_OR_HARD ? SESSION_DIFFICULTIES : [params.dificuldade];
+      // Chaves na ordem de sempre: o cursor salvo de cada filtro é o hash deste objeto.
+      const ordered = (v: Record<string, string | undefined>) => Object.fromEntries(PARAM_ORDER.filter((k) => v[k]).map((k) => [k, v[k]!]));
+      const variants = (assuntos.length ? assuntos : [undefined]).flatMap((assunto) => diffs.map((dificuldade) => ordered({ ...base, assunto, dificuldade })));
+      const lists: QuestQuestion[][] = [];
+      let left = toBuy;
+      for (const [i, v] of variants.entries()) {
+        if (left <= 0) break;
+        const got = await fetchFresh('free', v, Math.ceil(left / (variants.length - i)), seen);
+        for (const q of got) seen.add(q.id);
+        lists.push(got);
+        left -= got.length;
+      }
+      const items = interleave(lists);
       await log('qbank_free', 'ok');
       const questions = [...cached, ...items.map(publicQuestion)];
       return json(200, { questions: await withStatus(admin, auth.user.id, questions), reason: questions.length ? null : 'esgotado' });

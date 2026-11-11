@@ -41,12 +41,13 @@ export const questFailure = (message: string, fallback: string) => (/Quest API .
 // O banco próprio (apiQuestoes, qid "own-…") vem antes das da Quest, e a dificuldade não o filtra (a dele é só estimada
 // pela IA na classificação): a única preferência nele é a banca (`preferBanca`), depois as provas mais recentes.
 // Nas da Quest a dificuldade filtra; primeiro o mesmo órgão, a carreira, a banca e as mais recentes.
-export interface CacheFilter { materia: string; assunto?: string; dificuldades?: string[]; banca?: string; preferBanca?: string; preferOrgao?: string; preferCarreiras?: string[]; tipo?: string; ano?: string; minAno?: number; orgao?: string; cargo?: string; fonte?: 'propria' | 'quest' }
+export interface CacheFilter { materia: string; assunto?: string; assuntos?: string[]; dificuldades?: string[]; banca?: string; preferBanca?: string; preferOrgao?: string; preferCarreiras?: string[]; tipo?: string; ano?: string; minAno?: number; orgao?: string; cargo?: string; fonte?: 'propria' | 'quest' }
 export async function fromCache(admin: SupabaseClient, f: CacheFilter, want: number, isNew: (qid: string) => boolean): Promise<PublicQuestion[]> {
   if (want <= 0 || !f.materia) return [];
   const query = (own: boolean) => {
     let q = admin.from('qbank_questions').select('qid, payload').eq('materia', f.materia);
     if (f.assunto) q = q.eq('assunto', f.assunto);
+    else if (f.assuntos?.length) q = q.in('assunto', f.assuntos); // vários assuntos: qualquer um deles (OU)
     if (f.banca) q = q.eq('payload->prova->>banca', f.banca);
     if (f.tipo) q = q.ilike('payload->>tipo', f.tipo);
     if (f.ano) q = q.eq('payload->prova->>ano', f.ano);

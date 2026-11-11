@@ -701,6 +701,8 @@ a.task-title:hover { color: var(--cyan); }
 .chips-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .chip-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-2); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
 .chip-btn.on, .chip-btn:hover { color: var(--text); border-color: var(--cyan); }
+.assuntos-field { display: grid; gap: 8px; }
+.assuntos-field .chip-btn { padding: 4px 10px; font-size: 12.5px; text-align: left; }
 .article-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .article-peek { flex-basis: 100%; padding: 14px; border-radius: 12px; background: var(--well); border: 1px solid color-mix(in srgb, var(--cyan) 35%, transparent); line-height: 1.6; }
 .article-peek header { display: flex; justify-content: space-between; margin-bottom: 6px; }

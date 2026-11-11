@@ -65,6 +65,27 @@ function MateriaField({ value, onChange, placeholder }: { value: string; onChang
   return <SearchSelect label="Matéria" value={value} options={options} loading={loading} placeholder={placeholder} onChange={onChange} onPick={onChange} onBlur={() => { if (value.trim()) onChange(resolveMateria(value, options)); }} />;
 }
 
+// Vários assuntos (OU): busca na lista da matéria, cada escolhido vira uma etiqueta removível. Vazio = todos.
+const MAX_ASSUNTOS = 10;
+const fold = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+function AssuntosField({ value, options, onChange }: { value: string[]; options: string[] | undefined; onChange: (list: string[]) => void }) {
+  const [text, setText] = useState('');
+  const q = fold(text.trim()), full = value.length >= MAX_ASSUNTOS;
+  const list = full ? [] : (options ?? []).filter((o) => !value.includes(o) && (!q || fold(o).includes(q))).slice(0, 60);
+  return (
+    <div className="assuntos-field">
+      <SearchSelect label="Assuntos" value={text} options={list} onChange={setText} onPick={(a) => { onChange([...value, a]); setText(''); }}
+        placeholder={!options ? 'Escolha a matéria primeiro' : full ? `Máximo de ${MAX_ASSUNTOS} assuntos` : value.length ? 'Adicionar outro assunto' : 'Todos · digite para escolher'} />
+      {value.length > 0 && (
+        <div className="chips-row">
+          {value.map((a) => <button key={a} className="chip-btn on" onClick={() => onChange(value.filter((x) => x !== a))} aria-label={`Remover ${a}`}>{a} <X size={13} /></button>)}
+          {value.length > 1 && <button className="chip-btn" onClick={() => onChange([])}>Limpar</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FreePractice({ noticeId }: { noticeId: string | undefined }) {
   const geral = useQuery({ queryKey: ['filtros-geral'], queryFn: () => filterLists.geral(), staleTime: Infinity });
   const mapped = useMappedMaterias(noticeId);
@@ -89,18 +110,16 @@ function FreePractice({ noticeId }: { noticeId: string | undefined }) {
       <div className="glass card filters">
         {!!mapped.data?.length && (
           <div className="chips-row"><span className="muted small">Matérias do seu concurso:</span>
-            {mapped.data.map((m) => <button key={m} className={'chip-btn' + (f.materia === m ? ' on' : '')} onClick={() => set({ materia: m, assunto: '' })}>{m}</button>)}
+            {mapped.data.map((m) => <button key={m} className={'chip-btn' + (f.materia === m ? ' on' : '')} onClick={() => set({ materia: m, assuntos: [] })}>{m}</button>)}
           </div>
         )}
         <div className="row">
           <div className="field"><span>Matéria</span>
-            <MateriaField value={f.materia} onChange={(materia) => set(materia === f.materia ? {} : { materia, assunto: '' })} placeholder="Digite para buscar (ex.: português, proc penal)" />
+            <MateriaField value={f.materia} onChange={(materia) => set(materia === f.materia ? {} : { materia, assuntos: [] })} placeholder="Digite para buscar (ex.: português, proc penal)" />
           </div>
-          <label className="field">Assunto
-            <select className="select" value={f.assunto ?? ''} onChange={(e) => set({ assunto: e.target.value })} disabled={!assuntos.data}>
-              <option value="">Todos</option>{assuntos.data?.items.map((a) => <option key={a} value={a}>{a}</option>)}
-            </select>
-          </label>
+          <div className="field"><span>Assuntos <span className="faint">(qualquer um dos escolhidos)</span></span>
+            <AssuntosField value={f.assuntos ?? []} options={assuntos.data?.items} onChange={(list) => set({ assuntos: list })} />
+          </div>
         </div>
         <div className="row">
           <div className="field"><span>Banca</span>

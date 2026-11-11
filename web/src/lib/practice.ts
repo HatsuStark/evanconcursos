@@ -20,7 +20,8 @@ async function invoke<T>(name: string, body: Record<string, unknown>): Promise<T
 const practice = <T,>(body: Record<string, unknown>) => invoke<T>('practice', body);
 
 // ---------- questões livres ----------
-export interface FreeFilters { materia: string; assunto?: string; banca?: string; ano?: string; dificuldade?: string; orgao?: string; cargo?: string; tipo?: string; onlyNew?: boolean; fonte?: '' | 'propria' | 'quest' }
+// assuntos: qualquer um deles (OU); vazio = todos.
+export interface FreeFilters { materia: string; assuntos?: string[]; banca?: string; ano?: string; dificuldade?: string; orgao?: string; cargo?: string; tipo?: string; onlyNew?: boolean; fonte?: '' | 'propria' | 'quest' }
 export const filterLists = {
   geral: () => practice<{ data: { anos?: (string | number)[]; dificuldades?: (string | number)[]; tiposQuestao?: string[] } }>({ action: 'filters', kind: 'geral' }),
   materias: (q: string) => practice<{ items: string[] }>({ action: 'filters', kind: 'materias', q }),
