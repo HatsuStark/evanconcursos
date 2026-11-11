@@ -131,7 +131,7 @@ export function ReviewCards({ taskId, title, sheet, onShowSheet, onGoQuestions }
               : <p className={c.type === 'trap' ? 'rc-trap-text' : 'rc-memo-text'}><Marked text={c.front} /></p>}
             {asksRecall(c.type) && (shown
               ? <div className="rc-answer"><Marked text={c.back ?? ''} /></div>
-              : <button className="rc-reveal" onClick={() => setShown(true)}>{c.type === 'cue' ? 'Do que a questão está falando?' : c.type === 'mnemo' ? 'Tente decifrar cada letra.' : 'Responda de cabeça.'} Toque para ver.</button>)}
+              : <button className="rc-reveal" onClick={() => setShown(true)}>{c.type === 'mnemo' ? 'Tente decifrar cada letra.' : 'Responda de cabeça.'} Toque para ver.</button>)}
           </div>
           {asksRecall(c.type) && !shown ? <div className="rc-hint">Espaço ou toque para revelar{idx > 0 ? ' · ← volta' : ''}</div>
             : asksRecall(c.type) ? <>

@@ -11,7 +11,9 @@ import { lawByKey, type LawEntry } from '../legal/registry.ts';
 export const GUIDE_PROMPT_VERSION = 'guide-v5';
 // Revisão curta com versão própria: folha de memorização (mapa mental, mnemônicos, gatilhos), sem texto corrido nem
 // questões. Mudar só a revisão não refaz as apostilas completas.
-export const REVIEW_PROMPT_VERSION = 'review-v2';
+// review-v3: a revisão é feita em cartões, um por vez. Gatilhos e perguntas viram perguntas diretas, com resposta que
+// começa pela conclusão; a pista solta ("vítima quer desistir da representação") era vaga sem o resto da folha.
+export const REVIEW_PROMPT_VERSION = 'review-v3';
 // Aprofundamento: para quem já estudou o tema; mesmo formato da completa, sem repetir o básico.
 export const DEEP_PROMPT_VERSION = 'deep-v2';
 export const guideVersion = (depth: GuideDepth) => (depth === 'revisao' ? REVIEW_PROMPT_VERSION : depth === 'aprofundamento' ? DEEP_PROMPT_VERSION : GUIDE_PROMPT_VERSION);
@@ -43,9 +45,9 @@ export const Guide = z.object({
     explicacao: z.string().describe('Como decifrar: cada letra ou palavra e o item que representa.'),
   })).describe('Mnemônicos para as listas e sequências do tema. Vazio se nada pede mnemônico.'),
   gatilhos: z.array(z.object({
-    pista: z.string().describe('Palavra ou situação que aparece no enunciado ("se a questão falar em…").'),
-    resposta: z.string().describe('O que lembrar na hora, em poucas palavras.'),
-  })).describe('Associações rápidas entre pistas do enunciado e a resposta.'),
+    pista: z.string().describe('Pergunta direta e completa sobre uma situação que aparece no enunciado, que se entende sozinha (ex.: "A vítima pode desistir da representação depois de oferecida a denúncia?").'),
+    resposta: z.string().describe('Começa pela conclusão (Sim, Não, o nome do instituto ou o número) e depois a regra em poucas palavras, com o artigo.'),
+  })).describe('Gatilhos de prova em forma de pergunta e resposta curta.'),
   pontos_banca: z.array(z.string()).describe('O que a banca mais cobra neste tema.'),
   pegadinhas: z.array(z.string()),
   resumo: z.array(z.string()).describe('Revisão em tópicos curtos.'),
@@ -251,10 +253,10 @@ const REVIEW_RULES = `- Revisão curta: nada de texto corrido nem questões de f
 - introducao: 1 frase. objetivos, secoes e questoes: vazios.
 - esquema: o mapa mental do tema, com 4 a ${L.esquema} ramos (topico = nome curto do ramo) e 2 a ${L.ramoItens} palavras-chave por ramo, de até 5 palavras cada. Os ramos seguem a lógica do tema (conceito, espécies, requisitos, exceções, prazos, consequências).
 - mnemonicos: 1 a ${L.mnemonicos}, só para listas, requisitos, ordens ou prazos que estejam nos trechos de lei ou no conteúdo do edital. Prefira siglas ou frases já usadas por concurseiros quando existirem; senão, crie uma curta e fácil de lembrar. A explicacao decifra cada letra ou palavra. Nunca force: sem lista ou sequência que peça mnemônico, deixe vazio.
-- gatilhos: 4 a ${L.gatilhos} associações rápidas entre uma pista que aparece no enunciado (só a pista, sem "se a questão falar em") e o que lembrar (ex.: pista "funcionário se apropria de bem que tem a posse em razão do cargo", resposta "peculato-apropriação").
+- gatilhos: 4 a ${L.gatilhos} situações típicas de enunciado, cada uma escrita como pergunta direta e completa, que o aluno entende sem ler o resto da revisão (cada gatilho aparece sozinho num cartão). A resposta começa pela conclusão e depois dá a regra em poucas palavras, com o artigo. Ex.: pista "A vítima pode desistir da representação depois de oferecida a denúncia?", resposta "Não. A representação é irretratável depois de oferecida a denúncia (CPP, art. 25)."; pista "Funcionário que se apropria de bem que tem a posse em razão do cargo comete qual crime?", resposta "Peculato-apropriação (CP, art. 312, caput)." Nunca uma pista solta, sem verbo ou sem pergunta.
 - memorizar: até ${L.memorizar} itens. quadros: 0 ou 1, enxuto. legislacao: até ${L.legislacao} artigos-chave, com comentário de 1 frase.
 - pontos_banca e pegadinhas: até ${L.pontos_banca} cada. resumo: 5 a ${L.resumo} tópicos.
-- perguntas: ${L.perguntas} perguntas de recordação ativa (o aluno tenta responder de cabeça), com resposta de 1 frase.`;
+- perguntas: ${L.perguntas} perguntas de recordação ativa (o aluno tenta responder de cabeça), específicas, com uma única resposta certa, e que se entendem sozinhas; resposta de 1 frase, começando pela conclusão.`;
 
 // format: formato predominante da banca na matéria ('certo e errado' ou múltipla escolha), para as questões de fixação.
 // duties/otherRoles: atribuições do cargo no edital e os outros cargos dele, para a apostila não descrever outro cargo.
