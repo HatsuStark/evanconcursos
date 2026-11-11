@@ -1,6 +1,10 @@
 // PDF.js configurado para o app: abre documentos e extrai o texto de cada página no navegador.
-import * as pdfjs from 'pdfjs-dist';
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+// Build "legacy": o normal do PDF.js 6 usa recursos que o Safari 18 (iOS 18) não tem (Map.getOrInsertComputed,
+// Math.sumPrecise); o legacy traz alternativas. Falta só o "for await" em ReadableStream, coberto por stream-iterator.ts
+// (no worker, o único uso tem alternativa própria). Quem importar o PDF.js no app usa este mesmo build.
+import './stream-iterator.ts';
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 

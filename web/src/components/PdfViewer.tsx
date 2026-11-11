@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Copy, Highlighter, Maximize2, Pencil, ZoomIn, ZoomOut } from 'lucide-react';
-import * as pdfjs from 'pdfjs-dist';
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { mergeRects, type MarkRect } from '../../../shared/domain/pdf-reading.ts';
 import { addMaterialNotes, deleteMaterialNote, updateMaterialNote, useMaterialNotes, type MaterialNote, type NoteColor } from '../lib/materials.ts';
