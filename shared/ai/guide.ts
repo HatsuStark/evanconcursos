@@ -345,7 +345,13 @@ export const titleKeys = (title: string) => [...new Set(norm(title.replace(/\([^
 export const lawKeys = (law: GuideSource[], juris: GuideSource[] = []) => [...new Set([...law, ...juris].map((l) => l.ref))].sort();
 
 // Tema que depende do cargo (atribuições, rotina, funções): a apostila é do cargo e não serve para outro, mesmo com o mesmo tema.
-export const roleSpecific = (p: { title?: string; topics: string[] }) => /atribui|do cargo|da fun[cç][aã]o|rotina funcional/i.test([p.title ?? '', ...p.topics].join(' '));
+// "Atribuições" de instituição ou autoridade (do STF, do Presidente, do Ministério Público) e "da função jurisdicional" são
+// conteúdo comum: antes contavam como tema do cargo, e os vídeos exigiam o nome do cargo no título (só vinham vídeos
+// genéricos sobre o cargo).
+const ROLE_INST = 'stf|stj|tst|tse|stm|tcu|tce|cnj|cnmp|agu|cvm|supremo|superior|tribunal|tribunais|congresso|senado|camara|presidente|vice|ministerio|ministro|conselho|poder|poderes|uniao|estados?|municipios?|distrito|defensoria|advocacia|procuradoria|policia|juiz|juizes|magistrad[a-z]*|delegad[a-z]*|orgaos?|entes?|agencias?|autoridades?|banco|comissao|comissoes|mesa|governador|prefeito|justica|forcas';
+const ROLE_LINK = 'd[oa]s?|e|a[os]?|conferidas?|constitucionais|institucionais|legais|privativas?|exclusivas?|competencias?|responsabilidades';
+const ROLE_TOPIC = new RegExp(String.raw`\b(?:do|ao|d?esse|d?este|seu) cargo\b|rotina funcional|\batribuic(?:ao|oes)\b(?!(?: (?:${ROLE_LINK}))+ (?:${ROLE_INST})\b)`);
+export const roleSpecific = (p: { title?: string; topics: string[] }) => ROLE_TOPIC.test(norm([p.title ?? '', ...p.topics].join(' ')));
 
 // Jurisprudência só entra na chave quando há (apostila de nível superior): as chaves das demais não mudam.
 export function guideCacheKey(p: { depth: GuideDepth; subject: string; title?: string; topics: string[]; law: GuideSource[]; juris?: GuideSource[]; fontes?: GuideSource[]; banca: string; cargo?: string }) {

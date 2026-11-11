@@ -78,6 +78,23 @@ describe('reaproveitamento de apostilas', () => {
   });
 });
 
+describe('roleSpecific', () => {
+  const r = (title: string, topics: string[] = []) => roleSpecific({ title, topics });
+  it('reconhece tema do cargo', () => {
+    expect(r('Atribuições do Cargo: rotina funcional')).toBe(true);
+    expect(r('Conhecimentos específicos', ['Principais atribuições do cargo.'])).toBe(true);
+    expect(r('Rotina de trabalho', ['Atribuições e responsabilidades no atendimento ao público.'])).toBe(true);
+    expect(r('Funções e deveres deste cargo')).toBe(true);
+  });
+  it('não confunde com atribuições de instituição nem com função jurisdicional', () => {
+    expect(r('Jurisdição e competência (parte 3 de 4): CPC, arts. 952 a 959; CF, arts. 102, 105', ['Jurisdição: conceito, princípios e características da função jurisdicional.', 'Competência e atribuições do STF e do STJ.'])).toBe(false);
+    expect(r('Poder Executivo', ['Atribuições do Presidente da República.'])).toBe(false);
+    expect(r('Funções essenciais à Justiça', ['Ministério Público: princípios, garantias e atribuições constitucionais do Ministério Público.'])).toBe(false);
+    expect(r('Organização administrativa', ['Atribuições dos órgãos da administração direta.'])).toBe(false);
+    expect(r('Lei 8.112/1990', ['Provimento, vacância, remoção, redistribuição e substituição. Acumulação de cargos.'])).toBe(false);
+  });
+});
+
 describe('cargo nas apostilas', () => {
   const t = { ...base, title: 'Atribuições do Cargo: rotina funcional', topics: ['Principais atribuições do cargo.'] };
   it('tema do cargo não é reaproveitado entre cargos; tema comum é', () => {
