@@ -128,6 +128,9 @@
 }
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100%; }
+/* Sem o ajuste automático de letra do Safari (iPhone): no modo "site de computador" ele aumentava blocos de texto, a
+   página mudava de altura e ele ajustava de novo, sem parar (as alternativas das questões tremiam). */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body {
   margin: 0;
   color: var(--text);
