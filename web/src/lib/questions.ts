@@ -28,6 +28,23 @@ async function call<T>(body: Record<string, unknown>): Promise<T> {
 // exclude: questões já mostradas (a revisão semanal tira delas os próximos erros).
 // batch: tamanho previsto do lote quando se pede menos para abrir mais rápido (o aquecimento é dimensionado por ele).
 export const nextQuestions = (taskId: string, count = 5, exclude: string[] = [], batch = count) => call<NextResult>({ action: 'next', taskId, count, exclude, batch });
+
+// Primeira busca da tarefa adiantada ao abrir a tela de estudo (a busca leva de 5 a 30 s): quando o estudante chega à aba
+// Questões, ela já veio ou está a caminho. Vale uma vez e por 10 min; falha ou sobra vencida cai na busca normal.
+const PREFETCH_TTL_MS = 10 * 60_000;
+const prefetched = new Map<string, { at: number; result: Promise<NextResult> }>();
+export function prefetchQuestions(taskId: string) {
+  const p = prefetched.get(taskId);
+  if (p && Date.now() - p.at < PREFETCH_TTL_MS) return;
+  const result = nextQuestions(taskId, 1, [], 5);
+  result.catch(() => prefetched.delete(taskId));
+  prefetched.set(taskId, { at: Date.now(), result });
+}
+export function takePrefetched(taskId: string): Promise<NextResult> | null {
+  const p = prefetched.get(taskId);
+  prefetched.delete(taskId);
+  return p && Date.now() - p.at < PREFETCH_TTL_MS ? p.result : null;
+}
 // Resposta corrigida direto no banco (answer_question): uma ida e volta, sem passar pela Edge Function.
 // sessionId: questão de aquecimento, que conta para a sessão anterior.
 export async function answerQuestion(taskId: string | null, qid: string, chosen: string, context: 'plan' | 'free' | 'review' = 'plan', sessionId?: string) {

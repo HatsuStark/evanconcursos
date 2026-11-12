@@ -35,6 +35,11 @@ const RELEVANCE_ROUNDS = 3;
 // Questões inéditas da IA levam até ~55 s (casos concretos, com questões reais de modelo): só começam se ainda houver tempo
 // antes do limite da função (150 s): 60 s de busca + 75 s de geração.
 const GENERATE_BEFORE_MS = 60_000, GENERATE_TIMEOUT_MS = 75_000;
+// Pedido sem questão que espera a geração de outro pedido do mesmo tema: confere a cada 3 s. Trava mais velha que o limite
+// da função é de pedido que morreu sem soltar.
+const GENERATE_POLL_MS = 3_000, LOCK_STALE_MS = 150_000;
+// Do cache (sem créditos) vem mais do que falta: a triagem descarta parte, e repor custa outra rodada inteira (~5 s).
+const cacheWant = (n: number) => Math.max(n * 2, n + 2);
 // Aquecimento: questões da sessão anterior no começo de uma sessão nova.
 const WARMUP_QUESTIONS = 3;
 // Parte seguinte de um tema: até 5 da parte anterior, nunca mais da metade das questões do dia.
@@ -300,7 +305,11 @@ Deno.serve(async (req) => {
         return qs;
       }
     };
-    const generated = async (n: number): Promise<PublicQuestion[]> => {
+    // Geração deixada para depois da resposta (o estudante já tem questão na tela): registrada à parte, com o tempo dela.
+    let background: Promise<void> | null = null;
+    // background: com questão para mostrar, as inéditas da IA (~55 s) são geradas depois da resposta; o pedido seguinte as
+    // reaproveita. Sem nenhuma, o pedido espera: a geração dele ou a de outro pedido do mesmo tema (trava por tema).
+    const generated = async (n: number, inBackground: boolean): Promise<PublicQuestion[]> => {
       const { data: nt } = await auth.client.from('notices').select('board, role_name, role_duties, structure').eq('id', subject.notice_id).single();
       const cargo = String(nt?.role_name ?? '');
       // Específicas e tema sobre o cargo: as questões de um cargo não servem a outro.
@@ -308,14 +317,59 @@ Deno.serve(async (req) => {
       // Só as da versão atual do prompt: as antigas saíam genéricas demais. Tema que cita artigos de lei conhecida só
       // reaproveita as feitas com o texto oficial (antes de a norma entrar na base, a IA escrevia de memória).
       const grounded = !!storedLawRefs(sess!.law_refs) || findLawRefs(sess!.title, subject.name, await ownLaws(admin, auth.user.id)).some((r) => r.ranges.length);
-      let madeQuery = admin.from('qbank_questions').select('payload').eq('payload->>ia_tema', theme).eq('payload->>ia_versao', GENERATED_PROMPT_VERSION);
-      if (grounded) madeQuery = madeQuery.gt('payload->ia_fontes', 0);
-      const { data: made } = await madeQuery.limit(200);
-      // As feitas antes da marca de destaque e que falam em termo destacado não têm como ser respondidas: ficam de fora.
-      const all = (made ?? []).map((r) => r.payload as PublicQuestion).filter((q) => !missingMark(q.enunciado));
-      const reuse = all.filter((q) => !seen.has(q.qid)).slice(0, n);
-      for (const q of reuse) seen.add(q.qid);
+      const madeAll = async () => {
+        let madeQuery = admin.from('qbank_questions').select('payload').eq('payload->>ia_tema', theme).eq('payload->>ia_versao', GENERATED_PROMPT_VERSION);
+        if (grounded) madeQuery = madeQuery.gt('payload->ia_fontes', 0);
+        const { data: made } = await madeQuery.limit(200);
+        // As feitas antes da marca de destaque e que falam em termo destacado não têm como ser respondidas: ficam de fora.
+        return (made ?? []).map((r) => r.payload as PublicQuestion).filter((q) => !missingMark(q.enunciado));
+      };
+      const pick = (all: PublicQuestion[]) => {
+        const reuse = all.filter((q) => !seen.has(q.qid)).slice(0, n);
+        for (const q of reuse) seen.add(q.qid);
+        return reuse;
+      };
+      const all = await madeAll();
+      const reuse = pick(all);
       if (reuse.length >= n) return reuse;
+      // Outro pedido já gera este tema: com questão na tela, segue sem esperar; sem nenhuma, espera as dele.
+      if (!await lockTheme(theme)) {
+        if (inBackground || reuse.length) return reuse;
+        while (Date.now() - started < GENERATE_BEFORE_MS + GENERATE_TIMEOUT_MS) {
+          await new Promise((r) => setTimeout(r, GENERATE_POLL_MS));
+          const got = pick(await madeAll());
+          if (got.length) return got;
+          const { data: lock } = await admin.from('qbank_generation_locks').select('theme').eq('theme', theme).maybeSingle();
+          if (!lock) return pick(await madeAll());
+        }
+        timedOut = true;
+        return [];
+      }
+      const job = create(all, n - reuse.length, inBackground ? genUsage : usage, nt, cargo, theme)
+        .finally(() => admin.from('qbank_generation_locks').delete().eq('theme', theme).then(() => {}, () => {}));
+      if (inBackground) {
+        const t0 = Date.now();
+        background = job.then(() => logUsage(admin, {
+          ownerId: auth.user.id, operation: 'qbank_generate', model, promptVersion: GENERATED_PROMPT_VERSION,
+          usage: genUsage.inputTokens ? genUsage : null, latencyMs: Date.now() - t0, status: 'ok',
+        })).catch(() => {});
+        return reuse;
+      }
+      const fresh = (await job).slice(0, n - reuse.length);
+      for (const q of fresh) seen.add(q.qid);
+      return [...reuse, ...fresh];
+    };
+    const genUsage: GeminiUsage = { inputTokens: 0, outputTokens: 0, thinkingTokens: 0 };
+    // Trava do tema: livre, ou presa há mais que o limite da função (pedido que morreu sem soltar).
+    const lockTheme = async (theme: string) => {
+      const { error } = await admin.from('qbank_generation_locks').insert({ theme });
+      if (!error) return true;
+      const stale = new Date(Date.now() - LOCK_STALE_MS).toISOString();
+      const { data } = await admin.from('qbank_generation_locks').update({ started_at: new Date().toISOString() }).eq('theme', theme).lt('started_at', stale).select('theme');
+      return !!data?.length;
+    };
+    // Gera um lote de inéditas e grava no banco (servem a este pedido, ao próximo e a outros estudantes do mesmo tema).
+    const create = async (all: PublicQuestion[], missing: number, u: GeminiUsage, nt: { board?: unknown; role_duties?: unknown; structure?: unknown } | null, cargo: string, theme: string): Promise<PublicQuestion[]> => {
       try {
         const { data: ss } = await auth.client.from('study_sessions').select('topic_ids').eq('id', sid).single();
         const { data: tt } = ss?.topic_ids?.length ? await auth.client.from('notice_topics').select('id, text').in('id', ss.topic_ids) : { data: [] };
@@ -336,22 +390,20 @@ Deno.serve(async (req) => {
           return { enunciado: q.enunciado, alternativas: /certo/i.test(String(q.tipo ?? '')) ? [] : q.alternativas.map((a) => a.texto), gabarito: String(r.gabarito ?? ''), banca: q.prova?.banca ?? '' };
         });
         // Pelo menos 3 por vez: as que sobram servem ao próximo lote e a outros estudantes.
-        const k = Math.min(GENERATED_MAX, Math.max(3, n - reuse.length));
+        const k = Math.min(GENERATED_MAX, Math.max(3, missing));
         const r = await generateJson({ apiKey, model, schema: GeneratedQuestions, jsonSchema: generatedJsonSchema(), temperature: 0.5, timeoutMs: GENERATE_TIMEOUT_MS,
           parts: [{ text: generatedPrompt({ banca: String(nt?.board ?? ''), cargo, subject: subject.name, title: sess!.title, keyword: sess!.keyword ?? '',
             law, format, n: k, avoid: all.map((q) => plain(q.enunciado)).slice(-15), examples,
             guide: guide ? guideDigest(guide.content) : '', duties: String(nt?.role_duties ?? ''), otherRoles: ((nt?.structure as { otherRoles?: string[] } | null)?.otherRoles ?? []).map(String) }) }] });
-        usage.inputTokens += r.usage.inputTokens; usage.outputTokens += r.usage.outputTokens; usage.thinkingTokens += r.usage.thinkingTokens;
+        u.inputTokens += r.usage.inputTokens; u.outputTokens += r.usage.outputTokens; u.thinkingTokens += r.usage.thinkingTokens;
         const rows = arrangeBatch(r.data.questoes).map((q) => toPublic(q, {
           qid: `ia-${crypto.randomUUID()}`, format, materia: filter.materia ?? subject.name, assunto: filter.assuntos[0] ?? sess!.title, theme, year: new Date().getFullYear(), sources: law.length,
         })).filter((x) => x !== null);
         if (rows.length) await admin.from('qbank_questions').insert(rows.map((x) => ({ qid: x.payload.qid, materia: x.payload.materia, assunto: x.payload.assunto, payload: x.payload, gabarito: x.gabarito })));
-        const fresh = rows.map((x) => x.payload as unknown as PublicQuestion).slice(0, n - reuse.length);
-        for (const q of fresh) seen.add(q.qid);
-        return [...reuse, ...fresh];
+        return rows.map((x) => x.payload as unknown as PublicQuestion);
       } catch (e) {
         console.error('generated:', e);
-        return reuse;
+        return [];
       }
     };
     let timedOut = false;
@@ -425,24 +477,26 @@ Deno.serve(async (req) => {
       for (const a of planPicks(liveIncidence, served, need)) wanted.set(a, (wanted.get(a) ?? 0) + 1);
       const cached: PublicQuestion[] = [];
       const isNewCached = (id: string) => !seen.has(id) && !cached.some((c) => c.qid === id);
+      // Com triagem, o cache traz sobra (sem créditos): o descarte não obriga outra rodada.
+      const extra = (n: number) => (sess ? cacheWant(n) : n);
       // A dificuldade alterna a cada questão e continua de onde parou na sessão.
       let turn = [...served.values()].reduce((a, b) => a + b, 0);
       // Antes de tudo, o banco próprio: as da banca do edital e depois as das outras, sem filtro de dificuldade (a dele é
       // estimada). Só o que faltar vem da Quest (cache e API), com a dificuldade da sessão; por último, a IA.
       for (const [assunto, n] of wanted) {
         if (n <= 0) continue;
-        const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, tipo, minAno: recentMinYear(materiaOf(filter, assunto)), preferBanca: banca, fonte: 'propria' }, n, isNewCached);
+        const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, tipo, minAno: recentMinYear(materiaOf(filter, assunto)), preferBanca: banca, fonte: 'propria' }, extra(n), isNewCached);
         cached.push(...got);
         mark(`cache:propria:${got.length}`);
-        wanted.set(assunto, n - got.length);
+        wanted.set(assunto, Math.max(0, n - got.length));
       }
       for (const board of banca ? [true, false] : [false]) {
         for (const [assunto, n] of wanted) {
           if (n <= 0 || timedOut) continue;
-          const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, dificuldades: diffs, tipo, minAno: recentMinYear(materiaOf(filter, assunto)), preferOrgao: narrow.orgao, preferCarreiras: carreiras, fonte: 'quest', ...(board ? { banca } : { preferBanca: banca }) }, n, isNewCached);
+          const got = await fromCache(admin, { materia: materiaOf(filter, assunto)!, assunto, dificuldades: diffs, tipo, minAno: recentMinYear(materiaOf(filter, assunto)), preferOrgao: narrow.orgao, preferCarreiras: carreiras, fonte: 'quest', ...(board ? { banca } : { preferBanca: banca }) }, extra(n), isNewCached);
           cached.push(...got);
           mark(`cache:${board ? 'banca' : 'outras'}:${got.length}`);
-          let left = n - got.length;
+          let left = Math.max(0, n - got.length);
           const fs = live.filter((x) => x.assunto === assunto && x.board === board);
           for (; left > 0 && fs.length && !timedOut; left--, turn++) {
             const before = out.length;
@@ -475,12 +529,14 @@ Deno.serve(async (req) => {
       ...result.slice(opening).map((q) => q.qid),
     ];
     const room = generatedRoom({ missing: count - result.length, sessionQids: [...new Set(sessionQids)], apiDry: apiDry || result.length === opening });
-    if (sess && room > 0 && Date.now() - started < GENERATE_BEFORE_MS) { result.push(...await generated(room)); mark(`ia:${room}`); }
+    if (sess && room > 0 && Date.now() - started < GENERATE_BEFORE_MS) { result.push(...await generated(room, result.length > 0)); mark(`ia:${room}`); }
     // O registro de uso fica para depois da resposta: o estudante não espera por ele.
     EdgeRuntime.waitUntil(log('qbank_fetch', 'ok').catch(() => {}));
+    if (background) EdgeRuntime.waitUntil(background);
     // As questões do começo da tarefa (aquecimento, erros do tema) vêm todas, mesmo pedindo 1: saem do banco, na hora, e não
-    // voltariam depois, porque o pedido seguinte já não é o começo da tarefa.
-    const batch = await withStatus(admin, auth.user.id, result.slice(0, Math.max(count, opening)));
+    // voltariam depois, porque o pedido seguinte já não é o começo da tarefa. As que sobraram do cache (já triadas, sem
+    // créditos) vêm junto até o lote previsto: são as próximas, sem outra ida ao servidor.
+    const batch = await withStatus(admin, auth.user.id, result.slice(0, Math.max(planned, opening)));
     mark('fim');
     return json(200, { questions: batch, filter: { materia: filter.materia, assuntos: filter.assuntos, how: filter.how }, reason: batch.length ? null : timedOut ? 'demorou' : 'esgotado-dificeis', ...(body.debug ? { timing: marks } : {}) });
   } catch (err) {

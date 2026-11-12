@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { questionById, reviewDue, searchFree, type FreeFilters } from '../lib/practice.ts';
 import {
-  answerQuestion, explainQuestion, loadNote, mnemonicFor, nextQuestions, optionsOf, saveNote,
+  answerQuestion, explainQuestion, loadNote, mnemonicFor, nextQuestions, optionsOf, saveNote, takePrefetched,
   type Explanation, type Mnemonic, type Question,
 } from '../lib/questions.ts';
 import { goalTone, questionScore, scoreGoal } from '../../../shared/domain/adaptive.ts';
@@ -75,7 +75,9 @@ export function QuestionsPanel({ source, goal = 0, answered = 0, paged = false }
       // Na revisão semanal, os erros já mostrados não voltam no mesmo lote.
       // Tarefa do cronograma: uma questão por vez (as do aquecimento vêm todas no começo). Enquanto o estudante responde
       // uma, chega só a seguinte: questão que ele não vai abrir não gasta créditos.
-      const r = source.kind === 'task' ? await nextQuestions(source.taskId, 1, queueRef.current.map((q) => q.qid), 5)
+      // A primeira pode já ter sido adiantada pela tela de estudo.
+      const pre = source.kind === 'task' && !queueRef.current.length ? takePrefetched(source.taskId) : null;
+      const r = source.kind === 'task' ? (pre && await pre.catch(() => null)) || await nextQuestions(source.taskId, 1, queueRef.current.map((q) => q.qid), 5)
         : source.kind === 'free' ? await searchFree(source.filters, Math.max(sizeRef.current, 5), queueRef.current.map((q) => q.qid))
         : source.kind === 'id' ? await questionById(source.qid)
         : { ...(await reviewDue(20)), reason: 'revisao' as string | null };

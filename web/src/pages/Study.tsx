@@ -22,6 +22,7 @@ import { fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
 import { missingNorms, sessionLawRefs, useOwnLaws } from '../lib/legal.ts';
 import { KIND_LABEL, setTaskDone } from '../lib/plans.ts';
 import { PRESETS, usePomodoro, type Preset } from '../lib/pomodoro.ts';
+import { prefetchQuestions } from '../lib/questions.ts';
 import { saveTimeSpent, useStudy, type StudyData } from '../lib/study.ts';
 
 const fmtClock = (s: number) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ':' : ''}${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -132,6 +133,11 @@ function StudyView({ d }: { d: StudyData }) {
   // Lei seca abre direto nos artigos.
   const [tab, setTab] = useState<TabKey>(d.task.kind === 'lei_seca' && tabs.some((t) => t.key === 'lei') ? 'lei' : tabs[0]!.key);
   const [videosOpened, setVideosOpened] = useState(false);
+  // Tarefa pendente com meta de questões, aberta em outra aba: a primeira busca começa já (leva de 5 a 30 s) e fica pronta
+  // para quando o estudante chegar às Questões. Aberta direto nas Questões, o próprio painel busca.
+  useEffect(() => {
+    if (tab !== 'questoes' && !d.task.done_at && d.task.goal_questions > 0 && d.task.kind !== 'simulado' && tabs.some((t) => t.key === 'questoes')) prefetchQuestions(d.task.id);
+  }, [d.task.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const floating = useAutoHide();
   const color = d.subjectIndex >= 0 ? subjectColor(d.subjectIndex) : 'var(--magenta)';
   // Meta e desempenho da tarefa: as questões de aquecimento (da sessão anterior) ficam de fora.

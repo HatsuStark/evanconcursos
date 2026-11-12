@@ -8,6 +8,7 @@ import { refreshOwnBank, useAdminOverview, useOwnBank, type AdminOverview } from
 // Nome de cada operação de IA registrada em ai_usage, como o admin reconhece.
 const OPERATIONS: Record<string, string> = {
   qbank_fetch: 'Busca de questões (cronograma)', qbank_free: 'Busca de questões (treino livre)', qbank_explain: 'Explicação de questão',
+  qbank_generate: 'Questões inéditas da IA (em segundo plano)',
   qbank_mnemonic: 'Mnemônico de questão', plan_sessions: 'Montagem do cronograma', plan_strategy: 'Estratégia do cronograma',
   study_guide: 'Apostilas', notice_extract: 'Leitura de edital', notice_roles: 'Cargos do edital', material_map: 'Mapa de PDF',
   hot_topics: 'O que mais cai', juris_picks: 'Jurisprudência', source_picks: 'Fontes', source_embed: 'Fontes (índice)',
