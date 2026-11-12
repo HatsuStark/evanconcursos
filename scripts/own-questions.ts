@@ -109,4 +109,6 @@ for (let i = 0; i < rows.length; i += BATCH) {
 }
 const { rows: [count] } = await db.query(`select count(*)::int as n from public.qbank_questions where qid like $1`, [`${OWN_PREFIX}%`]);
 console.log(`\nNo banco: ${count.n} questões próprias.`);
+// Retrato do banco próprio no painel do admin (leva uns 20 s).
+await db.query('select public.admin_refresh_own_bank()').then(() => console.log('Painel do admin atualizado.'), (e) => console.log(`Painel do admin não atualizado: ${(e as Error).message}`));
 await db.end();

@@ -1,8 +1,9 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { Inbox, RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Shell } from '../components/Shell.tsx';
-import { useAdminOverview, type AdminOverview } from '../lib/admin.ts';
+import { refreshOwnBank, useAdminOverview, useOwnBank, type AdminOverview } from '../lib/admin.ts';
 
 // Nome de cada operação de IA registrada em ai_usage, como o admin reconhece.
 const OPERATIONS: Record<string, string> = {
@@ -47,21 +48,107 @@ function DailyBars({ title, points, value, format }: { title: string; points: Ad
   );
 }
 
+// Lista de barras horizontais (contagem por categoria), com o número ao lado.
+function BarList({ title, items, label = (s) => s }: { title: string; items: { label: string; n: number }[]; label?: (s: string) => string }) {
+  const max = Math.max(1, ...items.map((i) => i.n)), total = items.reduce((s, i) => s + i.n, 0);
+  return (
+    <section className="glass card adm-chart">
+      <h3 style={{ margin: 0, fontSize: 14 }}>{title}</h3>
+      <div className="adm-hbars">{items.map((i) => (
+        <div key={i.label} className="adm-hbar" title={`${label(i.label)}: ${num(i.n)} (${pct(i.n / Math.max(1, total))})`}>
+          <span className="adm-hlabel">{label(i.label)}</span>
+          <span className="adm-htrack"><i style={{ width: `${(i.n / max) * 100}%` }} /></span>
+          <span className="adm-hval">{num(i.n)}</span>
+        </div>
+      ))}</div>
+    </section>
+  );
+}
+const DIFICULDADE: Record<string, string> = { 1: 'Muito fácil', 2: 'Fácil', 3: 'Média', 4: 'Difícil', 5: 'Muito difícil' };
+const TIPO: Record<string, string> = { 'multipla escolha': 'Múltipla escolha', 'certo e errado': 'Certo ou errado' };
+const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '–');
+
+// Banco próprio de questões (apiQuestoes): tamanho, cobertura e quanto os alunos usam.
+function OwnBank() {
+  const qc = useQueryClient();
+  const q = useOwnBank();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  async function refresh() {
+    setBusy(true); setError('');
+    try { qc.setQueryData(['admin-own-bank'], await refreshOwnBank()); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  }
+  if (q.isError) return <p className="error">{(q.error as Error).message}</p>;
+  if (!q.data) return <div className="spinner" />;
+  const s = q.data.snapshot, u = q.data.use30d;
+  return <>
+    <div className="adm-bar-top">
+      <span className="muted small">Retrato de {when(s?.computedAt)} · última importação {when(s?.lastImport)}</span>
+      <button className="btn ghost sm" disabled={busy} onClick={refresh}>{busy ? <><span className="spinner" /> Recalculando (uns 20 s)…</> : <><RefreshCw size={14} /> Recalcular</>}</button>
+      {error && <span className="error small">{error}</span>}
+    </div>
+    {s && <section className="adm-group">
+      <h2>Acervo</h2>
+      <div className="adm-tiles">
+        <Tile label="Questões próprias" value={num(s.total)} hint={`+ ${num(s.quest)} guardadas da Quest API`} />
+        <Tile label="Provas" value={num(s.provas)} />
+        <Tile label="Matérias" value={num(s.materias)} />
+        <Tile label="Assuntos" value={num(s.assuntos)} hint={s.semAssunto ? `${num(s.semAssunto)} questões sem assunto` : undefined} />
+        <Tile label="Com explicação da IA" value={num(s.explained)} hint="geradas quando o aluno pede" />
+      </div>
+    </section>}
+    <section className="adm-group">
+      <h2>Uso nos últimos 30 dias</h2>
+      <div className="adm-tiles">
+        <Tile label="Respostas no banco próprio" value={num(u.ownAnswers)} hint={`${pct(u.answers ? u.ownAnswers / u.answers : null)} de todas as ${num(u.answers)} respostas`} />
+        <Tile label="Acerto" value={pct(u.ownAccuracy)} />
+        <Tile label="Questões diferentes usadas" value={num(u.ownDistinct)} hint={s ? `${pct(u.ownDistinct / Math.max(1, s.total))} do acervo` : undefined} />
+        <Tile label="Alunos" value={num(u.ownUsers)} />
+      </div>
+    </section>
+    {s && <>
+      <div className="adm-charts">
+        <BarList title="Por banca (15 maiores)" items={s.byBanca} />
+        <BarList title="Por ano" items={[...s.byAno].reverse()} />
+        <BarList title="Por tipo" items={s.byTipo} label={(t) => TIPO[t] ?? t} />
+        <BarList title="Por dificuldade" items={s.byDificuldade} label={(d) => DIFICULDADE[d] ?? 'Sem dificuldade'} />
+      </div>
+      <section className="glass card">
+        <h3 style={{ marginTop: 0 }}>Matérias com mais questões (30 maiores)</h3>
+        <div className="guide-table">
+          <table className="sum-table adm-table">
+            <thead><tr><th>Matéria</th><th>Questões</th><th>Assuntos</th><th>Respondidas (30 dias)</th></tr></thead>
+            <tbody>{s.byMateria.map((m) => (
+              <tr key={m.label}><th scope="row">{m.label}</th><td>{num(m.n)}</td><td>{num(m.assuntos)}</td><td>{u.byMateria[m.label] ? num(u.byMateria[m.label]) : '–'}</td></tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </section>
+    </>}
+  </>;
+}
+
 // Painel do admin: quantos usam, o que usam e quanto custa. Só leitura; contas continuam pelo scripts/users.mjs.
 export function AdminPage() {
+  const [tab, setTab] = useState<'geral' | 'banco'>('geral');
   const [days, setDays] = useState(30);
   const q = useAdminOverview(days);
-  const o = q.data;
+  const o = tab === 'geral' ? q.data : undefined;
   return (
     <Shell title="Painel" subtitle="Uso e custo do app (só admin)">
       <div className="grid" style={{ gap: 14 }}>
-        <div className="adm-bar-top">
+        <div className="tabs" role="tablist">
+          <button role="tab" aria-selected={tab === 'geral'} className={'tab' + (tab === 'geral' ? ' on' : '')} onClick={() => setTab('geral')}>Visão geral</button>
+          <button role="tab" aria-selected={tab === 'banco'} className={'tab' + (tab === 'banco' ? ' on' : '')} onClick={() => setTab('banco')}>Banco próprio</button>
+          <Link className="btn ghost sm" style={{ marginLeft: 'auto' }} to="/relatos"><Inbox size={14} /> Relatos</Link>
+        </div>
+        {tab === 'banco' && <OwnBank />}
+        {tab === 'geral' && <div className="adm-bar-top">
           <div className="segmented">{PERIODS.map((p) => <button key={p} className={days === p ? 'on' : ''} onClick={() => setDays(p)}>{p} dias</button>)}</div>
           <button className="btn ghost sm" disabled={q.isFetching} onClick={() => q.refetch()}><RefreshCw size={14} /> Atualizar</button>
-          <Link className="btn ghost sm" to="/relatos"><Inbox size={14} /> Relatos</Link>
-        </div>
-        {q.isError && <p className="error">{(q.error as Error).message}</p>}
-        {!o && !q.isError && <div className="spinner" />}
+        </div>}
+        {tab === 'geral' && q.isError && <p className="error">{(q.error as Error).message}</p>}
+        {tab === 'geral' && !o && !q.isError && <div className="spinner" />}
         {o && <>
           <section className="adm-group">
             <h2>Usuários</h2>

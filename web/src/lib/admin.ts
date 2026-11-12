@@ -29,3 +29,28 @@ export const useAdminOverview = (days: number) => useQuery({
   },
   retry: false, staleTime: 60_000,
 });
+
+// Banco próprio de questões: retrato guardado (recalculado na importação ou pelo botão) e uso em 30 dias.
+interface Count { label: string; n: number }
+export interface OwnBankStats {
+  snapshot: null | {
+    total: number; quest: number; materias: number; assuntos: number; provas: number; semAssunto: number; explained: number;
+    lastImport: string | null; computedAt: string;
+    byBanca: Count[]; byAno: Count[]; byTipo: Count[]; byDificuldade: Count[]; byMateria: (Count & { assuntos: number })[];
+  };
+  use30d: { answers: number; ownAnswers: number; ownAccuracy: number | null; ownDistinct: number; ownUsers: number; byMateria: Record<string, number> };
+}
+async function adminCall<T>(body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke('admin', { body });
+  if (error) {
+    let msg = error.message;
+    try { msg = (await (error as { context?: Response }).context?.json())?.error ?? msg; } catch { /* sem JSON */ }
+    throw new Error(msg);
+  }
+  return data as T;
+}
+export const useOwnBank = () => useQuery({
+  queryKey: ['admin-own-bank'], retry: false, staleTime: 5 * 60_000,
+  queryFn: () => adminCall<OwnBankStats>({ action: 'ownBank' }),
+});
+export const refreshOwnBank = () => adminCall<OwnBankStats>({ action: 'refreshOwnBank' });

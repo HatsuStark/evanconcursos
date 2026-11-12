@@ -954,3 +954,9 @@ details.card summary { cursor: pointer; font-weight: 600; }
 .adm-bar:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
 .adm-axis { display: flex; justify-content: space-between; }
 .adm-table td { font-variant-numeric: tabular-nums; }
+.adm-hbars { display: grid; gap: 6px; }
+.adm-hbar { display: grid; grid-template-columns: minmax(80px, 38%) 1fr auto; gap: 8px; align-items: center; font-size: 13px; }
+.adm-hlabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.adm-htrack { height: 10px; border-radius: 5px; background: var(--surface-3); overflow: hidden; }
+.adm-htrack i { display: block; height: 100%; background: var(--cyan); border-radius: 0 4px 4px 0; opacity: .8; }
+.adm-hval { font-variant-numeric: tabular-nums; min-width: 48px; text-align: right; }
