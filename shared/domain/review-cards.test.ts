@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_CARDS, allReviewCards, asksRecall, buildReviewDeck, emptyMemory, rememberAnswers, suggestVerdict, type ReviewSheet } from './review-cards.ts';
+import { CLOZE_BLANK, MAX_CARDS, allReviewCards, clozeOf, asksRecall, buildReviewDeck, emptyMemory, rememberAnswers, suggestVerdict, type ReviewSheet } from './review-cards.ts';
 
 const sheet: ReviewSheet = {
   perguntas: [{ pergunta: 'Pena do peculato?', resposta: 'Reclusão de 2 a 12 anos e multa.' }],
@@ -26,7 +26,7 @@ describe('review cards', () => {
 
   it('puts a reading card after every two recall cards', () => {
     const types = buildReviewDeck(sheet).cards.map((c) => (asksRecall(c.type) ? 'a' : 'r')).join('');
-    expect(types).toBe('aaraarr');
+    expect(types).toBe('aaraara');
   });
 
   it('drops known cards, puts missed first and prefers unread reading cards', () => {
@@ -45,13 +45,30 @@ describe('review cards', () => {
     const mem = rememberAnswers(emptyMemory(), Object.fromEntries(all.filter((c) => asksRecall(c.type)).map((c) => [c.id, 'know' as const])));
     const deck = buildReviewDeck(sheet, mem);
     expect(deck.restarted).toBe(true);
-    expect(deck.cards.filter((c) => asksRecall(c.type))).toHaveLength(4);
+    expect(deck.cards.filter((c) => asksRecall(c.type))).toHaveLength(5);
     expect(rememberAnswers(mem, {}, true).known).toEqual([]);
   });
 
   it('caps the deck size', () => {
     const big: ReviewSheet = { gatilhos: Array.from({ length: 30 }, (_, i) => ({ pista: `p${i}`, resposta: `r${i}` })), memorizar: Array.from({ length: 10 }, (_, i) => `m${i}`) };
     expect(buildReviewDeck(big).cards).toHaveLength(MAX_CARDS);
+  });
+
+  it('blanks the number, fraction or highlighted term to memorize', () => {
+    expect(clozeOf('Pena: reclusão de 2 a 12 anos, e multa.')).toEqual({ front: `Pena: reclusão de ${CLOZE_BLANK}, e multa.`, back: 'Pena: reclusão de **2 a 12 anos**, e multa.' });
+    expect(clozeOf('Prazo de 15 dias úteis para contestar (art. 335).')?.front).toBe(`Prazo de ${CLOZE_BLANK} para contestar (art. 335).`);
+    expect(clozeOf('Emenda exige três quintos dos votos, em dois turnos.')?.back).toContain('**três quintos**');
+    expect(clozeOf('Quórum: maioria absoluta dos membros.')?.back).toContain('**maioria absoluta**');
+    expect(clozeOf('Depois, reduz a pena pela metade.')?.front).toBe(`Depois, reduz a pena pela ${CLOZE_BLANK}.`);
+    expect(clozeOf('A citação é **pessoal** em regra.')).toEqual({ front: `A citação é ${CLOZE_BLANK} em regra.`, back: 'A citação é **pessoal** em regra.' });
+    expect(clozeOf('Lei 8.112/90, art. 5º: requisitos para o cargo.')).toBeNull();
+    expect(clozeOf('Representação irretratável após a denúncia.')).toBeNull();
+  });
+
+  it('turns memorize items with something to blank into recall cards', () => {
+    const types = allReviewCards(sheet).map((c) => c.type);
+    expect(types.filter((t) => t === 'cloze')).toHaveLength(1);
+    expect(types.filter((t) => t === 'memo')).toHaveLength(1);
   });
 
   it('suggests a verdict from the score', () => {

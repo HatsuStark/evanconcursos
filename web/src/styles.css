@@ -559,6 +559,7 @@ a.task-title:hover { color: var(--cyan); }
 .rc-memo-text b, .rc-big b { color: var(--bold); }
 .rc-trap-text { border-left: 3px solid var(--orange); padding-left: 12px; }
 .rc-mn { font-size: 38px; font-weight: 700; letter-spacing: .12em; color: var(--lime); text-align: center; overflow-wrap: anywhere; }
+.rc-blank { display: inline-block; width: 4.5em; height: 1em; vertical-align: -0.15em; margin: 0 3px; border-bottom: 3px solid var(--bold); border-radius: 2px; }
 .rc-reveal { margin-top: auto; width: 100%; border: 1px dashed var(--line-2); border-radius: 14px; padding: 16px; background: var(--surface); color: var(--faint); font: inherit; font-size: 14px; cursor: pointer; }
 .rc-reveal:hover { border-color: var(--cyan); color: var(--text); }
 .rc-answer { margin-top: auto; border-radius: 14px; padding: 14px 16px; background: color-mix(in srgb, var(--cyan) 10%, var(--surface)); border: 1px solid color-mix(in srgb, var(--cyan) 40%, transparent); font-size: 16px; line-height: 1.55; animation: rc-in .2s ease-out; }

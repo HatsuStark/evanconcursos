@@ -2,29 +2,19 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ListChecks, RotateCcw, ScrollText } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { splitMarks } from '../../../shared/ai/marks.ts';
-import { asksRecall, buildReviewDeck, emptyMemory, rememberAnswers, suggestVerdict, type CardAnswer, type ReviewCardType, type ReviewMemory, type ReviewSheet, type ReviewVerdict } from '../../../shared/domain/review-cards.ts';
+import { CLOZE_BLANK, asksRecall, buildReviewDeck, rememberAnswers, suggestVerdict, type CardAnswer, type ReviewCardType, type ReviewMemory, type ReviewSheet, type ReviewVerdict } from '../../../shared/domain/review-cards.ts';
+import { loadReviewMemory, reviewSessionTracker, saveReviewMemory } from '../lib/reviewCards.ts';
 import { answerTheoryReview, useTaskTheoryReview } from '../lib/theoryReviews.ts';
 import { fmtDate } from './ui.tsx';
 
 const TAGS: Record<ReviewCardType, [string, string]> = {
-  recall: ['rc-recall', 'Tente lembrar'], cue: ['rc-cue', 'Gatilho de prova'], mnemo: ['rc-mnemo', 'Mnemônico'], memo: ['rc-memo', 'Para memorizar'], trap: ['rc-trap', 'Pegadinha'],
+  recall: ['rc-recall', 'Tente lembrar'], cue: ['rc-cue', 'Gatilho de prova'], mnemo: ['rc-mnemo', 'Mnemônico'], cloze: ['rc-memo', 'Complete'], memo: ['rc-memo', 'Para memorizar'], trap: ['rc-trap', 'Pegadinha'],
 };
 const VERDICTS: { v: ReviewVerdict; label: string }[] = [{ v: 'lembrei', label: 'Lembrei bem' }, { v: 'parcial', label: 'Lembrei em parte' }, { v: 'esqueci', label: 'Esqueci' }];
 
-// Memória por tarefa, neste aparelho: o que o aluno já sabe, o que não lembrou e o que já leu.
-const memKey = (taskId: string) => `review-cards:${taskId}`;
-function readMemory(taskId: string): ReviewMemory {
-  try {
-    const v = JSON.parse(localStorage.getItem(memKey(taskId)) ?? 'null');
-    if (v && Array.isArray(v.known) && Array.isArray(v.missed) && Array.isArray(v.seen)) return v;
-  } catch { /* armazenamento bloqueado ou valor inválido */ }
-  return emptyMemory();
-}
-function saveMemory(taskId: string, m: ReviewMemory) {
-  try { localStorage.setItem(memKey(taskId), JSON.stringify(m)); } catch { /* armazenamento bloqueado */ }
-}
-
 const Marked = ({ text }: { text: string }) => <>{splitMarks(text).map((p, i) => (p.bold ? <b key={i}>{p.text}</b> : <span key={i}>{p.text}</span>))}</>;
+// Frase com lacuna: o espaço em branco aparece como um traço destacado.
+const Blanked = ({ text }: { text: string }) => <>{text.split(CLOZE_BLANK).map((t, i) => <span key={i}>{i > 0 && <span className="rc-blank" aria-label="lacuna" />}{t}</span>)}</>;
 
 // Revisão curta em cartões: um por vez, com a resposta escondida nos de recordação. No fim, placar e o resultado da
 // revisão de teoria já sugerido.
@@ -33,8 +23,18 @@ export function ReviewCards({ taskId, title, sheet, onShowSheet, onGoQuestions }
 }) {
   const qc = useQueryClient();
   const due = useTaskTheoryReview(taskId);
-  const [round, setRound] = useState(0);
-  const deck = useMemo(() => buildReviewDeck(sheet, readMemory(taskId)), [sheet, taskId, round]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Memória do banco (o que já sabe, o que não lembrou, o que já leu). O baralho é montado ao carregar e ao recomeçar;
+  // gravar a memória no fim não troca os cartões na tela.
+  const memory = useRef<ReviewMemory | null>(null);
+  const [seed, setSeed] = useState(0);
+  useEffect(() => {
+    let off = false;
+    memory.current = null; setSeed(0);
+    void loadReviewMemory(taskId).then((m) => { if (!off) { memory.current = m; setSeed((x) => x + 1); } });
+    return () => { off = true; };
+  }, [taskId]);
+  const deck = useMemo(() => (seed && memory.current ? buildReviewDeck(sheet, memory.current) : null), [sheet, seed]);
+  const track = useRef(reviewSessionTracker(taskId));
   const [idx, setIdx] = useState(0);
   const [shown, setShown] = useState(false);
   const [answers, setAnswers] = useState<Record<string, CardAnswer>>({});
@@ -44,7 +44,7 @@ export function ReviewCards({ taskId, title, sheet, onShowSheet, onGoQuestions }
   const [error, setError] = useState('');
   const started = useRef(Date.now());
 
-  const cards = deck.cards, done = idx >= cards.length, c = cards[idx];
+  const cards = deck?.cards ?? [], done = idx >= cards.length, c = cards[idx];
   const asks = cards.filter((x) => asksRecall(x.type));
   const right = asks.filter((x) => answers[x.id] === 'know').length;
   const suggested = suggestVerdict(right, asks.length);
@@ -53,7 +53,15 @@ export function ReviewCards({ taskId, title, sheet, onShowSheet, onGoQuestions }
     if (!c) return;
     const next = { ...answers, [c.id]: a };
     setAnswers(next); setShown(false); setIdx(idx + 1);
-    if (idx + 1 >= cards.length) saveMemory(taskId, rememberAnswers(readMemory(taskId), next, deck.restarted));
+    const finished = idx + 1 >= cards.length, vals = asks.map((x) => next[x.id]);
+    track.current({
+      cards: cards.length, recallCards: asks.length, answered: Object.keys(next).length, remembered: vals.filter((v) => v === 'know').length,
+      missed: vals.filter((v) => v === 'again').length, durationS: (Date.now() - started.current) / 1000, completed: finished,
+    });
+    if (finished && memory.current) {
+      memory.current = rememberAnswers(memory.current, next, deck!.restarted);
+      void saveReviewMemory(taskId, memory.current).catch(() => {});
+    }
   }
   function back() {
     if (idx === 0) return;
@@ -61,7 +69,7 @@ export function ReviewCards({ taskId, title, sheet, onShowSheet, onGoQuestions }
     setAnswers(next); setShown(false); setIdx(idx - 1);
   }
   function restart() {
-    setRound(round + 1); setIdx(0); setShown(false); setAnswers({}); setVerdict(null); setSaved(null); setError(''); started.current = Date.now();
+    setSeed((x) => x + 1); track.current = reviewSessionTracker(taskId); setIdx(0); setShown(false); setAnswers({}); setVerdict(null); setSaved(null); setError(''); started.current = Date.now();
   }
   async function register() {
     if (!due.data) return;
@@ -103,6 +111,7 @@ export function ReviewCards({ taskId, title, sheet, onShowSheet, onGoQuestions }
     },
   };
 
+  if (!deck) return <div className="glass card" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> Preparando os cartões…</div>;
   if (!cards.length) return null;
   const minutes = Math.max(1, Math.round((Date.now() - started.current) / 60000));
   const estimate = Math.max(1, Math.round(cards.length * 12 / 60));
@@ -127,11 +136,12 @@ export function ReviewCards({ taskId, title, sheet, onShowSheet, onGoQuestions }
             {c.type === 'mnemo' ? <>
               <p className="rc-big"><Marked text={c.front || 'O que esta sigla resume?'} /></p>
               <div className="rc-mn">{c.mnemonic}</div>
-            </> : asksRecall(c.type) ? <p className="rc-big"><Marked text={c.front} /></p>
+            </> : c.type === 'cloze' ? <p className="rc-big"><Blanked text={c.front} /></p>
+              : asksRecall(c.type) ? <p className="rc-big"><Marked text={c.front} /></p>
               : <p className={c.type === 'trap' ? 'rc-trap-text' : 'rc-memo-text'}><Marked text={c.front} /></p>}
             {asksRecall(c.type) && (shown
               ? <div className="rc-answer"><Marked text={c.back ?? ''} /></div>
-              : <button className="rc-reveal" onClick={() => setShown(true)}>{c.type === 'mnemo' ? 'Tente decifrar cada letra.' : 'Responda de cabeça.'} Toque para ver.</button>)}
+              : <button className="rc-reveal" onClick={() => setShown(true)}>{c.type === 'mnemo' ? 'Tente decifrar cada letra.' : c.type === 'cloze' ? 'Complete de cabeça.' : 'Responda de cabeça.'} Toque para ver.</button>)}
           </div>
           {asksRecall(c.type) && !shown ? <div className="rc-hint">Espaço ou toque para revelar{idx > 0 ? ' · ← volta' : ''}</div>
             : asksRecall(c.type) ? <>
