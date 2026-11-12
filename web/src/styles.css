@@ -934,3 +934,23 @@ details.card summary { cursor: pointer; font-weight: 600; }
 @media (max-width: 720px) {
   :is(input, textarea, select):not([type="checkbox"], [type="radio"], [type="range"], [type="file"]) { font-size: 16px !important; }
 }
+
+/* Painel do admin */
+.adm-bar-top { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.adm-group { display: grid; gap: 10px; }
+.adm-group h2 { margin: 0; font-size: 16px; }
+.adm-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.adm-tile { display: grid; gap: 2px; align-content: start; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--line); }
+.adm-tile strong { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.adm-label { font-size: 12px; color: var(--muted); }
+.adm-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.adm-chart { display: grid; gap: 8px; min-width: 0; }
+.adm-chart-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.adm-chart-head h3 { margin: 0; font-size: 14px; }
+.adm-bars { display: flex; align-items: flex-end; gap: 2px; height: 120px; border-bottom: 1px solid var(--line); }
+.adm-bar { flex: 1; min-width: 0; height: 100%; display: flex; align-items: flex-end; padding: 0; border: 0; background: none; cursor: default; }
+.adm-bar i { display: block; width: 100%; background: var(--cyan); border-radius: 4px 4px 0 0; opacity: .75; }
+.adm-bar.on i, .adm-bar:focus-visible i { opacity: 1; }
+.adm-bar:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+.adm-axis { display: flex; justify-content: space-between; }
+.adm-table td { font-variant-numeric: tabular-nums; }

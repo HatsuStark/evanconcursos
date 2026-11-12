@@ -1,4 +1,4 @@
-import { Inbox, LogOut } from 'lucide-react';
+import { BarChart3, Inbox, LogOut } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useFeedbackList } from '../lib/feedback.ts';
@@ -100,7 +100,10 @@ export function AccountPage() {
           {saved && <p className="muted" role="status" style={{ margin: 0 }}>Senha alterada.</p>}
         </section>
         {feedback.data && (
-          <Link className="btn ghost" to="/relatos"><Inbox size={16} /> Relatos de usuários{newCount ? ` (${newCount} novos)` : ''}</Link>
+          <>
+            <Link className="btn ghost" to="/admin"><BarChart3 size={16} /> Painel do admin</Link>
+            <Link className="btn ghost" to="/relatos"><Inbox size={16} /> Relatos de usuários{newCount ? ` (${newCount} novos)` : ''}</Link>
+          </>
         )}
         <button className="btn ghost" onClick={() => supabase.auth.signOut()}><LogOut size={16} /> Sair</button>
       </div>

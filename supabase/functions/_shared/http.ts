@@ -20,6 +20,8 @@ export const json = (status: number, body: unknown) => {
 
 const env = (k: string) => Deno.env.get(k) ?? '';
 const emails = (k: string) => env(k).split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+// Admin (relatos e painel): e-mails em ADMIN_EMAILS; sem ela, FEEDBACK_EMAIL (quem recebe os relatos).
+export const isAdmin = (email: string) => (emails('ADMIN_EMAILS').length ? emails('ADMIN_EMAILS') : emails('FEEDBACK_EMAIL')).includes(email.toLowerCase());
 
 // Teto diário de gasto com IA por usuário (USD, dia de São Paulo). E-mails em AI_UNLIMITED_EMAILS não têm teto.
 // Conta o custo do Gemini (ai_usage.cost_usd); créditos da Quest API não têm preço em dólar e ficam fora.

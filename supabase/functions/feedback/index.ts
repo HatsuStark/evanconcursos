@@ -1,7 +1,7 @@
 // Edge Function "feedback": recebe relato de bug ou sugestão do balão do app, grava em public.feedback e avisa por
 // e-mail (Resend) quando RESEND_API_KEY e FEEDBACK_EMAIL estão configurados. Sem eles, fica só no banco.
 // POST {kind: 'bug'|'sugestao'|'outro', message, page?, userAgent?} → {ok: true}
-import { adminClient, CORS, json, requireUser } from '../_shared/http.ts';
+import { adminClient, CORS, isAdmin, json, requireUser } from '../_shared/http.ts';
 
 const KINDS = { bug: 'Bug', sugestao: 'Sugestão', outro: 'Outro' } as const;
 const DAILY_LIMIT = 20;
@@ -24,8 +24,6 @@ async function sendEmail(subject: string, html: string, replyTo: string | undefi
   return res.ok;
 }
 
-// Admin: e-mails em ADMIN_EMAILS (padrão: FEEDBACK_EMAIL, quem recebe os relatos).
-const isAdmin = (email: string) => (env('ADMIN_EMAILS') || env('FEEDBACK_EMAIL')).split(',').map((e) => e.trim().toLowerCase()).filter(Boolean).includes(email.toLowerCase());
 const STATUSES = ['novo', 'resolvido', 'descartado'];
 
 // {action: 'list', status?} → {items} | {action: 'update', id, status?, note?} → {ok}

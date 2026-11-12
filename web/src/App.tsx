@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './lib/auth.tsx';
 import { AccountPage, FirstPasswordPage } from './pages/Account.tsx';
+import { AdminPage } from './pages/Admin.tsx';
 import { AuthPage } from './pages/Auth.tsx';
 import { DiscursivePage } from './pages/Discursive.tsx';
 import { FeedbackPage } from './pages/Feedback.tsx';
@@ -28,6 +29,7 @@ export function App() {
     <Routes>
       <Route path="/conta" element={<AccountPage />} />
       <Route path="/relatos" element={<FeedbackPage />} />
+      <Route path="/admin" element={<AdminPage />} />
       <Route path="/" element={<HomePage />} />
       <Route path="/concursos" element={<NoticesPage />} />
       <Route path="/concursos/novo" element={<NewNoticePage />} />
