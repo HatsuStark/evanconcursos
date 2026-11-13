@@ -326,13 +326,19 @@ export function unverifiedLawRefs(text: string, provided: ProvidedArticle[], sub
 export function verifyGuide(g: Guide, provided: ProvidedArticle[], subject = '', extra: LawEntry[] = [], juris: GuideJuris[] = []) {
   const refs = new Set(provided.map((p) => sourceRef(p.lawKey, p.label, extra).toLowerCase()));
   const legislacao = g.legislacao.filter((l) => refs.has(l.ref.trim().toLowerCase()));
-  const text = [
-    g.introducao, ...(g.objetivos ?? []), ...(g.esquema ?? []).flatMap((e) => [e.topico, ...e.itens]), ...g.secoes.flatMap((s) => [s.texto, ...s.exemplos, s.como_banca_cobra]),
-    ...(g.quadros ?? []).flatMap((q) => q.linhas.flat()), ...g.legislacao.map((l) => l.comentario), ...(g.memorizar ?? []), ...(g.mnemonicos ?? []).flatMap((m) => [m.alvo, m.mnemonico, m.explicacao]),
-    ...(g.gatilhos ?? []).flatMap((x) => [x.pista, x.resposta]), ...g.pontos_banca, ...g.pegadinhas, ...g.resumo,
-    ...(g.questoes ?? []).flatMap((q) => [q.enunciado, ...q.alternativas, q.comentario]), ...g.perguntas.flatMap((q) => [q.pergunta, q.resposta]),
-  ].join('\n');
+  const text = guideCitationText(g);
   return { guide: { ...g, legislacao }, unverified: [...unverifiedLawRefs(text, provided, subject, extra), ...unverifiedPrecedents(text, juris)], droppedRefs: g.legislacao.length - legislacao.length };
+}
+
+// Todo o texto da apostila em que pode haver citação de artigo (a conferência e os artigos relacionados leem o mesmo).
+// Campos ausentes (apostilas antigas, revisão curta) contam como vazios.
+export function guideCitationText(g: Partial<Guide>) {
+  return [
+    g.introducao ?? '', ...(g.objetivos ?? []), ...(g.esquema ?? []).flatMap((e) => [e.topico, ...e.itens]), ...(g.secoes ?? []).flatMap((s) => [s.texto, ...(s.exemplos ?? []), s.como_banca_cobra ?? '']),
+    ...(g.quadros ?? []).flatMap((q) => q.linhas.flat()), ...(g.legislacao ?? []).map((l) => l.comentario), ...(g.memorizar ?? []), ...(g.mnemonicos ?? []).flatMap((m) => [m.alvo, m.mnemonico, m.explicacao]),
+    ...(g.gatilhos ?? []).flatMap((x) => [x.pista, x.resposta]), ...(g.pontos_banca ?? []), ...(g.pegadinhas ?? []), ...(g.resumo ?? []),
+    ...(g.questoes ?? []).flatMap((q) => [q.enunciado, ...q.alternativas, q.comentario]), ...(g.perguntas ?? []).flatMap((q) => [q.pergunta, q.resposta]),
+  ].join('\n');
 }
 
 // Chave de reaproveitamento: mesmo tema, mesmas fontes, mesma profundidade e versão do prompt.

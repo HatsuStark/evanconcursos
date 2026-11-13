@@ -8,8 +8,9 @@
 // Não há "gerar de novo" pelo estudante (economia de créditos): uma apostila existente é sempre reaproveitada.
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import type { z } from 'zod';
-import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide, guideCacheKey, GuideExtras, guideExtrasJsonSchema, GuideOutline, guideOutlineJsonSchema, GuideSections, guideSectionsJsonSchema, guideStage, mergeReviewHalves, reviewHalfJsonSchema, ReviewHalves, reviewStage, sectionGroups, textFromOutline, guidePracticeJsonSchema, GuidePractice, GuideText, guideTextJsonSchema, guideVersion, guidePrompt, MAX_GUIDE_FONTES, MAX_GUIDE_JURIS, mergeGuide, partialGuide, lawKeys, pickSimilarGuide, topicKeys, trimReview, unlistedLaws, verifyGuide, type BoardQuestion, type GuideDepth, type GuideJuris, type GuideSource } from '../../../shared/ai/guide.ts';
+import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide, guideCacheKey, GuideExtras, guideExtrasJsonSchema, GuideOutline, guideOutlineJsonSchema, GuideSections, guideSectionsJsonSchema, guideStage, mergeReviewHalves, reviewHalfJsonSchema, ReviewHalves, reviewStage, sectionGroups, textFromOutline, guidePracticeJsonSchema, GuidePractice, GuideText, guideTextJsonSchema, guideVersion, guidePrompt, MAX_GUIDE_FONTES, MAX_GUIDE_JURIS, mergeGuide, partialGuide, lawKeys, pickSimilarGuide, topicKeys, trimReview, unlistedLaws, verifyGuide, guideCitationText, type BoardQuestion, type GuideDepth, type GuideJuris, type GuideSource } from '../../../shared/ai/guide.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
+import { mergeRelated, outsideRefs, RELATED_PROMPT_VERSION, RelatedVerdicts, relatedJsonSchema, relatedPrompt, type RelatedArticle } from '../../../shared/ai/related.ts';
 import { QuestClient } from '../../../shared/qbank/client.ts';
 import { materiaOf, measureIncidence, QMAP_PROMPT_VERSION } from '../../../shared/qbank/map.ts';
 import { aiFor } from '../_shared/ai.ts';
@@ -228,6 +229,8 @@ async function generate(admin: Admin, ownerId: string, jobId: string, ctx: Guide
     await admin.from('ai_jobs').update({ status: 'succeeded', finished_at: new Date().toISOString() }).eq('id', jobId);
     // "+partes": escrita em partes (a chave do cache continua a da versão do prompt, para não refazer as apostilas já feitas).
     await logUsage(admin, { ownerId, jobId, operation: 'study_guide', model, promptVersion: `${guideVersion(input.depth)}${split || input.depth === 'revisao' ? '+partes' : ''}`, usage, latencyMs: Date.now() - started, status: 'ok' });
+    // Já com a apostila na tela: os artigos relacionados chegam em seguida.
+    if (wantsRelated(input.depth)) await ensureRelated(admin, ownerId, ctx, key).catch((e) => console.error('related:', e));
   } catch (err) {
     if (err instanceof GeminiError && err.usage) add(err.usage);
     // Prática falhou com o texto já gravado: a apostila fica só com o texto, sem esperar mais.
@@ -238,6 +241,53 @@ async function generate(admin: Admin, ownerId: string, jobId: string, ctx: Guide
     const message = err instanceof Error ? err.message : String(err);
     await admin.from('ai_jobs').update({ status: 'failed', finished_at: new Date().toISOString(), error: message.slice(0, 1000) }).eq('id', jobId);
     await logUsage(admin, { ownerId, jobId, operation: 'study_guide', model, promptVersion: guideVersion(input.depth), usage, latencyMs: Date.now() - started, status: 'error', error: message }).catch(() => {});
+  }
+}
+
+// Artigos relacionados (completa e aprofundamento): os citados fora dos trechos da sessão ganham o texto oficial e, da IA,
+// como complementam o tema, ou o sinal de que a frase da apostila não confere com eles. Uma vez por apostila (gravado nela);
+// a trava é a própria coluna. Artigo fora da base de leis fica só com o aviso de conferir.
+const RELATED_RETRY_MS = 3600 * 1000;
+type RelatedState = RelatedArticle[] | { running?: string; failed?: string } | null | undefined;
+const wantsRelated = (depth: GuideDepth) => depth !== 'revisao';
+const relatedPending = (r: RelatedState) => !Array.isArray(r) && !(r?.failed && Date.now() - new Date(r.failed).getTime() < RELATED_RETRY_MS);
+
+async function ensureRelated(admin: Admin, ownerId: string, ctx: GuideContext, cacheKey: string) {
+  const now = Date.now(), stale = new Date(now - STUCK_MS).toISOString(), retry = new Date(now - RELATED_RETRY_MS).toISOString();
+  const { data: claimed } = await admin.from('study_guides').update({ related: { running: new Date(now).toISOString() } }).eq('cache_key', cacheKey)
+    .or(`related.is.null,related->>running.lt.${stale},related->>failed.lt.${retry}`).select('content').maybeSingle();
+  if (!claimed) return;
+  const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash', apiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
+  let usage: GeminiUsage | null = null;
+  try {
+    const refs = outsideRefs(guideCitationText(claimed.content as Guide), ctx.articles, ctx.input.subject, ctx.extra);
+    const items: { ref: string; context: string; text: string }[] = [];
+    const norms = new Map<string, string | null>();
+    for (const r of refs) {
+      const law = lawByKey(r.lawKey, ctx.extra);
+      if (!law) continue;
+      if (!norms.has(law.urn)) norms.set(law.urn, ((await admin.from('legal_norms').select('id').eq('urn', law.urn).limit(1).maybeSingle()).data?.id as string | undefined) ?? null);
+      const normId = norms.get(law.urn);
+      if (!normId) continue;
+      const { data: arts } = await admin.from('legal_articles').select('suffix, text').eq('norm_id', normId).eq('num', r.num).limit(5);
+      const art = (arts ?? []).find((a) => String(a.suffix ?? '') === r.suffix);
+      if (art?.text) items.push({ ref: r.ref, context: r.context, text: String(art.text) });
+    }
+    let related: RelatedArticle[] = [];
+    if (items.length) {
+      const res = await generateJson({ apiKey, model, schema: RelatedVerdicts, jsonSchema: relatedJsonSchema(), thinkingLevel: 'low', timeoutMs: 40_000,
+        parts: [{ text: relatedPrompt({ subject: ctx.input.subject, title: ctx.input.title }, items) }] });
+      usage = res.usage;
+      related = mergeRelated(items, res.data);
+    }
+    const { error } = await admin.from('study_guides').update({ related }).eq('cache_key', cacheKey);
+    if (error) throw new Error(error.message);
+    if (usage) await logUsage(admin, { ownerId, operation: 'guide_related', model, promptVersion: RELATED_PROMPT_VERSION, usage, latencyMs: Date.now() - now, status: 'ok' });
+  } catch (err) {
+    if (err instanceof GeminiError && err.usage) usage = err.usage;
+    const message = err instanceof Error ? err.message : String(err);
+    await admin.from('study_guides').update({ related: { failed: new Date().toISOString() } }).eq('cache_key', cacheKey);
+    await logUsage(admin, { ownerId, operation: 'guide_related', model, promptVersion: RELATED_PROMPT_VERSION, usage, latencyMs: Date.now() - now, status: 'error', error: message }).catch(() => {});
   }
 }
 
@@ -311,7 +361,12 @@ Deno.serve(async (req) => {
     // Revisões gravadas antes dos tetos também saem curtas.
     // Apostila só com o texto: a prática ainda está sendo escrita (`parcial`); geração parada não deixa a tela esperando.
     if (guide?.content?.parcial && !isRunning(await lastJob(admin, ctx.key))) guide.content = { ...guide.content, parcial: undefined };
-    if (guide) return json(200, { guide: depth === 'revisao' ? { ...guide, content: trimReview(guide.content) } : guide });
+    if (guide) {
+      // Apostila pronta sem os artigos relacionados (as antigas também): faz agora, e a tela espera por eles.
+      const pending = wantsRelated(depth) && !guide.content?.parcial && relatedPending(guide.related);
+      if (pending) EdgeRuntime.waitUntil(ensureRelated(admin, auth.user.id, ctx, guide.cache_key).catch((e) => console.error('related:', e)));
+      return json(200, { guide: depth === 'revisao' ? { ...guide, content: trimReview(guide.content) } : guide, relatedPending: pending });
+    }
     if (body.poll) {
       const job = await lastJob(admin, ctx.key);
       if (!isRunning(job) && job?.status !== 'succeeded') return json(502, { error: 'Não foi possível gerar a apostila agora.' });

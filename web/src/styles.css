@@ -590,6 +590,10 @@ a.task-title:hover { color: var(--cyan); }
 .guide-option.wrong { border-color: var(--orange); background: color-mix(in srgb, var(--orange) 10%, transparent); }
 .guide-examples { padding: 12px 14px; border-left: 3px solid var(--violet); background: color-mix(in srgb, var(--violet) 7%, transparent); border-radius: 8px; }
 .guide-examples p:last-child { margin: 0; }
+/* Artigos relacionados: o texto oficial fica recolhido. */
+.guide-related details { margin: 4px 0 8px; }
+.guide-related summary { cursor: pointer; color: var(--muted); }
+.guide-related .law-text { white-space: pre-line; margin: 6px 0 0; padding: 8px 12px; border-left: 3px solid var(--violet); background: color-mix(in srgb, var(--violet) 5%, transparent); border-radius: 6px; }
 .guide-board { margin-top: 12px; padding: 12px 14px; border-left: 3px solid var(--orange); background: color-mix(in srgb, var(--orange) 8%, transparent); border-radius: 8px; }
 .guide-board strong { display: flex; align-items: center; gap: 6px; color: var(--orange); font-size: 14px; }
 .guide-board p { margin: 4px 0 0; }

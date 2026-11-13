@@ -6,6 +6,7 @@ import { MindMap } from './MindMap.tsx';
 import { ReviewCards } from './ReviewCards.tsx';
 import { allReviewCards } from '../../../shared/domain/review-cards.ts';
 import { guideSpeech } from '../../../shared/ai/speech.ts';
+import { stillUnverified, type RelatedArticle } from '../../../shared/ai/related.ts';
 import { localVoiceSupported } from '../lib/piper.ts';
 import { supabase } from '../lib/supabase.ts';
 import { BROWSER_DEFAULT, CADU, RATES, useGuideVoice, voiceSupported } from '../lib/voice.ts';
@@ -26,24 +27,29 @@ interface GuideContent {
   parcial?: boolean; // ainda sendo escrita: chega em partes (roteiro, seções, quadros e lei, prática)
   pendentes?: number[]; // seções do roteiro ainda sendo escritas
 }
-interface GuideRow { content: GuideContent; sources: string[]; unlisted_sources: string[]; unverified: string[]; model: string; created_at: string; depth: string }
+// related: lista quando pronto; outro valor (null, em andamento, falhou) = ainda sem os artigos relacionados.
+interface GuideRow { content: GuideContent; sources: string[]; unlisted_sources: string[]; unverified: string[]; model: string; created_at: string; depth: string; related?: RelatedArticle[] | unknown }
+type Fetched = { guide: GuideRow; relatedPending: boolean };
+const relatedOf = (g: GuideRow | null) => (Array.isArray(g?.related) ? (g!.related as RelatedArticle[]) : []);
 
 const POLL_MS = 2500, GIVE_UP_MS = 3 * 60 * 1000; // igual ao da função: depois disso a geração foi interrompida
+// Artigos relacionados: uma chamada curta à IA depois da apostila pronta.
+const RELATED_POLL_MS = 4000, RELATED_GIVE_UP_MS = 60 * 1000;
 
 // Sem "gerar de novo" (economia de créditos): a apostila existente é sempre reaproveitada.
 // A geração roda em segundo plano no servidor; aqui só espera. null se a espera foi cancelada.
 // A apostila chega em partes (o roteiro em segundos, depois as seções): `onPartial` mostra o que já existe enquanto a espera continua.
-async function fetchGuide(taskId: string, depth: string, cancelled: () => boolean, onPartial: (g: GuideRow) => void) {
+async function fetchGuide(taskId: string, depth: string, cancelled: () => boolean, onPartial: (g: GuideRow) => void, poll = false): Promise<Fetched | null> {
   const giveUp = Date.now() + GIVE_UP_MS;
-  for (let poll = false; !cancelled(); poll = true) {
+  for (; !cancelled(); poll = true) {
     const { data, error } = await supabase.functions.invoke('study-guide', { body: { taskId, depth, poll } });
     if (error) {
       let msg = error.message;
       try { msg = (await (error as { context?: Response }).context?.json())?.error ?? msg; } catch { /* sem JSON */ }
       throw new Error(msg);
     }
-    const guide = (data as { guide?: GuideRow }).guide;
-    if (guide && !guide.content.parcial) return guide;
+    const { guide, relatedPending } = data as { guide?: GuideRow; relatedPending?: boolean };
+    if (guide && !guide.content.parcial) return { guide, relatedPending: !!relatedPending };
     if (guide) onPartial(guide);
     if (Date.now() > giveUp) throw new Error('A apostila está demorando mais que o normal. Tente de novo em instantes.');
     await new Promise((r) => setTimeout(r, POLL_MS));
@@ -74,12 +80,26 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa', onGo
     const id = ++loadId.current, cancelled = () => id !== loadId.current;
     setLoading(true); setError('');
     try {
-      const g = await fetchGuide(taskId, depth, cancelled, (partial) => { if (!cancelled()) { setGuide(partial); setLoading(false); } });
-      if (!cancelled()) setGuide(g);
+      const r = await fetchGuide(taskId, depth, cancelled, (partial) => { if (!cancelled()) { setGuide(partial); setLoading(false); } });
+      if (cancelled() || !r) return;
+      setGuide(r.guide);
+      setLoading(false);
+      if (r.relatedPending) void waitRelated(cancelled);
     } catch (e) {
       if (!cancelled()) setError((e as Error).message);
     } finally {
       if (!cancelled()) setLoading(false);
+    }
+  }
+  // A apostila já está na tela; os artigos relacionados entram quando ficam prontos. Falha aqui não incomoda o estudante.
+  async function waitRelated(cancelled: () => boolean) {
+    const giveUp = Date.now() + RELATED_GIVE_UP_MS;
+    while (!cancelled() && Date.now() < giveUp) {
+      await new Promise((r) => setTimeout(r, RELATED_POLL_MS));
+      if (cancelled()) return;
+      const r = await fetchGuide(taskId, depth, cancelled, () => {}, true).catch(() => null);
+      if (!r || cancelled()) return;
+      if (Array.isArray(r.guide.related) || !r.relatedPending) { setGuide(r.guide); return; }
     }
   }
   useEffect(() => {
@@ -140,7 +160,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa', onGo
             </section>
           )}
           {/* Artigos que o app não conseguiu conferir com o texto da lei: um lembrete discreto, sem a lista, para não assustar. */}
-          {(!!guide!.unlisted_sources.length || !!guide!.unverified.length) && (
+          {(!!guide!.unlisted_sources.length || !!stillUnverified(guide!.unverified, relatedOf(guide)).length) && (
             <p className="faint small" style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
               <Info size={14} style={{ flex: 'none' }} aria-hidden="true" /> Confira os artigos citados em fontes oficiais.
             </p>
@@ -180,6 +200,17 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa', onGo
           {!!g.legislacao.length && (
             <section {...reading('lei')}><h3>Lei seca comentada</h3>
               <ul>{g.legislacao.map((l, i) => <li key={i}><b>{l.ref}:</b> {l.comentario}</li>)}</ul>
+            </section>
+          )}
+          {/* Citados fora dos trechos da sessão: como complementam o tema, com o texto oficial a um clique. */}
+          {relatedOf(guide).some((r) => r.confere) && (
+            <section className="guide-related"><h3>Artigos relacionados</h3>
+              <p className="faint small" style={{ marginTop: -4 }}>Citados nesta apostila, mas fora dos artigos da sessão. Explicação feita por IA a partir do texto oficial.</p>
+              <ul>{relatedOf(guide).filter((r) => r.confere).map((r) => (
+                <li key={r.ref}><b>{r.ref}:</b> {r.explicacao}
+                  <details><summary className="small">Texto oficial</summary><p className="small law-text">{r.texto}</p></details>
+                </li>
+              ))}</ul>
             </section>
           )}
           {g.parcial && <div className="glass card no-print" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> {g.secoes.length ? 'Escrevendo o restante: quadros, lei comentada, o que memorizar, pegadinhas e questões de fixação…' : 'Escrevendo o restante da revisão…'} Pode ir lendo; aparece aqui em instantes.</div>}
