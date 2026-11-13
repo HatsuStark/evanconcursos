@@ -6,7 +6,7 @@ import { MindMap } from './MindMap.tsx';
 import { ReviewCards } from './ReviewCards.tsx';
 import { allReviewCards } from '../../../shared/domain/review-cards.ts';
 import { guideSpeech } from '../../../shared/ai/speech.ts';
-import { placeNotes, stillUnverified, type RelatedArticle } from '../../../shared/ai/related.ts';
+import { planNotes, stillUnverified, type Notes, type RelatedArticle } from '../../../shared/ai/related.ts';
 import { localVoiceSupported } from '../lib/piper.ts';
 import { supabase } from '../lib/supabase.ts';
 import { BROWSER_DEFAULT, CADU, RATES, useGuideVoice, voiceSupported } from '../lib/voice.ts';
@@ -59,7 +59,7 @@ async function fetchGuide(taskId: string, depth: string, cancelled: () => boolea
 
 // Texto com o resumo de cada artigo citado fora da sessão, entre parênteses logo depois da citação. Tocar no resumo mostra
 // o texto oficial ali mesmo.
-function Cited({ text, notes }: { text: string; notes: { at: number; items: RelatedArticle[] }[] }) {
+function Cited({ text, notes }: { text: string; notes: Notes }) {
   const [open, setOpen] = useState<string | null>(null);
   if (!notes.length) return <>{text}</>;
   const out: ReactNode[] = [];
@@ -144,10 +144,26 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa', onGo
   // Revisão curta pronta abre em cartões; a folha completa fica a um clique.
   const cardsMode = depth === 'revisao' && guide?.depth === 'revisao' && !!g && !g.parcial && !loading && !sheetView && allReviewCards(g).length > 0;
   const reading = (key: string) => ({ 'data-voice': key, className: voice.activeKey === key ? 'speaking' : undefined });
-  // Resumo dos artigos citados fora da sessão, entre parênteses no próprio texto: cada um uma vez, no primeiro texto (na
-  // ordem da tela) que tem a frase que o cita.
-  const rel = relatedOf(guide), placed = new Set<string>();
-  const cite = (s: string) => (rel.length ? <Cited text={s} notes={placeNotes(s, rel, placed)} /> : s);
+  // Resumo dos artigos citados fora da sessão, entre parênteses no próprio texto, uma vez por artigo. Os textos vão na
+  // ordem da tela (a mesma do JSX abaixo); cada texto com resumo é consumido na primeira vez que aparece.
+  const notesPlan = useMemo(() => {
+    const rel = relatedOf(guide);
+    if (!g || !rel.length) return new Map<string, Notes>();
+    const texts = [
+      g.introducao, ...g.secoes.flatMap((s) => [...paragraphs(s.texto), ...s.exemplos, ...(s.como_banca_cobra && g.perfil_banca ? [s.como_banca_cobra] : [])]),
+      ...g.legislacao.map((l) => l.comentario), ...(g.memorizar ?? []), ...g.pontos_banca, ...g.pegadinhas, ...g.resumo,
+    ];
+    const byText = new Map<string, Notes>();
+    for (const [i, n] of planNotes(texts, rel)) if (!byText.has(texts[i]!)) byText.set(texts[i]!, n);
+    return byText;
+  }, [g, guide]);
+  const pending = new Map(notesPlan);
+  const cite = (s: string) => {
+    const n = pending.get(s);
+    if (!n) return s;
+    pending.delete(s);
+    return <Cited text={s} notes={n} />;
+  };
 
   if (!hasSession) return <div className="glass card muted">A apostila é gerada para as tarefas de teoria. Nos dias de revisão e reforço, use as questões e a lei seca.</div>;
   return (

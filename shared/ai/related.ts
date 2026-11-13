@@ -10,7 +10,8 @@ import type { ProvidedArticle } from './guide.ts';
 export const RELATED_PROMPT_VERSION = 'related-v2';
 // Por apostila: os primeiros citados. Intervalo grande ("arts. 1º a 30") é menção de passagem, não artigo a explicar.
 export const RELATED_MAX = 6;
-const RANGE_MAX = 3, CONTEXT_MAX = 400, TEXT_MAX = 1200;
+// O trecho guarda a frase inteira (o resumo é encaixado nela); para a IA vai até CONTEXT_MAX, em volta da citação.
+const RANGE_MAX = 3, CONTEXT_MAX = 600, TRECHO_MAX = 2000, TEXT_MAX = 1200;
 
 export interface OutsideRef { lawKey: string; num: number; suffix: string; ref: string; context: string }
 // trecho: a frase da apostila que cita o artigo (onde o resumo entra). resumo e trecho faltam nos feitos pela related-v1.
@@ -37,7 +38,7 @@ export function outsideRefs(text: string, provided: ProvidedArticle[], subject =
         sents ??= sentences(text).map((s) => ({ s, refs: findLawRefs(s, subject, extra) }));
         // Sem frase que cite o artigo com essa lei, a lei veio de outra menção no texto (atribuição errada): fica de fora.
         const hit = sents.find((x) => x.refs.some((y) => y.law === r.law && y.ranges.some((g) => inRanges([g], n, suffix))));
-        if (hit) out.set(ref, { lawKey: r.law, num: n, suffix, ref, context: hit.s.slice(0, CONTEXT_MAX) });
+        if (hit) out.set(ref, { lawKey: r.law, num: n, suffix, ref, context: hit.s.slice(0, TRECHO_MAX) });
       }
     }
   }
@@ -55,6 +56,14 @@ export const RelatedVerdicts = z.object({
 export type RelatedVerdicts = z.infer<typeof RelatedVerdicts>;
 export const relatedJsonSchema = () => z.toJSONSchema(RelatedVerdicts, { target: 'draft-7' });
 
+// Frase longa: só a parte em volta da citação do artigo.
+function around(context: string, ref: string) {
+  if (context.length <= CONTEXT_MAX) return context;
+  const num = refNum(ref)?.num, at = num ? context.search(new RegExp(`(?<!\\d)${num}(?!\\d)`)) : -1;
+  const from = Math.max(0, Math.min(context.length - CONTEXT_MAX, (at < 0 ? 0 : at) - CONTEXT_MAX / 2));
+  return `${from ? '…' : ''}${context.slice(from, from + CONTEXT_MAX)}${from + CONTEXT_MAX < context.length ? '…' : ''}`;
+}
+
 export function relatedPrompt(s: { subject: string; title: string }, items: { ref: string; context: string; text: string }[]) {
   return `Você é professor de cursinho para concursos. A apostila do tema abaixo cita artigos que não estão entre os trechos de lei da sessão. Para cada um, você recebe a frase da apostila que o cita e o texto oficial do artigo.
 Disciplina: ${s.subject}
@@ -64,7 +73,7 @@ Para cada artigo (devolva um item por colchete):
 - explicacao: com confere true, 1 ou 2 frases curtas (até 45 palavras), em linguagem simples: o que o artigo estabelece e como ele se liga ao tema da sessão (complementa, excepciona, define um conceito usado, traz o requisito, o procedimento ou a pena). Use só o texto oficial e o tema: não cite outros artigos, jurisprudência ou doutrina, e não invente prazos ou números. Com confere false, vazio.
 - resumo: com confere true, o que diz o trecho do artigo que a frase cita, para ler entre parênteses logo depois da citação (até 30 palavras, sem repetir o número do artigo, sem ponto final). Se a frase cita incisos, parágrafos ou alíneas, resuma só eles (vários incisos: separe por ponto e vírgula); se cita o artigo inteiro, resuma a regra principal. Fiel ao texto oficial: mantenha prazos, números, sujeitos e exceções; pode simplificar as palavras. Com confere false, vazio.
 Artigos:
-${items.map((i) => `[${i.ref}]\nFrase da apostila: ${i.context}\nTexto oficial: ${i.text.slice(0, TEXT_MAX)}`).join('\n\n')}`;
+${items.map((i) => `[${i.ref}]\nFrase da apostila: ${around(i.context, i.ref)}\nTexto oficial: ${i.text.slice(0, TEXT_MAX)}`).join('\n\n')}`;
 }
 
 const key = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -83,9 +92,10 @@ export function mergeRelated(items: { ref: string; text: string; context?: strin
 }
 
 // ---------- resumo no texto ----------
-// Onde entra o resumo de cada artigo conferido: no trecho (a frase que o cita), logo depois da citação, incluindo os
-// incisos, parágrafos e a lei que vêm junto ("art. 311, incisos II e III, do CPC" → depois de "CPC"). Artigo numa lista
-// ("arts. 20 e 21") entra depois da lista. Uma vez por artigo: só no primeiro texto que contém o trecho.
+// Onde entra o resumo de cada artigo conferido: logo depois da citação, incluindo os incisos, parágrafos e a lei que vêm
+// junto ("art. 311, incisos II e III, do CPC" → depois de "CPC"). Artigo numa lista ("arts. 20 e 21") entra depois da
+// lista. Uma vez por artigo: de preferência no trecho (a frase que o cita); sem ele (trecho cortado nas feitas antes),
+// na primeira citação do número na ordem da tela, desde que não venha com outra lei escrita.
 const ART = /\b(?:arts?\.|artigos?)\s*/gi;
 const LIST = String.raw`(?:\d{1,4}(?:\.\d{3})*(?:\s*[º°])?(?:\s*-\s*[A-Z]{1,2}\b)?(?:\s*(?:,|e|a|ao)\s*(?=\d))?\s*)+`;
 const PARTS = String.raw`(?:,?\s*(?:incisos?|inc\.|§§?|par[áa]grafos?(?:\s+[úu]nico)?|caput|al[íi]neas?)(?:\s*(?:[IVXLC]+\b|\d+[º°]?|[a-z]\))(?:\s*(?:,|e|a)\s*)?)*)*`;
@@ -97,28 +107,48 @@ export const refNum = (ref: string) => {
   return m ? { num: Number(m[1]), suffix: m[2] ?? '' } : null;
 };
 
-export function placeNotes(text: string, related: RelatedArticle[], used = new Set<string>()): { at: number; items: RelatedArticle[] }[] {
-  const at = new Map<number, RelatedArticle[]>();
-  for (const r of related) {
-    if (!r.confere || !r.resumo || !r.trecho || used.has(r.ref)) continue;
-    const start = text.indexOf(r.trecho);
-    const n = refNum(r.ref);
-    if (start < 0 || !n) continue;
-    const sentence = text.slice(start, start + r.trecho.length);
-    for (const m of sentence.matchAll(ART)) {
-      const from = m.index! + m[0].length, c = CITE.exec(sentence.slice(from));
-      if (!c) continue;
-      const nums = [...c[1]!.matchAll(/(\d{1,4}(?:\.\d{3})*)(?:\s*[º°])?(?:\s*-\s*([A-Z]{1,2})\b)?/g)].map((x) => ({ num: Number(x[1]!.replace(/\./g, '')), suffix: x[2] ?? '' }));
-      // "arts. 20 a 23": o intervalo conta.
-      const inList = nums.some((x) => x.num === n.num && x.suffix === n.suffix) || (/\ba\b/.test(c[1]!) && nums.length === 2 && n.num > nums[0]!.num && n.num < nums[1]!.num);
-      if (!inList) continue;
-      const pos = start + from + c[0].replace(/[\s,]+$/, '').length;
-      at.set(pos, [...(at.get(pos) ?? []), r]);
-      used.add(r.ref);
-      break;
+const lawToken = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+// Posição logo depois da citação do artigo dentro de text[from, to); -1 se não há. anyLaw: aceita citação com outra lei escrita.
+function citeEnd(text: string, from: number, to: number, ref: string, anyLaw: boolean) {
+  const n = refNum(ref);
+  if (!n) return -1;
+  const part = text.slice(from, to), short = lawToken(ref.slice(0, ref.lastIndexOf(', art.')));
+  for (const m of part.matchAll(ART)) {
+    const at = m.index! + m[0].length, c = CITE.exec(part.slice(at));
+    if (!c) continue;
+    const nums = [...c[1]!.matchAll(/(\d{1,4}(?:\.\d{3})*)(?:\s*[º°])?(?:\s*-\s*([A-Z]{1,2})\b)?/g)].map((x) => ({ num: Number(x[1]!.replace(/\./g, '')), suffix: x[2] ?? '' }));
+    // "arts. 20 a 23": o intervalo conta.
+    const inList = nums.some((x) => x.num === n.num && x.suffix === n.suffix) || (/\ba\b/.test(c[1]!) && nums.length === 2 && n.num > nums[0]!.num && n.num < nums[1]!.num);
+    if (!inList || (!anyLaw && c[3] && !lawToken(c[3]).includes(short))) continue;
+    return from + at + c[0].replace(/[\s,]+$/, '').length;
+  }
+  return -1;
+}
+
+export type Notes = { at: number; items: RelatedArticle[] }[];
+// Para os textos na ordem da tela, os resumos de cada um (pela posição na lista).
+export function planNotes(texts: string[], related: RelatedArticle[]): Map<number, Notes> {
+  const placed = new Map<number, Map<number, RelatedArticle[]>>();
+  const put = (i: number, pos: number, r: RelatedArticle) => {
+    const m = placed.get(i) ?? new Map<number, RelatedArticle[]>();
+    m.set(pos, [...(m.get(pos) ?? []), r]);
+    placed.set(i, m);
+  };
+  for (const r of related.filter((x) => x.confere && x.resumo)) {
+    let done = false;
+    // 1) No trecho; 2) na primeira citação do número sem outra lei escrita.
+    for (let i = 0; i < texts.length && !done && r.trecho; i++) {
+      const start = texts[i]!.indexOf(r.trecho);
+      if (start < 0) continue;
+      const pos = citeEnd(texts[i]!, start, start + r.trecho.length, r.ref, true);
+      if (pos >= 0) { put(i, pos, r); done = true; }
+    }
+    for (let i = 0; i < texts.length && !done; i++) {
+      const pos = citeEnd(texts[i]!, 0, texts[i]!.length, r.ref, false);
+      if (pos >= 0) { put(i, pos, r); done = true; }
     }
   }
-  return [...at].sort((a, b) => a[0] - b[0]).map(([p, items]) => ({ at: p, items }));
+  return new Map([...placed].map(([i, m]) => [i, [...m].sort((a, b) => a[0] - b[0]).map(([at, items]) => ({ at, items }))]));
 }
 
 // Citações ainda por conferir: as do `unverified` que não viraram artigo relacionado conferido.

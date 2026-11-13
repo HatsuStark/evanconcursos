@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeRelated, outsideRefs, placeNotes, relatedPrompt, stillUnverified, type RelatedArticle } from './related.ts';
+import { mergeRelated, outsideRefs, planNotes, relatedPrompt, stillUnverified, type RelatedArticle } from './related.ts';
 
 const provided = [{ lawKey: 'L9099', label: '89', num: 89, suffix: '' }];
 
@@ -48,40 +48,49 @@ describe('mergeRelated', () => {
   });
 });
 
-describe('placeNotes', () => {
+describe('planNotes', () => {
   const rel = (ref: string, trecho: string, resumo = 'R'): RelatedArticle => ({ ref, trecho, resumo, texto: '', explicacao: 'x', confere: true });
-  const insert = (text: string, related: RelatedArticle[]) => {
-    let out = text;
-    for (const p of placeNotes(text, related).reverse()) out = `${out.slice(0, p.at)} (${p.items.map((i) => i.resumo).join(' | ')})${out.slice(p.at)}`;
-    return out;
+  // Textos com os resumos inseridos entre parênteses.
+  const insert = (texts: string[], related: RelatedArticle[]) => {
+    const plan = planNotes(texts, related);
+    return texts.map((t, i) => {
+      let out = t;
+      for (const p of [...(plan.get(i) ?? [])].reverse()) out = `${out.slice(0, p.at)} (${p.items.map((x) => x.resumo).join(' | ')})${out.slice(p.at)}`;
+      return out;
+    });
   };
 
   it('entra depois da citação, com incisos e lei', () => {
     const s = 'A regra não vale para a tutela da evidência dos incisos II e III do art. 311, incisos II e III, do CPC, nem para a decisão do art. 701.';
-    expect(insert(s, [rel('CPC, art. 311', s, 'A'), rel('CPC, art. 701', s, 'B')]))
-      .toBe('A regra não vale para a tutela da evidência dos incisos II e III do art. 311, incisos II e III, do CPC (A), nem para a decisão do art. 701 (B).');
+    expect(insert([s], [rel('CPC, art. 311', s, 'A'), rel('CPC, art. 701', s, 'B')]))
+      .toEqual(['A regra não vale para a tutela da evidência dos incisos II e III do art. 311, incisos II e III, do CPC (A), nem para a decisão do art. 701 (B).']);
   });
 
   it('artigo numa lista ou num intervalo entra depois da lista', () => {
     const s = 'Veja os arts. 20 e 21 da LINDB sobre consequências.';
-    expect(insert(s, [rel('LINDB, art. 21', s, 'B'), rel('LINDB, art. 20', s, 'A')])).toBe('Veja os arts. 20 e 21 da LINDB (B | A) sobre consequências.');
+    expect(insert([s], [rel('LINDB, art. 21', s, 'B'), rel('LINDB, art. 20', s, 'A')])).toEqual(['Veja os arts. 20 e 21 da LINDB (B | A) sobre consequências.']);
     const t = 'Os arts. 20 a 23 tratam disso.';
-    expect(insert(t, [rel('LINDB, art. 22', t)])).toBe('Os arts. 20 a 23 (R) tratam disso.');
+    expect(insert([t], [rel('LINDB, art. 22', t)])).toEqual(['Os arts. 20 a 23 (R) tratam disso.']);
   });
 
-  it('só no texto que tem o trecho, uma vez, e só os conferidos com resumo', () => {
-    const s = 'O art. 77 do CP traz os requisitos.';
-    expect(placeNotes('Outro parágrafo, art. 77 do CP.', [rel('CP, art. 77', s)])).toEqual([]);
-    const used = new Set<string>();
-    expect(placeNotes(s, [rel('CP, art. 77', s)], used)).toHaveLength(1);
-    expect(placeNotes(s, [rel('CP, art. 77', s)], used)).toEqual([]);
-    expect(placeNotes(s, [{ ...rel('CP, art. 77', s), confere: false }])).toEqual([]);
-    expect(placeNotes(s, [rel('CP, art. 77', s, '')])).toEqual([]);
+  it('prefere o texto do trecho, uma vez por artigo, só os conferidos com resumo', () => {
+    const s = 'O art. 77 do CP traz os requisitos.', other = 'Antes, o art. 77 do CP aparece de passagem.';
+    expect(insert([other, s], [rel('CP, art. 77', s)])).toEqual([other, 'O art. 77 do CP (R) traz os requisitos.']);
+    expect(insert([s, s], [rel('CP, art. 77', s)])).toEqual(['O art. 77 do CP (R) traz os requisitos.', s]);
+    expect(planNotes([s], [{ ...rel('CP, art. 77', s), confere: false }]).size).toBe(0);
+    expect(planNotes([s], [rel('CP, art. 77', s, '')]).size).toBe(0);
+  });
+
+  it('trecho cortado antes da citação: vai para a primeira citação do número, sem outra lei escrita', () => {
+    const s = 'Esse artigo tem exceções: a tutela da evidência e a decisão do art. 701.';
+    const cut = 'O parágrafo único do art. 9º traz exceções longas';
+    const texts = ['O art. 701 do CPP não é este.', `${cut} que só no fim citam o art. 701.`, s];
+    expect(insert(texts, [rel('CPC, art. 701', cut)])).toEqual([texts[0], `${cut} que só no fim citam o art. 701 (R).`, s]);
   });
 
   it('número que não é do artigo não engana', () => {
     const s = 'O prazo de 311 dias do art. 31 não se confunde.';
-    expect(placeNotes(s, [rel('CPC, art. 311', s)])).toEqual([]);
+    expect(planNotes([s], [rel('CPC, art. 311', s)]).size).toBe(0);
   });
 });
 
