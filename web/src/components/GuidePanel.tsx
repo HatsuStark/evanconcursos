@@ -144,8 +144,8 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa', onGo
   // Revisão curta pronta abre em cartões; a folha completa fica a um clique.
   const cardsMode = depth === 'revisao' && guide?.depth === 'revisao' && !!g && !g.parcial && !loading && !sheetView && allReviewCards(g).length > 0;
   const reading = (key: string) => ({ 'data-voice': key, className: voice.activeKey === key ? 'speaking' : undefined });
-  // Resumo dos artigos citados fora da sessão, entre parênteses no próprio texto, uma vez por artigo. Os textos vão na
-  // ordem da tela (a mesma do JSX abaixo); cada texto com resumo é consumido na primeira vez que aparece.
+  // Resumo dos artigos citados fora da sessão, entre parênteses no próprio texto, em cada parágrafo que os cita. Os textos
+  // vão na ordem da tela (a mesma do JSX abaixo); cada texto com resumo é consumido na primeira vez que aparece.
   const notesPlan = useMemo(() => {
     const rel = relatedOf(guide);
     if (!g || !rel.length) return new Map<string, Notes>();

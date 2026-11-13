@@ -73,19 +73,20 @@ describe('planNotes', () => {
     expect(insert([t], [rel('LINDB, art. 22', t)])).toEqual(['Os arts. 20 a 23 (R) tratam disso.']);
   });
 
-  it('prefere o texto do trecho, uma vez por artigo, só os conferidos com resumo', () => {
-    const s = 'O art. 77 do CP traz os requisitos.', other = 'Antes, o art. 77 do CP aparece de passagem.';
-    expect(insert([other, s], [rel('CP, art. 77', s)])).toEqual([other, 'O art. 77 do CP (R) traz os requisitos.']);
-    expect(insert([s, s], [rel('CP, art. 77', s)])).toEqual(['O art. 77 do CP (R) traz os requisitos.', s]);
+  it('em todo texto que cita o artigo, uma vez por texto, só os conferidos com resumo', () => {
+    const s = 'O art. 77 do CP traz os requisitos.', other = 'Antes, o art. 77 aparece de passagem; de novo o art. 77.';
+    expect(insert([other, s], [rel('CP, art. 77', s)])).toEqual(['Antes, o art. 77 (R) aparece de passagem; de novo o art. 77.', 'O art. 77 do CP (R) traz os requisitos.']);
+    const gp = 'O art. 77 do Código Penal traz os requisitos.';
+    expect(insert([gp], [rel('CP, art. 77', gp)])).toEqual(['O art. 77 do Código Penal (R) traz os requisitos.']);
     expect(planNotes([s], [{ ...rel('CP, art. 77', s), confere: false }]).size).toBe(0);
     expect(planNotes([s], [rel('CP, art. 77', s, '')]).size).toBe(0);
   });
 
-  it('trecho cortado antes da citação: vai para a primeira citação do número, sem outra lei escrita', () => {
+  it('trecho cortado antes da citação e outra lei escrita', () => {
     const s = 'Esse artigo tem exceções: a tutela da evidência e a decisão do art. 701.';
     const cut = 'O parágrafo único do art. 9º traz exceções longas';
     const texts = ['O art. 701 do CPP não é este.', `${cut} que só no fim citam o art. 701.`, s];
-    expect(insert(texts, [rel('CPC, art. 701', cut)])).toEqual([texts[0], `${cut} que só no fim citam o art. 701 (R).`, s]);
+    expect(insert(texts, [rel('CPC, art. 701', cut)])).toEqual([texts[0], `${cut} que só no fim citam o art. 701 (R).`, 'Esse artigo tem exceções: a tutela da evidência e a decisão do art. 701 (R).']);
   });
 
   it('número que não é do artigo não engana', () => {

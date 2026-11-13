@@ -94,8 +94,8 @@ export function mergeRelated(items: { ref: string; text: string; context?: strin
 // ---------- resumo no texto ----------
 // Onde entra o resumo de cada artigo conferido: logo depois da citação, incluindo os incisos, parágrafos e a lei que vêm
 // junto ("art. 311, incisos II e III, do CPC" → depois de "CPC"). Artigo numa lista ("arts. 20 e 21") entra depois da
-// lista. Uma vez por artigo: de preferência no trecho (a frase que o cita); sem ele (trecho cortado nas feitas antes),
-// na primeira citação do número na ordem da tela, desde que não venha com outra lei escrita.
+// lista. Em cada parágrafo ou item que cita o artigo, uma vez (na primeira citação dele ali), desde que a citação não
+// venha com outra lei escrita.
 const ART = /\b(?:arts?\.|artigos?)\s*/gi;
 const LIST = String.raw`(?:\d{1,4}(?:\.\d{3})*(?:\s*[º°])?(?:\s*-\s*[A-Z]{1,2}\b)?(?:\s*(?:,|e|a|ao)\s*(?=\d))?\s*)+`;
 const PARTS = String.raw`(?:,?\s*(?:incisos?|inc\.|§§?|par[áa]grafos?(?:\s+[úu]nico)?|caput|al[íi]neas?)(?:\s*(?:[IVXLC]+\b|\d+[º°]?|[a-z]\))(?:\s*(?:,|e|a)\s*)?)*)*`;
@@ -135,17 +135,13 @@ export function planNotes(texts: string[], related: RelatedArticle[]): Map<numbe
     placed.set(i, m);
   };
   for (const r of related.filter((x) => x.confere && x.resumo)) {
-    let done = false;
-    // 1) No trecho; 2) na primeira citação do número sem outra lei escrita.
-    for (let i = 0; i < texts.length && !done && r.trecho; i++) {
-      const start = texts[i]!.indexOf(r.trecho);
-      if (start < 0) continue;
-      const pos = citeEnd(texts[i]!, start, start + r.trecho.length, r.ref, true);
-      if (pos >= 0) { put(i, pos, r); done = true; }
-    }
-    for (let i = 0; i < texts.length && !done; i++) {
-      const pos = citeEnd(texts[i]!, 0, texts[i]!.length, r.ref, false);
-      if (pos >= 0) { put(i, pos, r); done = true; }
+    // Em todo texto que cita o artigo, na primeira citação dele: no texto do trecho, a citação do trecho (vale mesmo com
+    // a lei escrita de outro jeito, "do Código Penal"); nos demais, a primeira sem outra lei escrita.
+    for (let i = 0; i < texts.length; i++) {
+      const t = texts[i]!, start = r.trecho ? t.indexOf(r.trecho) : -1;
+      const inTrecho = start >= 0 ? citeEnd(t, start, start + r.trecho!.length, r.ref, true) : -1;
+      const pos = inTrecho >= 0 ? inTrecho : citeEnd(t, 0, t.length, r.ref, false);
+      if (pos >= 0) put(i, pos, r);
     }
   }
   return new Map([...placed].map(([i, m]) => [i, [...m].sort((a, b) => a[0] - b[0]).map(([at, items]) => ({ at, items }))]));
