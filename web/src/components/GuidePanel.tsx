@@ -1,12 +1,12 @@
 import { BookOpen, GalleryHorizontal, Info, CheckCircle2, Headphones, Landmark, Pause, Play, Printer, SkipBack, SkipForward, Sparkles, Square } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { dropHotDisclaimer } from '../../../shared/ai/hot.ts';
 import { missingMark, splitMarks } from '../../../shared/ai/marks.ts';
 import { MindMap } from './MindMap.tsx';
 import { ReviewCards } from './ReviewCards.tsx';
 import { allReviewCards } from '../../../shared/domain/review-cards.ts';
 import { guideSpeech } from '../../../shared/ai/speech.ts';
-import { stillUnverified, type RelatedArticle } from '../../../shared/ai/related.ts';
+import { placeNotes, stillUnverified, type RelatedArticle } from '../../../shared/ai/related.ts';
 import { localVoiceSupported } from '../lib/piper.ts';
 import { supabase } from '../lib/supabase.ts';
 import { BROWSER_DEFAULT, CADU, RATES, useGuideVoice, voiceSupported } from '../lib/voice.ts';
@@ -55,6 +55,26 @@ async function fetchGuide(taskId: string, depth: string, cancelled: () => boolea
     await new Promise((r) => setTimeout(r, POLL_MS));
   }
   return null;
+}
+
+// Texto com o resumo de cada artigo citado fora da sessão, entre parênteses logo depois da citação. Tocar no resumo mostra
+// o texto oficial ali mesmo.
+function Cited({ text, notes }: { text: string; notes: { at: number; items: RelatedArticle[] }[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  if (!notes.length) return <>{text}</>;
+  const out: ReactNode[] = [];
+  let last = 0;
+  for (const n of notes) {
+    out.push(text.slice(last, n.at));
+    last = n.at;
+    for (const r of n.items) {
+      out.push(<span key={r.ref}> <button type="button" className="cite-note" aria-expanded={open === r.ref} title={`${r.ref}: ver o texto oficial`}
+        onClick={() => setOpen(open === r.ref ? null : r.ref)}>({n.items.length > 1 ? `${r.ref.replace(/^.*, /, '')}: ` : ''}{r.resumo})</button>
+        {open === r.ref && <span className="cite-law">{r.texto}</span>}</span>);
+    }
+  }
+  out.push(text.slice(last));
+  return <>{out}</>;
 }
 
 const paragraphs = (t: string) => t.split(/\n\s*\n|\n/).map((p) => p.trim()).filter(Boolean);
@@ -124,6 +144,10 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa', onGo
   // Revisão curta pronta abre em cartões; a folha completa fica a um clique.
   const cardsMode = depth === 'revisao' && guide?.depth === 'revisao' && !!g && !g.parcial && !loading && !sheetView && allReviewCards(g).length > 0;
   const reading = (key: string) => ({ 'data-voice': key, className: voice.activeKey === key ? 'speaking' : undefined });
+  // Resumo dos artigos citados fora da sessão, entre parênteses no próprio texto: cada um uma vez, no primeiro texto (na
+  // ordem da tela) que tem a frase que o cita.
+  const rel = relatedOf(guide), placed = new Set<string>();
+  const cite = (s: string) => (rel.length ? <Cited text={s} notes={placeNotes(s, rel, placed)} /> : s);
 
   if (!hasSession) return <div className="glass card muted">A apostila é gerada para as tarefas de teoria. Nos dias de revisão e reforço, use as questões e a lei seca.</div>;
   return (
@@ -151,7 +175,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa', onGo
           <header {...reading('intro')}>
             <span className="badge violet"><BookOpen size={12} /> Apostila · {guide!.depth === 'completa' ? 'completa' : guide!.depth === 'aprofundamento' ? 'aprofundamento' : 'revisão curta'}</span>
             <h2>{g.titulo}</h2>
-            <p className="lead">{g.introducao}</p>
+            <p className="lead">{cite(g.introducao)}</p>
             {!!g.objetivos?.length && <div className="guide-goals"><strong>Ao final, você vai saber</strong><ul>{g.objetivos.map((o, i) => <li key={i}>{o}</li>)}</ul></div>}
           </header>
           {!!g.esquema?.length && (
@@ -169,12 +193,12 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa', onGo
             <section key={i} {...reading(`s${i}`)}>
               <h3>{s.titulo}{s.prioridade === 'alta' && <span className="badge orange" style={{ marginLeft: 8, verticalAlign: 2 }}>cai muito</span>}</h3>
               {g.pendentes?.includes(i) && !s.texto && <p className="muted small" style={{ display: 'flex', gap: 8, alignItems: 'center' }}><span className="spinner" /> Escrevendo esta seção…</p>}
-              {paragraphs(s.texto).map((p, j) => <p key={j}>{p}</p>)}
-              {!!s.exemplos.length && <div className="guide-examples">{s.exemplos.map((e, j) => <p key={j}><b>Exemplo:</b> {e}</p>)}</div>}
+              {paragraphs(s.texto).map((p, j) => <p key={j}>{cite(p)}</p>)}
+              {!!s.exemplos.length && <div className="guide-examples">{s.exemplos.map((e, j) => <p key={j}><b>Exemplo:</b> {cite(e)}</p>)}</div>}
               {s.como_banca_cobra && g.perfil_banca && (
                 <aside className="guide-board">
                   <strong><Landmark size={15} /> Como a {g.perfil_banca.banca} cobra</strong>
-                  <p>{s.como_banca_cobra}</p>
+                  <p>{cite(s.como_banca_cobra)}</p>
                 </aside>
               )}
             </section>
@@ -199,7 +223,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa', onGo
           ))}
           {!!g.legislacao.length && (
             <section {...reading('lei')}><h3>Lei seca comentada</h3>
-              <ul>{g.legislacao.map((l, i) => <li key={i}><b>{l.ref}:</b> {l.comentario}</li>)}</ul>
+              <ul>{g.legislacao.map((l, i) => <li key={i}><b>{l.ref}:</b> {cite(l.comentario)}</li>)}</ul>
             </section>
           )}
           {/* Citados fora dos trechos da sessão: como complementam o tema, com o texto oficial a um clique. */}
@@ -214,10 +238,10 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa', onGo
             </section>
           )}
           {g.parcial && <div className="glass card no-print" style={{ display: 'flex', gap: 10, alignItems: 'center' }}><span className="spinner" /> {g.secoes.length ? 'Escrevendo o restante: quadros, lei comentada, o que memorizar, pegadinhas e questões de fixação…' : 'Escrevendo o restante da revisão…'} Pode ir lendo; aparece aqui em instantes.</div>}
-          {!!g.memorizar?.length && <section {...reading('memorizar')} className={'guide-memo' + (voice.activeKey === 'memorizar' ? ' speaking' : '')}><h3>Para memorizar</h3><ul>{g.memorizar.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
-          {!!g.pontos_banca.length && <section {...reading('banca')}><h3>O que mais cai</h3><p className="faint small" style={{ marginTop: -4 }}>Estimativas feitas por IA.</p><ul>{g.pontos_banca.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
-          {!!g.pegadinhas.length && <section data-voice="pegadinhas" className={'guide-traps' + (voice.activeKey === 'pegadinhas' ? ' speaking' : '')}><h3>Pegadinhas</h3><ul>{g.pegadinhas.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
-          {!!g.resumo.length && <section {...reading('resumo')}><h3>Resumo</h3><ul>{g.resumo.map((p, i) => <li key={i}>{p}</li>)}</ul></section>}
+          {!!g.memorizar?.length && <section {...reading('memorizar')} className={'guide-memo' + (voice.activeKey === 'memorizar' ? ' speaking' : '')}><h3>Para memorizar</h3><ul>{g.memorizar.map((p, i) => <li key={i}>{cite(p)}</li>)}</ul></section>}
+          {!!g.pontos_banca.length && <section {...reading('banca')}><h3>O que mais cai</h3><p className="faint small" style={{ marginTop: -4 }}>Estimativas feitas por IA.</p><ul>{g.pontos_banca.map((p, i) => <li key={i}>{cite(p)}</li>)}</ul></section>}
+          {!!g.pegadinhas.length && <section data-voice="pegadinhas" className={'guide-traps' + (voice.activeKey === 'pegadinhas' ? ' speaking' : '')}><h3>Pegadinhas</h3><ul>{g.pegadinhas.map((p, i) => <li key={i}>{cite(p)}</li>)}</ul></section>}
+          {!!g.resumo.length && <section {...reading('resumo')}><h3>Resumo</h3><ul>{g.resumo.map((p, i) => <li key={i}>{cite(p)}</li>)}</ul></section>}
           {!!fixQuestions(g.questoes).length && (
             <section {...reading('questoes')}><h3>Questões de fixação</h3>
               {fixQuestions(g.questoes).map((q, i) => {

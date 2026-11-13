@@ -590,6 +590,11 @@ a.task-title:hover { color: var(--cyan); }
 .guide-option.wrong { border-color: var(--orange); background: color-mix(in srgb, var(--orange) 10%, transparent); }
 .guide-examples { padding: 12px 14px; border-left: 3px solid var(--violet); background: color-mix(in srgb, var(--violet) 7%, transparent); border-radius: 8px; }
 .guide-examples p:last-child { margin: 0; }
+/* Resumo do artigo citado fora da sessão, no meio do texto: discreto; tocar abre o texto oficial logo abaixo. */
+.cite-note { all: unset; cursor: pointer; font-style: italic; color: var(--muted); }
+.cite-note:hover, .cite-note:focus-visible { color: var(--violet); text-decoration: underline; text-underline-offset: 2px; }
+.cite-note:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; border-radius: 3px; }
+.cite-law { display: block; white-space: pre-line; margin: 6px 0; padding: 8px 12px; font-size: 0.9em; border-left: 3px solid var(--violet); background: color-mix(in srgb, var(--violet) 5%, transparent); border-radius: 6px; }
 /* Artigos relacionados: o texto oficial fica recolhido. */
 .guide-related details { margin: 4px 0 8px; }
 .guide-related summary { cursor: pointer; color: var(--muted); }
