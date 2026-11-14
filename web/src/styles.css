@@ -969,3 +969,24 @@ details.card summary { cursor: pointer; font-weight: 600; }
 .adm-htrack { height: 10px; border-radius: 5px; background: var(--surface-3); overflow: hidden; }
 .adm-htrack i { display: block; height: 100%; background: var(--cyan); border-radius: 0 4px 4px 0; opacity: .8; }
 .adm-hval { font-variant-numeric: tabular-nums; min-width: 48px; text-align: right; }
+
+/* ---------- resumo do dia (tela Hoje) ---------- */
+.day-panel { display: grid; gap: 14px; padding-top: 18px; border-top: 1px solid var(--line); }
+.day-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 14px; }
+.day-stat { display: grid; gap: 2px; }
+.day-stat strong { display: inline-flex; align-items: center; gap: 6px; font-size: 26px; font-weight: 700; }
+.day-stat span { color: var(--muted); font-size: 13px; }
+.day-next { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+@media (max-width: 720px) {
+  .day-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .day-stat strong { font-size: 22px; }
+  .day-next .btn { width: 100%; }
+}
+
+/* ---------- revisão do dia e conclusão da tarefa ---------- */
+.daily-review { display: grid; gap: 12px; margin-top: 18px; }
+.daily-review-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.task-done-card { display: grid; gap: 14px; margin-bottom: 18px; border-color: color-mix(in srgb, var(--lime) 45%, transparent); background: color-mix(in srgb, var(--lime) 6%, var(--surface)); animation: pop-in .25s ease-out; }
+.task-done-card h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 22px; }
+.task-done-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+@keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(.985); } to { opacity: 1; transform: none; } }

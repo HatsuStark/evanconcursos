@@ -9,6 +9,7 @@ import {
 } from '../lib/questions.ts';
 import { goalTone, questionScore, scoreGoal } from '../../../shared/domain/adaptive.ts';
 import { useActivePlan } from '../lib/plans.ts';
+import type { Attempt, StudyData } from '../lib/study.ts';
 import { mayHaveMnemonic } from '../../../shared/qbank/mnemonic.ts';
 import { ArticleChips } from './ArticlePeek.tsx';
 import { CommentsPanel } from './CommentsPanel.tsx';
@@ -191,7 +192,13 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
     try {
       const r = await answerQuestion(taskId, q.qid, st.chosen, source.kind === 'review' ? 'review' : source.kind === 'task' ? 'plan' : 'free', q.warmupOf);
       patch({ result: r, tab: 'explicacao' });
-      void qc.invalidateQueries({ queryKey: ['study'] });
+      // Na tarefa, a resposta entra direto nos dados da tela (meta e placar), sem buscar tudo de novo a cada questão.
+      const cached = taskId ? qc.getQueryData<StudyData>(['study', taskId]) : undefined;
+      if (taskId && cached) {
+        const attempt: Attempt = { id: `local-${q.qid}-${Date.now()}`, task_id: taskId, session_id: q.warmupOf ?? cached.task.session_id, qid: q.qid, assunto: q.assunto, correct: r.correct, created_at: new Date().toISOString() };
+        qc.setQueryData<StudyData>(['study', taskId], { ...cached, attempts: [attempt, ...cached.attempts] });
+      } else void qc.invalidateQueries({ queryKey: ['study'] });
+      void qc.invalidateQueries({ queryKey: ['study-activity'] });
       void qc.invalidateQueries({ queryKey: ['due-counts'] });
       void qc.invalidateQueries({ queryKey: ['error-due-dates'] });
     } catch (e) { setError((e as Error).message); } finally { setBusy(''); }

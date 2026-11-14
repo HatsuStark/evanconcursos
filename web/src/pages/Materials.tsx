@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { FileUp, Lock, RefreshCw, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { MaterialRanges } from '../components/MaterialRanges.tsx';
-import { PdfViewer } from '../components/PdfViewer.tsx';
+import { PdfViewer } from '../components/PdfViewerLazy.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { deleteMaterial, remapMaterial, signedUrl, uploadMaterial, useMaterials, type Material } from '../lib/materials.ts';
 import { useActivePlan } from '../lib/plans.ts';

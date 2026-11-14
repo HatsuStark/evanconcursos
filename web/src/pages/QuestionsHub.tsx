@@ -15,7 +15,7 @@ import { SimuladoStarter } from '../components/SimuladoStarter.tsx';
 import { today, useActivePlan } from '../lib/plans.ts';
 import {
   createSimulado, deleteCard, filterLists, reviewCard, useAttemptStats, useDueCounts, useFlashcards, useMappedMaterias, useMateriaOptions, useSimulados,
-  type Ctx, type FreeFilters,
+  type Ctx, type Flashcard, type FreeFilters,
 } from '../lib/practice.ts';
 
 const TABS = [
@@ -168,9 +168,11 @@ function FlashcardsTab({ planId }: { planId: string | undefined }) {
   const list = cards.data ?? [], c = list[i];
   async function rate(knew: boolean) {
     if (!c) return;
-    await reviewCard(c, knew);
     setFlip(false);
-    if (!all) { await qc.invalidateQueries({ queryKey: ['flashcards'] }); void qc.invalidateQueries({ queryKey: ['due-counts'] }); setI(0); } else setI(i + 1);
+    // O próximo cartão aparece na hora; a gravação segue por trás e, se falhar, a lista é buscada de novo.
+    if (!all) { qc.setQueryData<Flashcard[]>(['flashcards', false, planId], (old) => old?.filter((x) => x.id !== c.id)); setI(0); } else setI(i + 1);
+    try { await reviewCard(c, knew); } catch { void qc.invalidateQueries({ queryKey: ['flashcards'] }); }
+    void qc.invalidateQueries({ queryKey: ['due-counts'] });
   }
   return (
     <div className="grid" style={{ gap: 14 }}>

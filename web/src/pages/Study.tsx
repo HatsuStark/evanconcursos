@@ -1,10 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Check, FileText, Gavel, Library, ListChecks, Maximize2, Minimize2, Pause, Play, RotateCcw, Scale, ScanSearch, Timer, Video } from 'lucide-react';
+import { BookOpen, Check, CheckCircle2, ChevronRight, FileText, Gavel, Library, ListChecks, Maximize2, Minimize2, Pause, Play, RotateCcw, Scale, ScanSearch, Timer, Video } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { evaluate, latestAnswers, questionScore, scoreGoal } from '../../../shared/domain/adaptive.ts';
 import { REVIEW_PREFIX } from '../../../shared/ai/plan-build.ts';
 import { DEEP_PREFIX, PRACTICE_PREFIX } from '../../../shared/ai/plan.ts';
+import { cycleQueue } from '../../../shared/domain/cycle.ts';
 import { isWarmupAnswer } from '../../../shared/domain/goals.ts';
 import { videoQuery } from '../../../shared/domain/videos.ts';
 import { GuidePanel } from '../components/GuidePanel.tsx';
@@ -20,7 +21,7 @@ import { TheoryReviewCard } from '../components/TheoryReviewCard.tsx';
 import { VideosPanel } from '../components/VideosPanel.tsx';
 import { fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
 import { missingNorms, sessionLawRefs, useOwnLaws } from '../lib/legal.ts';
-import { KIND_LABEL, setTaskDone } from '../lib/plans.ts';
+import { KIND_LABEL, today, toggleTaskDone, useActivePlan } from '../lib/plans.ts';
 import { PRESETS, usePomodoro, type Preset } from '../lib/pomodoro.ts';
 import { prefetchQuestions } from '../lib/questions.ts';
 import { saveTimeSpent, useStudy, type StudyData } from '../lib/study.ts';
@@ -166,10 +167,20 @@ function StudyView({ d }: { d: StudyData }) {
   function resetTimer() {
     if (window.confirm(`Zerar o cronômetro desta tarefa? Os ${fmtClock(timer.seconds)} registrados serão apagados.`)) timer.reset();
   }
+  // Ao concluir: resumo da tarefa e atalho para a próxima (a do dia, ou a seguinte da fila no ciclo).
+  const [justDone, setJustDone] = useState(false);
+  useEffect(() => setJustDone(false), [d.task.id]);
+  const plan = useActivePlan().data;
+  const planTasks = plan?.plan.id === d.task.plan_id ? plan.tasks : [];
+  const nextTask = d.pacing === 'ciclo' ? cycleQueue(planTasks).find((t) => t.id !== d.task.id)
+    : planTasks.find((t) => t.date === today() && !t.done_at && t.kind !== 'exam' && t.id !== d.task.id);
   async function toggleDone() {
+    const finishing = !d.task.done_at;
     if (focus) { if (timer.running) timer.toggle(); setFocus(false); }
-    await setTaskDone(d.task.id, !d.task.done_at);
-    await qc.invalidateQueries();
+    else if (finishing && timer.running) timer.pause();
+    await toggleTaskDone(qc, d.task.id, finishing);
+    setJustDone(finishing);
+    if (finishing) window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   const tabBar = (
@@ -261,6 +272,23 @@ function StudyView({ d }: { d: StudyData }) {
               <ul className="advice" style={{ marginTop: 10 }}>{d.topics.map((t, i) => <li key={i}>{t}</li>)}</ul>
             </details>
           )}
+        </div>
+      )}
+
+      {justDone && !!d.task.done_at && (
+        <div className="glass card task-done-card no-print">
+          <h2><CheckCircle2 size={24} style={{ color: 'var(--lime)' }} /> Tarefa concluída</h2>
+          <div className="stats">
+            <div className="stat"><strong style={{ color: 'var(--cyan)' }}>{fmtClock(timer.seconds)}</strong><span>de estudo</span></div>
+            <div className="stat"><strong style={{ color: 'var(--violet)' }}>{mine.length}{d.task.goal_questions ? `/${d.task.goal_questions}` : ''}</strong><span>questões</span></div>
+            <div className="stat"><strong style={{ color: verdict.level === 'ok' ? 'var(--lime)' : 'var(--orange)' }}>{mine.length ? score.pct + '%' : '—'}</strong><span>de acerto</span></div>
+          </div>
+          {!!mine.length && <p className="muted" style={{ margin: 0 }}>{score.pending ? `Faltaram ${score.pending} ${score.pending === 1 ? 'questão' : 'questões'} da meta: as pendentes contam como não feitas no desempenho do tema.` : verdict.text}</p>}
+          <div className="task-done-actions">
+            {nextTask ? <Link className="btn" to={`/estudo/${nextTask.id}`}>Próxima tarefa <ChevronRight size={18} /></Link> : <span className="badge lime">{d.pacing === 'ciclo' ? 'Fila concluída' : 'Tudo feito por hoje'}</span>}
+            <Link className="btn ghost" to="/">Voltar para Hoje</Link>
+          </div>
+          {nextTask && <p className="faint small" style={{ margin: 0 }}>Em seguida: {nextTask.title}</p>}
         </div>
       )}
 

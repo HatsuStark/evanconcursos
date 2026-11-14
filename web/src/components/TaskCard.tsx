@@ -2,12 +2,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { CalendarDays, Check, Clock, RotateCcw, Target } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { KIND_LABEL, setTaskDone, today, useActivePlan, type SubjectRow, type TaskRow } from '../lib/plans.ts';
+import { KIND_LABEL, toggleTaskDone, today, useActivePlan, type SubjectRow, type TaskRow } from '../lib/plans.ts';
 import { useErrorDueDates } from '../lib/practice.ts';
 import { fmtDate, subjectColor, SubjectIcon } from './ui.tsx';
 
 export const KIND_COLOR: Record<string, string> = {
-  simulado: 'var(--magenta)', weekly_review: 'var(--lime)', lei_seca: 'var(--cyan)', consolidation: 'var(--orange)', final_review: 'var(--orange)', pente_fino: 'var(--violet)', eve: 'var(--cyan)', exam: '#fff',
+  simulado: 'var(--magenta)', weekly_review: 'var(--lime)', lei_seca: 'var(--cyan)', consolidation: 'var(--orange)', final_review: 'var(--orange)', pente_fino: 'var(--violet)', eve: 'var(--cyan)', exam: 'var(--text)',
 };
 export const taskColor = (t: TaskRow, subjects: SubjectRow[]) => {
   const i = subjects.findIndex((s) => s.id === t.subject_id);
@@ -31,10 +31,7 @@ export function TaskCard({ task, subjects, showDate }: { task: TaskRow; subjects
 
   async function toggle() {
     setBusy(true);
-    try {
-      await setTaskDone(task.id, !done);
-      await Promise.all([qc.invalidateQueries({ queryKey: ['active-plan'] }), qc.invalidateQueries({ queryKey: ['study-activity'] })]);
-    } finally { setBusy(false); }
+    try { await toggleTaskDone(qc, task.id, !done); } finally { setBusy(false); }
   }
 
   return (

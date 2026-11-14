@@ -444,27 +444,37 @@ export function planPicks(incidence: Incidence[], served: Map<string, number>, n
 }
 
 // ---------- explicação da questão (IA), ancorada no texto oficial da lei ----------
-export const EXPLAIN_PROMPT_VERSION = 'explain-v1';
+// explain-v2: a explicação ensina a acertar a próxima questão do mesmo tipo. Começa pela regra que decide (reaproveitável),
+// aponta em cada alternativa errada o trecho exato que a derruba, mostra a conta em cálculo, trata certo ou errado como um
+// item só, avisa quando a questão depende de imagem que a IA não recebeu e quando a lei atual não combina com o gabarito.
+// As explicações já gravadas continuam valendo (uma por questão, compartilhada): só as novas saem neste formato.
+export const EXPLAIN_PROMPT_VERSION = 'explain-v2';
 export const Explanation = z.object({
-  resumo: z.string().describe('Por que a alternativa correta está certa, em até 5 frases.'),
-  alternativas: z.array(z.object({ letra: z.string(), comentario: z.string().describe('Por que está certa ou errada, em 1–2 frases.') })),
+  resumo: z.string().describe('Primeiro a regra que decide a questão, numa frase que sirva para outras questões do tema; depois, como ela leva ao gabarito. Até 5 frases.'),
+  alternativas: z.array(z.object({ letra: z.string(), comentario: z.string().describe('Errada: o trecho que a torna errada e como ficaria certa. Certa: o que a confirma. 1–2 frases, sem repetir o texto da alternativa.') })),
   artigos: z.array(z.string()).describe('Artigos usados, no formato "CP, art. 312" — somente dos trechos de lei fornecidos.'),
-  dica: z.string().describe('Pegadinha ou ponto de atenção da banca, em 1 frase (ou vazio).'),
+  dica: z.string().describe('Como reconhecer esta cobrança na próxima questão: a troca ou o detalhe que a banca explora, em 1 frase (ou vazio).'),
 });
 export type Explanation = z.infer<typeof Explanation>;
 export const explanationJsonSchema = () => z.toJSONSchema(Explanation, { target: 'draft-7' });
 
-export function explainPrompt(p: { banca: string; enunciado: string; alternativas: { letra: string; texto: string }[]; gabarito: string; textos: string[]; lei: { ref: string; text: string }[] }) {
-  return `Você é professor de cursinho para concursos. Explique a questão abaixo para um estudante.
-${p.textos.length ? `Texto associado:\n${p.textos.join('\n').slice(0, 3000)}\n` : ''}Questão (${p.banca || 'banca não informada'}):
+// assunto: assunto da questão no banco, para situar a regra. imagens: a questão tem figura ou anexo que a IA não recebe.
+export function explainPrompt(p: { banca: string; enunciado: string; alternativas: { letra: string; texto: string }[]; gabarito: string; textos: string[]; lei: { ref: string; text: string }[]; assunto?: string; imagens?: boolean }) {
+  return `Você é professor de cursinho para concursos. Explique a questão abaixo para um estudante que a errou e quer acertar a próxima do mesmo tipo.
+${p.assunto ? `Assunto: ${p.assunto}\n` : ''}${p.textos.length ? `Texto associado:\n${p.textos.join('\n').slice(0, 3000)}\n` : ''}Questão (${p.banca || 'banca não informada'}):
 ${p.enunciado}
 ${p.alternativas.map((a) => `${a.letra}) ${a.texto}`).join('\n')}
 Gabarito oficial: ${p.gabarito}
 ${p.lei.length ? `Trechos oficiais da lei (use somente estes como fonte legal):\n${p.lei.map((l) => `[${l.ref}] ${l.text}`).join('\n\n').slice(0, 12000)}` : 'Nenhum trecho de lei foi fornecido.'}
 Regras:
-- Explique a partir do gabarito oficial; nunca o contradiga.
+- O gabarito oficial é a referência: explique o raciocínio da banca e nunca diga que outra alternativa é a correta. Se o trecho de lei fornecido (texto atual) não combinar com o gabarito, mantenha o gabarito e avise na dica que a lei pode ter mudado depois da prova.
+- resumo: comece pela regra que decide a questão, escrita de um jeito que sirva para outras questões do tema; só depois aplique ao caso. O estudante precisa sair com a regra, não só com a resposta desta questão.
+- Em cada alternativa errada, aponte a palavra ou o trecho que a torna errada e diga como ficaria correta. "Está errada porque contraria a lei" não ensina nada. Não repita o texto da alternativa.
+- Questão de certo ou errado: um único comentário, com a letra do gabarito (C ou E), apontando o trecho que torna o item certo ou errado.
+- Questão de cálculo ou de raciocínio lógico: mostre a conta ou os passos no resumo, na ordem em que o candidato os faria na prova.
 - Cite artigos somente se estiverem nos trechos fornecidos, no formato do colchete (ex.: "CP, art. 312"). Não cite jurisprudência, súmulas nem autores.
-- Se não houver trecho de lei, explique pelo raciocínio, sem números de artigos.
-- Comente cada alternativa em 1–2 frases. Linguagem simples e direta.`;
+- Se não houver trecho de lei, explique pelo raciocínio, sem números de artigos.${p.imagens ? '\n- A questão tem imagem ou anexo que você não recebeu: diga isso no resumo e explique só o que o texto permite, sem supor o conteúdo da imagem.' : ''}
+- dica: a troca ou o detalhe que a banca explora neste tipo de questão, para o estudante reconhecer da próxima vez. Sem dica útil, deixe vazio.
+- Linguagem simples e direta, sem rodeios e sem elogiar a questão.`;
 }
 

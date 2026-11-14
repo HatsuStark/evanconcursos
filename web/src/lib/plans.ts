@@ -1,5 +1,5 @@
 // Planos de estudo: geração (IA no backend + scheduler determinístico) e leitura do cronograma ativo.
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, type QueryClient } from '@tanstack/react-query';
 import { subjectMinPct } from '../../../shared/domain/adaptive.ts';
 import { ymd } from '../../../shared/domain/dates.ts';
 import { prioritize, RUSH_WEEKS } from '../../../shared/domain/priority.ts';
@@ -180,6 +180,8 @@ export interface ActivePlan {
 // recente), com o edital, a versão ativa, as matérias e as tarefas vigentes.
 export const useActivePlan = (noticeId?: string) => useQuery({
   queryKey: ['active-plan', noticeId ?? 'current'],
+  // O plano inteiro (até milhares de tarefas) não é buscado de novo a cada volta à aba: o que o altera no app já o invalida.
+  staleTime: 2 * 60_000,
   queryFn: async (): Promise<ActivePlan | null> => {
     let q = supabase.from('study_plans').select('id, name, notice_id, active_version_id, pacing').eq('status', 'active').order('created_at', { ascending: false }).limit(1);
     if (noticeId) q = q.eq('notice_id', noticeId);
@@ -233,6 +235,18 @@ export async function setPacing(planId: string, pacing: Pacing) {
 export async function setTaskDone(taskId: string, done: boolean) {
   const { error } = await supabase.from('tasks').update({ done_at: done ? new Date().toISOString() : null }).eq('id', taskId);
   if (error) throw new Error(error.message);
+}
+
+// Conclusão com resposta imediata na tela: marca nos dados já carregados, grava, e só então atualiza o que depende disso
+// (metas, constância, revisões). Se a gravação falhar, a atualização devolve o estado verdadeiro.
+const DONE_DEPENDENTS = ['active-plan', 'study', 'study-activity', 'theory-reviews', 'verticalized'];
+export async function toggleTaskDone(qc: QueryClient, taskId: string, done: boolean) {
+  const at = done ? new Date().toISOString() : null;
+  qc.setQueriesData<ActivePlan | null>({ queryKey: ['active-plan'] }, (old) => (old ? { ...old, tasks: old.tasks.map((t) => (t.id === taskId ? { ...t, done_at: at } : t)) } : old));
+  qc.setQueriesData<{ task: TaskRow }>({ queryKey: ['study', taskId] }, (old) => (old ? { ...old, task: { ...old.task, done_at: at } } : old));
+  try { await setTaskDone(taskId, done); } finally {
+    for (const key of DONE_DEPENDENTS) void qc.invalidateQueries({ queryKey: [key] });
+  }
 }
 
 export const KIND_LABEL: Record<string, string> = {

@@ -152,7 +152,8 @@ Deno.serve(async (req) => {
       const lei = await lawExcerpts(p);
       const ex = await deps.ai(Explanation, explanationJsonSchema(), explainPrompt({
         banca: p.prova?.banca ?? '', enunciado: plain(p.enunciado), alternativas: p.alternativas.map((a) => ({ letra: a.letra, texto: plain(a.texto) })),
-        gabarito: q.gabarito, textos: p.textos.map(plain), lei,
+        gabarito: q.gabarito, textos: p.textos.map(plain), lei, assunto: p.assunto,
+        imagens: !!p.anexos?.length || p.alternativas.some((a) => !!a.imagens?.length) || /<img\b/i.test([p.enunciado, ...p.textos, ...p.alternativas.map((a) => a.texto)].join(' ')),
       }));
       // Só ficam citações que estavam entre os trechos fornecidos.
       const allowed = new Map(lei.map((l) => [normalizeText(l.ref), l.ref]));

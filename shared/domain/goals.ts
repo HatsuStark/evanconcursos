@@ -10,7 +10,7 @@ export interface GoalTask { date: string; minutes: number; kind: string; goal_qu
 
 const addDays = (day: string, n: number) => { const d = parseYmd(day)!; d.setDate(d.getDate() + n); return ymd(d); };
 const weekdayIndex = (day: string) => (parseYmd(day)!.getDay() + 6) % 7; // segunda = 0
-const isActive = (a: DayActivity | undefined) => !!a && (a.seconds >= MIN_ACTIVE_SECONDS || a.questions > 0 || a.tasks_done > 0 || a.discursives > 0);
+export const isActive = (a: DayActivity | undefined) => !!a && (a.seconds >= MIN_ACTIVE_SECONDS || a.questions > 0 || a.tasks_done > 0 || a.discursives > 0);
 
 export const activityStart = (today: string) => addDays(today, -ACTIVITY_LOOKBACK_DAYS);
 

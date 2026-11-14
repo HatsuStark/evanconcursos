@@ -13,7 +13,10 @@ import { roleContext } from '../ai/plan.ts';
 // Questões de versões anteriores não são reaproveitadas.
 // qgen-v3: receita de dificuldade por tipo de tema (lei, prática, língua, cálculo), apostila da sessão como fonte e
 // alternativas embaralhadas no código.
-export const GENERATED_PROMPT_VERSION = 'qgen-v3';
+// qgen-v4: a IA decide primeiro o que a questão cobra e a troca de cada distrator (o fundamento vem antes do enunciado na
+// resposta), confere se só uma alternativa se sustenta, escreve enunciado que não cita "a apostila" nem "o trecho" (o
+// candidato não os vê), limita comando negativo a uma questão por lote e mistura itens certos e errados em certo ou errado.
+export const GENERATED_PROMPT_VERSION = 'qgen-v4';
 export const GENERATED_BANCA = 'Inédita (IA)';
 export const GENERATED_MAX = 5;
 
@@ -30,10 +33,11 @@ export function generatedRoom(o: { missing: number; sessionQids: string[]; apiDr
 
 export const GeneratedQuestions = z.object({
   questoes: z.array(z.object({
+    // Primeiro campo de propósito: a IA planeja a regra e as trocas antes de escrever o enunciado e as alternativas.
+    fundamento: z.string().describe('Escreva antes do enunciado. O que decide a resposta (dispositivo de lei, regra, procedimento ou a conta) e o detalhe que os distratores trocam, em até 40 palavras.'),
     enunciado: z.string().describe('Trecho chamado de "destacado" no comando vai entre **duplo asterisco**.'),
     alternativas: z.array(z.string()).describe('5 alternativas sem a letra; vazio em certo ou errado.'),
     gabarito: z.string().describe('Letra correta (A a E) ou C/E em certo ou errado.'),
-    fundamento: z.string().describe('O que decide a resposta (dispositivo de lei, regra, procedimento ou a conta) e o detalhe que os distratores trocaram, em até 30 palavras.'),
   })),
 });
 export const generatedJsonSchema = () => z.toJSONSchema(GeneratedQuestions, { target: 'draft-7' });
@@ -117,6 +121,8 @@ Regras:
 - Caso concreto com servidor do cargo${p.cargo ? ` (${p.cargo})` : ''}: só situações e tarefas que as atribuições dele incluem. Nunca o ponha fazendo o trabalho de outro cargo do edital (ex.: quem cuida da limpeza e conservação não faz controle de acesso nem vigilância).
 - Fundamente nas fontes fornecidas: não invente prazos, números ou regras. Não cite jurisprudência, súmulas ou doutrina.
 - Exatamente uma alternativa correta${ce ? '' : '; as alternativas não se referem umas às outras ("todas as anteriores", "A e B") e podem ser lidas em qualquer ordem'}.
+- ${ce ? 'Misture itens certos e errados no lote. O item errado parte de uma afirmação verdadeira e troca um único detalhe.' : 'Antes de fixar o gabarito, confira cada distrator contra as fontes: se algum também puder ser defendido como correto, reescreva-o. Questão com duas respostas defensáveis é anulada na prova.'}
+- Enunciado autossuficiente: o candidato não vê a apostila nem os trechos de lei que você recebeu. Nunca escreva "segundo a apostila", "conforme o trecho" ou "de acordo com o texto fornecido"; cite a lei pelo nome, como a banca faz.${ce ? '' : '\n- Comando negativo ("INCORRETA", "EXCETO") em no máximo uma questão do lote, com a palavra em maiúsculas.'}
 Como chegar à dificuldade média a difícil:
 ${RECIPES[kind]}
 - Alternativas de tamanho parecido; a correta não pode ser a mais longa nem a mais detalhada.

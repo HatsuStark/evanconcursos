@@ -3,7 +3,9 @@
 import { z } from 'zod';
 import { normalizeText } from '../ai/notice.ts';
 
-export const MNEMONIC_PROMPT_VERSION = 'mnemonic-v2';
+// mnemonic-v3: prefere o mnemônico consagrado nos cursinhos, limita a 3 a 7 itens, respeita a ordem quando ela importa e
+// desiste quando a sigla só fecha acrescentando ou omitindo item.
+export const MNEMONIC_PROMPT_VERSION = 'mnemonic-v3';
 
 export const MnemonicChoice = z.object({
   acao: z.enum(['reusar', 'criar', 'nenhum']),
@@ -11,7 +13,7 @@ export const MnemonicChoice = z.object({
   conceito: z.string().describe('O que o mnemônico ajuda a lembrar, genérico o bastante para servir a outras questões (ex.: "Requisitos do ato administrativo").'),
   mnemonico: z.string().describe('Acrônimo ou frase curta (até 120 caracteres).'),
   itens: z.array(z.object({ chave: z.string(), significado: z.string() })).describe('Cada letra/palavra do mnemônico e o que representa.'),
-  explicacao: z.string().describe('Como usar o mnemônico nesta questão, em até 3 frases.'),
+  explicacao: z.string().describe('Como usar o mnemônico em questões deste conteúdo e qual item a banca costuma trocar, em até 3 frases.'),
 });
 export type MnemonicChoice = z.infer<typeof MnemonicChoice>;
 export const mnemonicJsonSchema = () => z.toJSONSchema(MnemonicChoice, { target: 'draft-7' });
@@ -30,7 +32,10 @@ Regras:
 - Se algum mnemônico existente cobre o que a questão cobra (inclusive quando a questão trata de só um dos itens dele), use acao "reusar" com o id dele: ver o conjunto ajuda a não confundir os itens.
 - Crie um novo só quando a questão cobra algo memorizável (lista, requisitos, elementos, prazos, ordem, classificações) e nenhum existente serve.
 - Se a questão é de interpretação, raciocínio ou cálculo, ou se o mnemônico seria forçado, use acao "nenhum".
-- O mnemônico precisa estar correto segundo o gabarito e a lei; não invente itens. Em português; pode ser acrônimo ou frase.
+- Se já existe um mnemônico consagrado nos cursinhos para este conteúdo (ex.: LIMPE para os princípios do art. 37 da Constituição), use-o em vez de inventar outro: é o que o estudante vai encontrar em outros materiais.
+- O mnemônico precisa estar correto segundo o gabarito e a lei: cada item tem de estar no gabarito ou nos trechos de lei fornecidos; sem trecho de lei, só entram itens de que você tem certeza. Em português; pode ser acrônimo ou frase.
+- Bom mnemônico é fácil de dizer em voz alta e mais curto que a lista que guarda: de 3 a 7 itens. Se a sigla só fecha acrescentando, omitindo ou forçando um item, use acao "nenhum".
+- Quando a ordem importa (fases, etapas, ordem de preferência), o mnemônico segue essa ordem.
 - conceito: genérico (serve a outras questões do mesmo tema), sem citar a questão.`;
 }
 

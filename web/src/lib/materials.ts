@@ -1,8 +1,10 @@
 // Biblioteca pessoal: PDFs do estudante (bucket privado), mapeamento de páginas pela IA e links temporários.
 import { useQuery } from '@tanstack/react-query';
 import type { MarkRect } from '../../../shared/domain/pdf-reading.ts';
-import { extractPages } from './pdfjs.ts';
 import { supabase } from './supabase.ts';
+
+// PDF.js sob demanda: só quem envia ou remapeia um PDF baixa o leitor.
+const extractPages = async (bytes: ArrayBuffer) => (await import('./pdfjs.ts')).extractPages(bytes);
 
 export interface Material { id: string; title: string; storage_path: string; pages: number | null; status: 'uploaded' | 'mapping' | 'mapped' | 'failed'; status_detail: string; size_bytes: number; created_at: string }
 export interface SessionPages { id: string; page_from: number; page_to: number; manual: boolean; material: { id: string; title: string; storage_path: string; pages: number | null } }

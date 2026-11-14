@@ -1,4 +1,4 @@
-import { CalendarClock, Check, CheckCircle2, ChevronDown, ChevronUp, Circle, FileUp, Layers, PenLine, RotateCcw, Sparkles } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, Circle, FileUp, PenLine, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cycleProgress, cycleQueue } from '../../../shared/domain/cycle.ts';
@@ -6,6 +6,8 @@ import { groupReviews } from '../../../shared/domain/theory-reviews.ts';
 import { RebalanceCard } from '../components/RebalanceCard.tsx';
 import { OpenPlanCard } from '../components/OpenPlanCard.tsx';
 import { CoverageBanner } from '../components/CoverageBanner.tsx';
+import { DailyReview } from '../components/DailyReview.tsx';
+import { DayPanel } from '../components/DayPanel.tsx';
 import { ReplanBanner } from '../components/ReplanBanner.tsx';
 import { Shell } from '../components/Shell.tsx';
 import { TaskCard } from '../components/TaskCard.tsx';
@@ -20,7 +22,6 @@ import { prepareGuides, today, useActivePlan } from '../lib/plans.ts';
 import { useTheoryReviews } from '../lib/theoryReviews.ts';
 
 const DISCURSIVE_NUDGE_DAYS = 7;
-const THEORY_REVIEWS_SHOWN = 4;
 const NEXT_TASKS_STEP = 5;
 const CYCLE_SHOWN = 3;
 
@@ -71,15 +72,6 @@ export function HomePage() {
 
   const rail = (
     <>
-      {!openEnded && (
-        <section>
-          <h3>Prova</h3>
-          <div className="glass card" style={{ display: 'grid', gap: 6 }}>
-            <strong style={{ fontSize: 34, color: 'var(--cyan)' }}>{days != null ? Math.max(0, days) : '—'}</strong>
-            <span className="muted">dias até {fmtDate(notice.exam_date)}</span>
-          </div>
-        </section>
-      )}
       {activity.data && <WeekGoals tasks={tasks} activity={activity.data} hours={version?.inputs.hours ?? []} />}
       <section>
         <h3>Conteúdo estudado</h3>
@@ -125,47 +117,15 @@ export function HomePage() {
       <div className="hero">
         <span className="badge lime">Concurso ativo</span>
         <h2 style={{ fontSize: 28, margin: '14px 0 4px' }}>{notice.role_name}</h2>
-        <p className="muted" style={{ margin: '0 0 18px' }}>{[notice.organization, notice.board].filter(Boolean).join(' · ')}</p>
-        <div className="meta-row">
-          <span className="chip" style={{ color: 'var(--cyan)' }}><CalendarClock /> {openEnded ? 'Sem prazo' : `Prova ${fmtDate(notice.exam_date)}`}</span>
-          <span className="chip" style={{ color: 'var(--blue)' }}><Layers /> {subjects.length} matérias</span>
-          <span className="chip" style={{ color: 'var(--lime)' }}><CheckCircle2 /> {tasks.filter((t) => t.done_at).length} tarefas feitas</span>
-        </div>
+        <p className="muted" style={{ margin: '0 0 18px' }}>{[notice.organization, notice.board, openEnded ? 'Sem prazo' : `Prova ${fmtDate(notice.exam_date)}`].filter(Boolean).join(' · ')}</p>
+        <DayPanel activity={activity.data ?? []} hours={version?.inputs.hours ?? []} today={t0} todays={isCycle ? [] : todays} examDays={openEnded ? null : days}
+          next={isCycle ? queue[0] : todays.find((t) => !t.done_at && t.kind !== 'exam')} reviewsDue={dueReviews.length} />
       </div>
       <OpenPlanCard active={active.data} />
       <RebalanceCard active={active.data} />
       <ReplanBanner active={active.data} />
       <CoverageBanner active={active.data} />
-      {!!(due.data?.errors || due.data?.cards) && (
-        <div className="glass card review-today">
-          <RotateCcw size={20} style={{ color: 'var(--orange)' }} />
-          <div style={{ flex: 1 }}><strong>Revisar</strong><div className="muted small">{due.data!.errors} erro(s) esperando a revisão semanal · {due.data!.cards} flashcard(s) para hoje</div></div>
-          {!!due.data!.errors && <Link className="btn ghost sm" to="/questoes?aba=revisar">Revisar erros agora</Link>}
-          {!!due.data!.cards && <Link className="btn ghost sm" to="/questoes?aba=flashcards">Flashcards</Link>}
-        </div>
-      )}
-      {!!theoryReviews.data?.length && (
-        <div className="glass card" style={{ marginTop: 18 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: dueReviews.length ? 10 : 0, flexWrap: 'wrap' }}>
-            <RotateCcw size={20} style={{ color: 'var(--cyan)' }} />
-            <strong>Revisão de teoria</strong>
-            <span className="muted small" style={{ flex: 1 }}>{dueReviews.length ? `${dueReviews.length} ${dueReviews.length === 1 ? 'tema' : 'temas'} para hoje` : 'Nada para hoje'}</span>
-            <Link className="btn ghost sm" to="/revisoes">Ver todas</Link>
-          </div>
-          <div className="grid" style={{ gap: 8 }}>
-            {dueReviews.slice(0, THEORY_REVIEWS_SHOWN).map((r) => (
-              <div key={r.id} className="material-row">
-                <div style={{ flex: 1, minWidth: 200 }}>
-                  <div>{r.task.title}</div>
-                  <div className="muted small">{subjects.find((s) => s.id === r.task.subject_id)?.name ?? ''} · revisão {r.stage} de 3{r.due_on < today() ? ' · atrasada' : ''}</div>
-                </div>
-                <Link className="btn ghost sm" to={`/estudo/${r.task_id}?revisao=1`}>Revisar</Link>
-              </div>
-            ))}
-          </div>
-          {dueReviews.length > THEORY_REVIEWS_SHOWN && <p className="faint small" style={{ margin: '10px 0 0' }}>Os próximos aparecem conforme você revisa, começando pelos mais atrasados.</p>}
-        </div>
-      )}
+      <DailyReview themes={dueReviews} errors={due.data?.errors ?? 0} cards={due.data?.cards ?? 0} subjects={subjects} today={t0} hasReviews={!!theoryReviews.data?.length} />
       {discursive.data?.rules && (lastDiscursive.data === null || (lastDiscursive.data ?? 0) >= DISCURSIVE_NUDGE_DAYS) && !lastDiscursive.isLoading && (
         <div className="glass card review-today">
           <PenLine size={20} style={{ color: 'var(--violet)' }} />

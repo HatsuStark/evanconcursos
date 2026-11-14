@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import { readingMinutes, tooLongForSession } from '../../../shared/domain/pdf-reading.ts';
 import { addSessionPages, deleteSessionPages, signedUrl, updateSessionPages, useMaterials, useSessionPages, type SessionPages } from '../lib/materials.ts';
 import { useActivePlan } from '../lib/plans.ts';
-import { PdfViewer } from './PdfViewer.tsx';
+import { PdfViewer } from './PdfViewerLazy.tsx';
 import { RangeEditor } from './RangeEditor.tsx';
 
 // Aba "Meus PDFs" do modo estudo: só os trechos das apostilas do estudante que cobrem esta sessão.

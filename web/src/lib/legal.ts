@@ -3,8 +3,10 @@ import { useQuery } from '@tanstack/react-query';
 import { findLawRefs, inRanges, rangesLabel, rangesOrFilter, sessionLawRefs as lawRefsOfSession, storedLawRefs, withWholeTitleLaws, type LawRef } from '../../../shared/legal/refs.ts';
 import { ownLawEntry, preferOfficial, unlistedNorms, type OwnNormRow, type UnlistedNorm } from '../../../shared/legal/norms.ts';
 import { lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
-import { extractPages } from './pdfjs.ts';
 import { supabase } from './supabase.ts';
+
+// PDF.js sob demanda: só quem envia um PDF baixa o leitor.
+const extractPages = async (bytes: ArrayBuffer) => (await import('./pdfjs.ts')).extractPages(bytes);
 
 export interface Norm { id: string; law_key: string; name: string; short_name: string; source_url: string; version: 'Current' | 'Original'; fetched_at: string; owner_id?: string | null; license?: string }
 export interface Article { id: string; ord: number; label: string; num: number; suffix: string; heading: string; text: string; notes: string[]; revoked: boolean }
