@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ownHtml, ownQid, ownRows, type OwnExam } from './own.ts';
+import { citesMissingText, ownHtml, ownQid, ownRows, type OwnExam } from './own.ts';
 
 const q = (over: Partial<OwnExam['questoes'][number]> = {}): OwnExam['questoes'][number] => ({
   numero: 1, enunciado: 'Qual é a **capital**?', alternativas: [{ letra: 'A', texto: 'X' }, { letra: 'B', texto: 'Y' }], gabarito: 'B',
@@ -45,5 +45,25 @@ describe('banco próprio', () => {
     const id = ownQid(() => 'abcdef0123456789ffff', 'prova-x', 3);
     expect(id).toBe('own-abcdef0123456789');
     expect(id).toMatch(/^[\w-]+$/);
+  });
+
+  it('descarta questão de interpretação que cita um texto que não veio', () => {
+    const port = { materia: 'Língua Portuguesa', assunto: 'Interpretação de Texto', dificuldade: 3, desatualizada: false };
+    const { rows, skipped, dropped } = ownRows(exam([
+      q({ numero: 1, enunciado: 'O parágrafo final do texto permite concluir que a personagem optou por', classificacao: port }),
+      q({ numero: 2, enunciado: 'O parágrafo final do texto permite concluir que a personagem optou por', classificacao: port, texto_associado: 'T1' }),
+    ]), (n) => `own-${n}`);
+    expect(rows.map((r) => r.qid)).toEqual(['own-2']);
+    expect(skipped).toEqual({ 'sem texto': 1 });
+    expect(dropped).toEqual(['own-1']);
+  });
+
+  it('só considera falta de texto em Português e quando o trecho não vem no enunciado', () => {
+    expect(citesMissingText('A história narrada apresenta a personagem em uma situação de', 'Interpretação de Texto')).toBe(true);
+    expect(citesMissingText('De acordo com o texto, o autor defende', 'Língua Portuguesa')).toBe(true);
+    expect(citesMissingText('Segundo o texto constitucional, compete à União', 'Direito Constitucional')).toBe(false);
+    expect(citesMissingText('No texto, o termo destacado em “casa velha” exerce', 'Língua Portuguesa')).toBe(false);
+    expect(citesMissingText('Leia o texto a seguir e responda.', 'Língua Portuguesa')).toBe(false);
+    expect(citesMissingText('Na redação oficial, o fecho do texto deve', 'Língua Portuguesa')).toBe(false);
   });
 });

@@ -49,7 +49,7 @@ const walk = (d: string) => { for (const f of readdirSync(d)) { const p = join(d
 for (const d of dirs) if (existsSync(d)) walk(d);
 
 const sha1 = (s: string) => createHash('sha1').update(s).digest('hex');
-const rows: OwnRow[] = [], skipped: Record<string, number> = {}, materias: Record<string, number> = {};
+const rows: OwnRow[] = [], dropped: string[] = [], skipped: Record<string, number> = {}, materias: Record<string, number> = {};
 let exams = 0, total = 0;
 for (const file of files) {
   const exam = JSON.parse(readFileSync(file, 'utf8')) as OwnExam;
@@ -58,6 +58,7 @@ for (const file of files) {
   const key = basename(file, '.json');
   const r = ownRows(exam, (n) => ownQid(sha1, key, n));
   rows.push(...r.rows);
+  dropped.push(...r.dropped);
   for (const [k, v] of Object.entries(r.skipped)) skipped[k] = (skipped[k] ?? 0) + v;
 }
 // Repetidas: mesma chave de conteúdo (texto sem formatação, acento nem pontuação). Fica a que já está no banco (o id que
@@ -91,6 +92,11 @@ console.log('Por matéria:', Object.entries(materias).sort((a, b) => b[1] - a[1]
 if (DRY || !rows.length) process.exit(0);
 
 const db = await connect();
+// Sem texto-base (ver citesMissingText): saem do banco mesmo se entraram antes da regra. Mesma ressalva das órfãs.
+if (dropped.length) {
+  const r = await db.query(`delete from public.qbank_questions where qid = any($1::text[])`, [dropped]);
+  if (r.rowCount) console.log(`${r.rowCount} questões sem texto-base removidas do banco.`);
+}
 if (CLEAN && repeated.length) {
   const r = await db.query(`delete from public.qbank_questions where qid = any($1::text[])`, [repeated]);
   console.log(`${r.rowCount} repetidas removidas do banco.`);
