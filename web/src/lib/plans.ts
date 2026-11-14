@@ -61,6 +61,10 @@ async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>) {
 // Busca (no servidor) o texto das normas citadas no edital que o app ainda não tem: federais no normas.leg.br, estaduais
 // no acervo ctresb/leis. Rápida quando já foram achadas antes, por qualquer estudante.
 export const resolveNoticeLaws = (noticeId: string) => invoke<{ found: string[]; missing: string[] }>('plan-design', { step: 'laws', noticeId }, 1);
+// Sessões que cresceram (aviso de cobertura) divididas em partes, nos dias de aprofundamento/consolidação da matéria.
+export interface SplitPreview { subject: string; session: string; date: string; parts: { title: string; date: string; replaces: string | null }[]; missingDays: number }
+export const previewSplit = (noticeId: string, planNoticeId: string) => invoke<{ preview: SplitPreview[] }>('plan-design', { step: 'reorganize', noticeId, planNoticeId }, 1);
+export const applySplit = (noticeId: string, planNoticeId: string) => invoke<{ changed: number }>('plan-design', { step: 'reorganize', noticeId, planNoticeId, apply: true }, 1);
 
 export type GenProgress ={ step: 'strategy' | 'sessions' | 'saving' | 'materials'; done: number; total: number };
 

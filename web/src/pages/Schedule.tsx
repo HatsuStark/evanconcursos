@@ -120,7 +120,7 @@ export function SchedulePage() {
       }>
       <OpenPlanCard active={active.data} />
       <PacingSwitch planId={plan.id} pacing={plan.pacing} openEnded={openEnded} />
-      <PlanNoticeBanner planId={active.data.plan.id} />
+      <PlanNoticeBanner planId={active.data.plan.id} noticeId={active.data.plan.notice_id} />
       <ReplanBanner active={active.data} />
       <CoverageBanner active={active.data} />
       <div className="calendar glass" role="grid" aria-label="Calendário de estudos">

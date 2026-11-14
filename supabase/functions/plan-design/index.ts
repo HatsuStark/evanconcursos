@@ -4,11 +4,13 @@
 //     no acervo ctresb/leis) → {found, missing}. Sem IA; o app chama antes da estratégia.
 //   {step:'strategy', noticeId, inputs, weeks, hours} → prioridade (peso 1–5) e foco por matéria + orientações
 //   {step:'sessions', noticeId, subjectId, n, minutes, level, focus, profile} → n sessões da matéria, cobrindo todos os tópicos
+//   {step:'reorganize', noticeId, planNoticeId, apply?} → divide em partes as sessões que cresceram (aviso de cobertura),
+//     cada parte nova no dia de um aprofundamento/consolidação da mesma matéria. Sem apply, só a prévia. Sem IA.
 // O calendário é montado no app pelo scheduler determinístico e gravado por create_plan_version.
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { aiLawRefs, findLawRefs, inRanges, type LawRef, mergeLawRefs, rangesLabel, rangesOrFilter, sessionLawRefs } from '../../../shared/legal/refs.ts';
+import { aiLawRefs, findLawRefs, inRanges, type LawRef, mergeLawRefs, rangesLabel, rangesOrFilter, sessionLawRefs, storedLawRefs } from '../../../shared/legal/refs.ts';
 import { LAWS, lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
-import { contentNeed, type LawSize, mergeShortLawSessions, PLAN_PROMPT_VERSION, PlanInputs, PlanStrategy, repairSessions, sessionsJsonSchema, sessionsPrompt, strategyJsonSchema, strategyPrompt, SubjectSessions } from '../../../shared/ai/plan.ts';
+import { contentNeed, DEEP_PREFIX, lawSessionParts, PRACTICE_PREFIX, type LawSize, mergeShortLawSessions, PLAN_PROMPT_VERSION, PlanInputs, PlanStrategy, repairSessions, sessionsJsonSchema, sessionsPrompt, strategyJsonSchema, strategyPrompt, SubjectSessions } from '../../../shared/ai/plan.ts';
 import { articleGaps, fillArticleGaps, lawCite, requiredLaws, type LawArticle, type RequiredLaw } from '../../../shared/ai/plan-coverage.ts';
 import { isOpenEnded } from '../../../shared/domain/rounds.ts';
 import { aiFor, defaultModel, keyFor } from '../_shared/ai.ts';
@@ -179,6 +181,47 @@ Deno.serve(async (req) => {
       fixes.unshift(...filled.fixes.map((f) => `artigos do edital: ${lawCite(f.law, own)}, ${rangesLabel(f)} em "${f.before}"`));
       await logUsage(admin, { ownerId: auth.user.id, operation, model: used, promptVersion: PLAN_PROMPT_VERSION, usage, latencyMs, status: 'ok' });
       return json(200, { sessions, fixes });
+    }
+
+    if (body.step === 'reorganize') {
+      type Task = { id: string; date: string; position: number; minutes: number; kind: string; subject_id: string | null; session_id: string | null; title: string; done_at: string | null };
+      const { data: pn } = await auth.client.from('plan_notices').select('id, plan_id, items, seen_at').eq('id', String(body.planNoticeId ?? '')).maybeSingle();
+      const { data: plan } = pn ? await auth.client.from('study_plans').select('id, notice_id').eq('id', pn.plan_id).maybeSingle() : { data: null };
+      if (!pn || pn.seen_at || !plan || plan.notice_id !== notice.id) return json(404, { error: 'Aviso não encontrado ou já resolvido.' });
+      const own = await ownLaws(admin, auth.user.id);
+      const { data: rows } = await auth.client.from('tasks').select('id, date, position, minutes, kind, subject_id, session_id, title, done_at')
+        .eq('plan_id', plan.id).is('superseded_in_version', null).order('date').order('position');
+      const tasks = (rows ?? []) as Task[];
+      const isDeep = (t: Task) => t.kind === 'theory' && (t.title.startsWith(DEEP_PREFIX) || t.title.startsWith(PRACTICE_PREFIX));
+      const used = new Set<string>();
+      const parts: { sessionId: string; title: string; lawRefs: LawRef[]; extra: { title: string; lawRefs: LawRef[]; replaceTaskId: string }[] }[] = [];
+      const preview: { subject: string; session: string; date: string; parts: { title: string; date: string; replaces: string | null }[]; missingDays: number }[] = [];
+      const items = (pn.items ?? []) as { subject: string; sessionId?: string }[];
+      for (const sid of [...new Set(items.map((i) => i.sessionId).filter((x): x is string => !!x))]) {
+        const { data: s } = await auth.client.from('study_sessions').select('id, subject_id, title, keyword, incidence, law_refs').eq('id', sid).maybeSingle();
+        const theory = tasks.find((t) => t.session_id === sid && t.kind === 'theory');
+        const refs = s ? storedLawRefs(s.law_refs) : null;
+        if (!s || !theory || theory.done_at || !refs) continue;
+        const size = await lawSize(admin, refs, own);
+        if (!size) continue;
+        // Dias livres da mesma matéria depois da sessão: aprofundamentos e revisões com questões primeiro, depois consolidação.
+        const later = tasks.filter((t) => t.subject_id === s.subject_id && !t.done_at && !used.has(t.id) && t.date > theory.date);
+        const pool = [...later.filter(isDeep), ...later.filter((t) => t.kind === 'consolidation')];
+        const x = { title: s.title, keyword: s.keyword, topics: [] as number[], incidence: s.incidence, refs }, minutes = theory.minutes || 60;
+        const want = lawSessionParts(x, size, minutes, 4);
+        const k = Math.min(want.length, 1 + pool.length);
+        const split = k === want.length ? want : lawSessionParts(x, size, minutes, k);
+        const chosen = pool.slice(0, split.length - 1).sort((a, b) => a.date.localeCompare(b.date) || a.position - b.position);
+        chosen.forEach((t) => used.add(t.id));
+        const subject = items.find((i) => i.sessionId === sid)?.subject ?? '';
+        preview.push({ subject, session: s.title, date: theory.date, missingDays: want.length - split.length,
+          parts: split.length > 1 ? split.map((p, j) => ({ title: p.title, date: j ? chosen[j - 1]!.date : theory.date, replaces: j ? chosen[j - 1]!.title : null })) : [] });
+        if (split.length > 1) parts.push({ sessionId: s.id, title: split[0]!.title, lawRefs: split[0]!.refs ?? refs, extra: split.slice(1).map((p, j) => ({ title: p.title, lawRefs: p.refs ?? [], replaceTaskId: chosen[j]!.id })) });
+      }
+      if (body.apply !== true) return json(200, { preview });
+      const { error } = await auth.client.rpc('split_plan_sessions', { p_plan: plan.id, p_data: { notice: pn.id, parts, summary: { kind: 'split', at: new Date().toISOString().slice(0, 10), sessions: parts.length } } });
+      if (error) return json(400, { error: error.message });
+      return json(200, { changed: parts.length });
     }
 
     return json(400, { error: 'Passo inválido.' });

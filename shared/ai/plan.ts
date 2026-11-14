@@ -286,6 +286,13 @@ function splitSession<T extends Session>(it: Sized<T>, k: number): T[] {
   return [it.x];
 }
 
+// Sessão de lei que cresceu depois de montada (artigos do edital incluídos): em quantas partes o texto pede (mesma régua
+// da montagem, no máximo `maxParts`) e a divisão, cada parte com o seu intervalo no título e nos refs.
+export function lawSessionParts<T extends Session>(x: T, size: LawSize[], minutes: number, maxParts: number): T[] {
+  const it: Sized<T> = { x, size, days: 1, deep: 0 };
+  return splitSession(it, Math.max(1, Math.min(maxParts, contentDays(it, minutes))));
+}
+
 // Artigos em sequência viram um intervalo ("994 a 1.010"); salto de número abre outro.
 function runs(list: { num: number; suffix: string }[]): ArticleRange[] {
   const out: ArticleRange[] = [];

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { theoryGoal } from '../domain/scheduler.ts';
 import { buildPlanPayload, carryOverSessions, fitOpenEnded, questionsOf, theoryPlan, type PlanBase } from './plan-build.ts';
-import { allocateSessions, contentNeed, fallbackSessions, isShortLaw, mergeShortLawSessions, repairSessions, type SubjectSessions } from './plan.ts';
+import { allocateSessions, contentNeed, fallbackSessions, isShortLaw, lawSessionParts, mergeShortLawSessions, repairSessions, type SubjectSessions } from './plan.ts';
 import { findLawRefs } from '../legal/refs.ts';
 
 function rng(seed: number) { return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32; }; }
@@ -311,5 +311,22 @@ describe('plano sem prazo dimensionado pelo conteúdo', () => {
       subjects: [{ id: 'a', name: 'A', core: true, questions: 5, weight: 3, topics: [{ id: 't0', text: 'x' }] }] };
     const counts = fitOpenEnded({ ...base }, { a: 1 });
     expect(counts.a!.days).toBe(theoryPlan(base).a!.days);
+  });
+});
+
+describe('sessão que cresceu depois de montada (lawSessionParts)', () => {
+  const law = (from: number, to: number, chars: number) => [{ law: 'L12153', short: 'Lei 12.153/09', cite: 'Lei 12.153/09', ranges: '', liveChars: (to - from + 1) * chars, liveArticles: to - from + 1, revokedArticles: 0,
+    articles: Array.from({ length: to - from + 1 }, (_, i) => ({ label: String(from + i), num: from + i, suffix: '', chars, revoked: false })) }];
+  const x = { title: 'Juizados da Fazenda Pública: Lei 12.153, arts. 1 a 28', keyword: 'juizados', topics: [], incidence: 2, refs: [{ law: 'L12153', ranges: [{ from: 1, to: 28 }] }] };
+  it('divide pelo texto, cada parte com a sua faixa, e respeita o máximo de partes', () => {
+    // 28 artigos × 1.000 caracteres em sessões de 60 min (9.000 por dia) pedem 4 dias.
+    const parts = lawSessionParts(x, law(1, 28, 1000), 60, 4);
+    expect(parts).toHaveLength(4);
+    expect(parts[0]!.title).toMatch(/^Juizados da Fazenda Pública \(parte 1 de 4\): Lei 12\.153\/09, arts\. 1 a \d+$/);
+    expect(parts.flatMap((p) => p.refs![0]!.ranges)).toEqual([{ from: 1, to: 7 }, { from: 8, to: 14 }, { from: 15, to: 21 }, { from: 22, to: 28 }]);
+    expect(lawSessionParts(x, law(1, 28, 1000), 60, 2)).toHaveLength(2);
+  });
+  it('cabe num dia: fica como está', () => {
+    expect(lawSessionParts(x, law(1, 28, 100), 60, 4)).toEqual([x]);
   });
 });

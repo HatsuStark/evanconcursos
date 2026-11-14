@@ -40,14 +40,14 @@ async function articlesOf(law: LawEntry) {
   return normArticles.get(law.urn)!;
 }
 
-const plans = await q<{ id: string; owner_id: string; notice_id: string; version: string; email: string }>(`
-  select p.id, p.owner_id, p.notice_id, p.active_version_id as version, u.email from study_plans p join auth.users u on u.id = p.owner_id
+const plans = await q<{ id: string; owner_id: string; notice_id: string; email: string }>(`
+  select p.id, p.owner_id, p.notice_id, u.email from study_plans p join auth.users u on u.id = p.owner_id
   where p.status = 'active' and p.active_version_id is not null ${EMAIL ? 'and lower(u.email) = $1' : ''} order by u.email`, EMAIL ? [EMAIL] : []);
 let affected = 0, changedSessions = 0;
 for (const plan of plans) {
   const extra = lawsFor(plan.owner_id);
   const subjects = await q<{ id: string; name: string }>(`select id, name from notice_subjects where notice_id = $1 order by position`, [plan.notice_id]);
-  const items: { subject: string; session: string; date: string | null; added: string }[] = [];
+  const items: { subject: string; session: string; sessionId: string; date: string | null; added: string }[] = [];
   const updates: { id: string; title: string; refs: LawRef[]; topicIds: string[]; before: string }[] = [];
   for (const subject of subjects) {
     const topics = await q<{ id: string; text: string }>(`select id, text from notice_topics where subject_id = $1 order by position`, [subject.id]);
@@ -62,7 +62,9 @@ for (const plan of plans) {
       withArts.push({ ...r, articles });
     }
     const sessions = await q<{ id: string; title: string; topic_ids: string[]; law_refs: unknown }>(
-      `select id, title, topic_ids, law_refs from study_sessions where plan_version_id = $1 and subject_id = $2 order by position`, [plan.version, subject.id]);
+      // Sessões das tarefas em vigor: depois de uma reorganização (replan_version), a versão ativa não tem sessões próprias e
+    // as tarefas continuam apontando para as da versão em que o plano foi montado.
+      `select id, title, topic_ids, law_refs from study_sessions where subject_id = $2 and id in (select session_id from tasks where plan_id = $1 and superseded_in_version is null) order by position`, [plan.id, subject.id]);
     const tasks = await q<{ session_id: string; kind: string; date: Date; done_at: Date | null }>(
       `select session_id, kind, date, done_at from tasks where plan_id = $1 and subject_id = $2 and superseded_in_version is null and session_id is not null`, [plan.id, subject.id]);
     const idx = new Map(topics.map((t, i) => [t.id, i]));
@@ -85,7 +87,7 @@ for (const plan of plans) {
       const s = filled.sessions[i]!;
       updates.push({ id: s.id, title: s.title, refs: s.refs, topicIds: s.topics.map((t) => topics[t]!.id), before: list[i]!.title });
     }
-    for (const f of filled.fixes) items.push({ subject: subject.name, session: f.before, date: list[f.index]!.date, added: `${lawCite(f.law, extra)}, ${rangesLabel(f)}` });
+    for (const f of filled.fixes) items.push({ subject: subject.name, session: f.before, sessionId: list[f.index]!.id, date: list[f.index]!.date, added: `${lawCite(f.law, extra)}, ${rangesLabel(f)}` });
   }
   if (!items.length) continue;
   affected++; changedSessions += updates.length;

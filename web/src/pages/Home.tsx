@@ -134,7 +134,7 @@ export function HomePage() {
       </div>
       <OpenPlanCard active={active.data} />
       <RebalanceCard active={active.data} />
-      <PlanNoticeBanner planId={active.data.plan.id} />
+      <PlanNoticeBanner planId={active.data.plan.id} noticeId={active.data.plan.notice_id} />
       <ReplanBanner active={active.data} />
       <CoverageBanner active={active.data} />
       <DailyReview themes={dueReviews} errors={due.data?.errors ?? 0} cards={due.data?.cards ?? 0} subjects={subjects} today={t0} hasReviews={!!theoryReviews.data?.length} />
