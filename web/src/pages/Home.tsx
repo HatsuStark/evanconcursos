@@ -19,6 +19,7 @@ import { useStudyActivity } from '../lib/goals.ts';
 import { useNotices } from '../lib/notices.ts';
 import { useDueCounts } from '../lib/practice.ts';
 import { prepareGuides, today, useActivePlan } from '../lib/plans.ts';
+import { prefetchQuestions } from '../lib/questions.ts';
 import { useTheoryReviews } from '../lib/theoryReviews.ts';
 
 const DISCURSIVE_NUDGE_DAYS = 7;
@@ -37,6 +38,15 @@ export function HomePage() {
   const theoryReviews = useTheoryReviews(planId);
   const activity = useStudyActivity(planId);
   useEffect(() => { if (planId) prepareGuides(planId); }, [planId]);
+  // A busca de questões da próxima tarefa começa já na tela Hoje: quando o estudante chega às Questões, a primeira está pronta.
+  const nextId = (() => {
+    const d = active.data;
+    if (!d) return undefined;
+    const t0 = today(), open = d.tasks.filter((t) => !t.done_at && t.kind !== 'exam');
+    const t = d.plan.pacing === 'ciclo' ? open[0] : open.find((x) => x.date === t0);
+    return t && t.goal_questions > 0 && t.kind !== 'simulado' ? t.id : undefined;
+  })();
+  useEffect(() => { if (nextId) prefetchQuestions(nextId); }, [nextId]);
   const [nextShown, setNextShown] = useState(0);
   const name = session?.user.email?.split('@')[0] ?? '';
   const subtitle = name ? `Olá, ${name}. Pronto para estudar?` : 'Pronto para estudar?';

@@ -447,6 +447,7 @@ export function planPicks(incidence: Incidence[], served: Map<string, number>, n
 // explain-v2: a explicação ensina a acertar a próxima questão do mesmo tipo. Começa pela regra que decide (reaproveitável),
 // aponta em cada alternativa errada o trecho exato que a derruba, mostra a conta em cálculo, trata certo ou errado como um
 // item só, avisa quando a questão depende de imagem que a IA não recebeu e quando a lei atual não combina com o gabarito.
+// Com súmulas e teses oficiais ligadas aos artigos da questão, a explicação pode citá-las (só as fornecidas).
 // As explicações já gravadas continuam valendo (uma por questão, compartilhada): só as novas saem neste formato.
 export const EXPLAIN_PROMPT_VERSION = 'explain-v2';
 export const Explanation = z.object({
@@ -459,20 +460,21 @@ export type Explanation = z.infer<typeof Explanation>;
 export const explanationJsonSchema = () => z.toJSONSchema(Explanation, { target: 'draft-7' });
 
 // assunto: assunto da questão no banco, para situar a regra. imagens: a questão tem figura ou anexo que a IA não recebe.
-export function explainPrompt(p: { banca: string; enunciado: string; alternativas: { letra: string; texto: string }[]; gabarito: string; textos: string[]; lei: { ref: string; text: string }[]; assunto?: string; imagens?: boolean }) {
+export function explainPrompt(p: { banca: string; enunciado: string; alternativas: { letra: string; texto: string }[]; gabarito: string; textos: string[]; lei: { ref: string; text: string }[]; assunto?: string; imagens?: boolean; juris?: { ref: string; text: string }[] }) {
+  const juris = p.juris ?? [];
   return `Você é professor de cursinho para concursos. Explique a questão abaixo para um estudante que a errou e quer acertar a próxima do mesmo tipo.
 ${p.assunto ? `Assunto: ${p.assunto}\n` : ''}${p.textos.length ? `Texto associado:\n${p.textos.join('\n').slice(0, 3000)}\n` : ''}Questão (${p.banca || 'banca não informada'}):
 ${p.enunciado}
 ${p.alternativas.map((a) => `${a.letra}) ${a.texto}`).join('\n')}
 Gabarito oficial: ${p.gabarito}
 ${p.lei.length ? `Trechos oficiais da lei (use somente estes como fonte legal):\n${p.lei.map((l) => `[${l.ref}] ${l.text}`).join('\n\n').slice(0, 12000)}` : 'Nenhum trecho de lei foi fornecido.'}
-Regras:
+${juris.length ? `Jurisprudência oficial do STF e do STJ ligada a esses artigos (texto publicado pelo tribunal; única jurisprudência que pode ser citada):\n${juris.map((j) => `[${j.ref}] ${j.text}`).join('\n\n').slice(0, 6000)}\n` : ''}Regras:
 - O gabarito oficial é a referência: explique o raciocínio da banca e nunca diga que outra alternativa é a correta. Se o trecho de lei fornecido (texto atual) não combinar com o gabarito, mantenha o gabarito e avise na dica que a lei pode ter mudado depois da prova.
 - resumo: comece pela regra que decide a questão, escrita de um jeito que sirva para outras questões do tema; só depois aplique ao caso. O estudante precisa sair com a regra, não só com a resposta desta questão.
 - Em cada alternativa errada, aponte a palavra ou o trecho que a torna errada e diga como ficaria correta. "Está errada porque contraria a lei" não ensina nada. Não repita o texto da alternativa.
 - Questão de certo ou errado: um único comentário, com a letra do gabarito (C ou E), apontando o trecho que torna o item certo ou errado.
 - Questão de cálculo ou de raciocínio lógico: mostre a conta ou os passos no resumo, na ordem em que o candidato os faria na prova.
-- Cite artigos somente se estiverem nos trechos fornecidos, no formato do colchete (ex.: "CP, art. 312"). Não cite jurisprudência, súmulas nem autores.
+- Cite artigos somente se estiverem nos trechos fornecidos, no formato do colchete (ex.: "CP, art. 312"). ${juris.length ? 'Jurisprudência: quando um item fornecido decide a questão ou alguma alternativa, cite-o pelo nome do colchete (ex.: "Súmula 17/STJ") e reproduza o sentido do enunciado oficial, sem acrescentar regra ou exceção. Se a questão depender de julgado que não está entre os fornecidos, explique o entendimento sem dar número de súmula ou de tema. Não cite autores.' : 'Não cite jurisprudência, súmulas nem autores.'}
 - Se não houver trecho de lei, explique pelo raciocínio, sem números de artigos.${p.imagens ? '\n- A questão tem imagem ou anexo que você não recebeu: diga isso no resumo e explique só o que o texto permite, sem supor o conteúdo da imagem.' : ''}
 - dica: a troca ou o detalhe que a banca explora neste tipo de questão, para o estudante reconhecer da próxima vez. Sem dica útil, deixe vazio.
 - Linguagem simples e direta, sem rodeios e sem elogiar a questão.`;

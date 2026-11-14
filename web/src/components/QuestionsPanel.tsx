@@ -60,6 +60,7 @@ export function QuestionsPanel({ source, goal = 0, answered = 0, paged = false }
   const [error, setError] = useState('');
   const [summary, setSummary] = useState(false);
   const fetching = useRef(false);
+  const needRef = useRef(1); // quantas questões faltam para a página e as adiantadas
   const sizeRef = useRef(pageSize);
   sizeRef.current = pageSize;
   // A busca depende do conteúdo da origem, não da identidade do objeto (que muda a cada renderização).
@@ -78,7 +79,7 @@ export function QuestionsPanel({ source, goal = 0, answered = 0, paged = false }
       // uma, chega só a seguinte: questão que ele não vai abrir não gasta créditos.
       // A primeira pode já ter sido adiantada pela tela de estudo.
       const pre = source.kind === 'task' && !queueRef.current.length ? takePrefetched(source.taskId) : null;
-      const r = source.kind === 'task' ? (pre && await pre.catch(() => null)) || await nextQuestions(source.taskId, 1, queueRef.current.map((q) => q.qid), 5)
+      const r = source.kind === 'task' ? (pre && await pre.catch(() => null)) || await nextQuestions(source.taskId, initial ? 1 : Math.min(2, Math.max(1, needRef.current)), queueRef.current.map((q) => q.qid), 5)
         : source.kind === 'free' ? await searchFree(source.filters, Math.max(sizeRef.current, 5), queueRef.current.map((q) => q.qid))
         : source.kind === 'id' ? await questionById(source.qid)
         : { ...(await reviewDue(20)), reason: 'revisao' as string | null };
@@ -91,9 +92,13 @@ export function QuestionsPanel({ source, goal = 0, answered = 0, paged = false }
     } catch (e) { setError((e as Error).message); } finally { setLoading(false); fetching.current = false; }
   }, [srcKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void load(true); }, [load]);
-  // Com uma por página, deixa a próxima pronta para abrir na hora (na tarefa, só ela; na busca livre, até 2); com mais, só
-  // carrega ao faltar questão na página.
-  const ahead = pageSize > 1 ? 0 : source.kind === 'task' ? 1 : 2;
+  // Com uma por página, deixa as 2 seguintes prontas para abrir na hora: quem responde rápido não espera a busca a cada
+  // questão. Na tarefa, para de adiantar quando o que já veio basta para a meta (o aquecimento não conta para ela): dali em
+  // diante só busca se o estudante avançar. Com mais de uma por página, só carrega ao faltar questão na página.
+  const pending = queue.filter((x) => !x.warmupOf && !states[x.qid]?.result).length;
+  const enough = source.kind === 'task' && goal > 0 && answered + pending >= goal;
+  const ahead = pageSize > 1 || enough ? 0 : 2;
+  needRef.current = idx + pageSize + ahead - queue.length;
   useEffect(() => { if (queue.length && queue.length < idx + pageSize + ahead && !reason) void load(); }, [idx, pageSize, ahead, queue.length, reason, load]);
 
   // Avançar além do que já veio dispara a busca acima: a próxima página só gasta créditos se for aberta. Se não vier nada, volta.

@@ -6,10 +6,11 @@
 //   {action:'mnemonic', qid, taskId?}     → mnemônico compartilhado (ou nenhum), vira flashcard do estudante
 // A chave da Quest API e o gabarito ficam só no servidor. taskId é opcional fora do cronograma.
 import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { arrangeBatch, generatedRoom, GENERATED_EXAMPLES, GENERATED_MAX, GENERATED_PROMPT_VERSION, GeneratedQuestions, generatedJsonSchema, generatedPrompt, generatedTheme, guideDigest, toPublic } from '../../../shared/qbank/generated.ts';
+import { arrangeBatch, generatedRoom, GENERATED_EXAMPLES, GENERATED_MAX, GENERATED_PROMPT_VERSION, GeneratedQuestions, generatedJsonSchema, generatedPrompt, generatedTheme, guideDigest, toPublic, citesUnknownPrecedent, GENERATED_JURIS_MAX, type GenJuris } from '../../../shared/qbank/generated.ts';
 import { guideCacheKey, roleSpecific } from '../../../shared/ai/guide.ts';
 import { missingMark } from '../../../shared/ai/marks.ts';
 import { loadLawSources } from '../_shared/law.ts';
+import { topicJuris } from '../_shared/juris.ts';
 import { DEEP_PREFIX, PRACTICE_PREFIX } from '../../../shared/ai/plan.ts';
 import { ownLaws } from '../_shared/legal.ts';
 import { prunedAssuntos, rejectedIds, RELEVANCE_PROMPT_VERSION, RelevanceVerdicts, relevanceJsonSchema, relevancePrompt } from '../../../shared/qbank/relevance.ts';
@@ -104,7 +105,7 @@ Deno.serve(async (req) => {
           .or(rangesOrFilter(r.ranges)).order('ord').limit(40);
         for (const a of (arts ?? []).filter((a) => inRanges(r.ranges, a.num, a.suffix)).slice(0, 8)) lei.push({ ref: `${law.short}, art. ${a.label}`, text: a.text.slice(0, 1500) });
       }
-      return lei;
+      return { lei, refs };
     };
 
     if (body.action === 'mnemonic') {
@@ -124,7 +125,7 @@ Deno.serve(async (req) => {
       const { data: existing } = await admin.from('mnemonics').select('id, concept, mnemonic').eq('materia', q.materia).eq('assunto', q.assunto).limit(12);
       const c = await deps.ai(MnemonicChoice, mnemonicJsonSchema(), mnemonicPrompt({
         enunciado: plain(p.enunciado), alternativas: p.alternativas.map((a) => ({ letra: a.letra, texto: plain(a.texto) })), gabarito: q.gabarito,
-        assunto: q.assunto, existing: existing ?? [], law: (await lawExcerpts(p)).map((l) => `[${l.ref}] ${l.text}`),
+        assunto: q.assunto, existing: existing ?? [], law: (await lawExcerpts(p)).lei.map((l) => `[${l.ref}] ${l.text}`),
       }));
       let mnemonicId: string | null = pickExisting(c, (existing ?? []).map((m) => m.id));
       if (!mnemonicId && c.acao === 'criar' && c.mnemonico.trim() && c.conceito.trim()) {
@@ -149,15 +150,22 @@ Deno.serve(async (req) => {
       if (!q) return json(404, { error: 'Questão não encontrada.' });
       if (q.explanation) return json(200, { explanation: q.explanation, cached: true });
       const p = q.payload as PublicQuestion;
-      const lei = await lawExcerpts(p);
+      const { lei, refs } = await lawExcerpts(p);
+      // Questão que fala em súmula, tribunal ou entendimento: as súmulas e teses oficiais ligadas aos artigos entram como
+      // fonte (as já escolhidas para o tema primeiro), sem nova chamada à IA para escolher.
+      const asksJuris = /s[úu]mula|jurisprud|\bST[FJ]\b|tribuna(l|is) superior|entendimento/i.test([p.enunciado, ...p.alternativas.map((a) => a.texto)].join(' '));
+      const juris = asksJuris && refs.length
+        ? (await topicJuris(admin, auth.user.id, { banca: p.prova?.banca ?? '', subject: subject?.name ?? p.materia ?? '', title: p.assunto ?? '', refs }, async () => false)
+          .catch((e) => { console.error('jurisprudência:', e); return { items: [] }; })).items.slice(0, 8).map((i) => ({ ref: i.label, text: i.text.slice(0, 600) }))
+        : [];
       const ex = await deps.ai(Explanation, explanationJsonSchema(), explainPrompt({
         banca: p.prova?.banca ?? '', enunciado: plain(p.enunciado), alternativas: p.alternativas.map((a) => ({ letra: a.letra, texto: plain(a.texto) })),
-        gabarito: q.gabarito, textos: p.textos.map(plain), lei, assunto: p.assunto,
+        gabarito: q.gabarito, textos: p.textos.map(plain), lei, juris, assunto: p.assunto,
         imagens: !!p.anexos?.length || p.alternativas.some((a) => !!a.imagens?.length) || /<img\b/i.test([p.enunciado, ...p.textos, ...p.alternativas.map((a) => a.texto)].join(' ')),
       }));
       // Só ficam citações que estavam entre os trechos fornecidos.
       const allowed = new Map(lei.map((l) => [normalizeText(l.ref), l.ref]));
-      const explanation = { ...ex, artigos: [...new Set(ex.artigos.map((a) => allowed.get(normalizeText(a))).filter((a): a is string => !!a))], fontes: lei.map((l) => l.ref), geradoEm: new Date().toISOString() };
+      const explanation = { ...ex, artigos: [...new Set(ex.artigos.map((a) => allowed.get(normalizeText(a))).filter((a): a is string => !!a))], fontes: [...lei.map((l) => l.ref), ...juris.map((j) => j.ref)], geradoEm: new Date().toISOString() };
       await admin.from('qbank_questions').update({ explanation, explanation_model: `${model}/${EXPLAIN_PROMPT_VERSION}` }).eq('qid', qid);
       await log('qbank_explain', 'ok');
       return json(200, { explanation });
@@ -310,6 +318,8 @@ Deno.serve(async (req) => {
     let background: Promise<void> | null = null;
     // background: com questão para mostrar, as inéditas da IA (~55 s) são geradas depois da resposta; o pedido seguinte as
     // reaproveita. Sem nenhuma, o pedido espera: a geração dele ou a de outro pedido do mesmo tema (trava por tema).
+    // Jurisprudência como fonte das inéditas: só no nível superior, como na apostila.
+    const withJuris = notice?.education_level === 'Superior';
     const generated = async (n: number, inBackground: boolean): Promise<PublicQuestion[]> => {
       const { data: nt } = await auth.client.from('notices').select('board, role_name, role_duties, structure').eq('id', subject.notice_id).single();
       const cargo = String(nt?.role_name ?? '');
@@ -323,7 +333,8 @@ Deno.serve(async (req) => {
         if (grounded) madeQuery = madeQuery.gt('payload->ia_fontes', 0);
         const { data: made } = await madeQuery.limit(200);
         // As feitas antes da marca de destaque e que falam em termo destacado não têm como ser respondidas: ficam de fora.
-        return (made ?? []).map((r) => r.payload as PublicQuestion).filter((q) => !missingMark(q.enunciado));
+        // Questão feita com jurisprudência (nível superior) não serve a quem não a recebe.
+        return (made ?? []).map((r) => r.payload as PublicQuestion).filter((q) => !missingMark(q.enunciado) && (withJuris || !((q as { ia_juris?: number }).ia_juris ?? 0)));
       };
       const pick = (all: PublicQuestion[]) => {
         const reuse = all.filter((q) => !seen.has(q.qid)).slice(0, n);
@@ -375,7 +386,14 @@ Deno.serve(async (req) => {
         const { data: ss } = await auth.client.from('study_sessions').select('topic_ids').eq('id', sid).single();
         const { data: tt } = ss?.topic_ids?.length ? await auth.client.from('notice_topics').select('id, text').in('id', ss.topic_ids) : { data: [] };
         const topics = (tt ?? []).sort((a, b) => ss!.topic_ids.indexOf(a.id) - ss!.topic_ids.indexOf(b.id)).map((t) => t.text as string);
-        const { law } = await loadLawSources(admin, { title: sess!.title, topics, subject: subject.name, ownerId: auth.user.id, lawRefs: sess!.law_refs });
+        const { law, refs } = await loadLawSources(admin, { title: sess!.title, topics, subject: subject.name, ownerId: auth.user.id, lawRefs: sess!.law_refs });
+        // Nível superior: as súmulas e teses que mais caem nos artigos da sessão (a mesma escolha da apostila, em cache
+        // compartilhado) entram como fonte das questões.
+        const juris: GenJuris[] = withJuris && law.length
+          ? (await topicJuris(admin, auth.user.id, { banca: String(nt?.board ?? ''), subject: subject.name, title: sess!.title, refs }, async () => true)
+            .catch((e) => { console.error('jurisprudência:', e); return { items: [] }; })).items.filter((i) => i.hot).slice(0, GENERATED_JURIS_MAX)
+            .map((i) => ({ ref: i.label, text: i.text.slice(0, 700), court: i.court, kind: i.kind, number: i.number }))
+          : [];
         // Apostila completa da sessão (a mesma chave da study-guide): base do conteúdo das questões, quando já existe.
         const { data: guide } = await admin.from('study_guides').select('content')
           .eq('cache_key', guideCacheKey({ depth: 'completa', banca: String(nt?.board ?? ''), subject: subject.name, title: sess!.title, topics, law, cargo })).maybeSingle();
@@ -395,10 +413,10 @@ Deno.serve(async (req) => {
         const r = await generateJson({ apiKey, model, schema: GeneratedQuestions, jsonSchema: generatedJsonSchema(), temperature: 0.5, timeoutMs: GENERATE_TIMEOUT_MS,
           parts: [{ text: generatedPrompt({ banca: String(nt?.board ?? ''), cargo, subject: subject.name, title: sess!.title, keyword: sess!.keyword ?? '',
             law, format, n: k, avoid: all.map((q) => plain(q.enunciado)).slice(-15), examples,
-            guide: guide ? guideDigest(guide.content) : '', duties: String(nt?.role_duties ?? ''), otherRoles: ((nt?.structure as { otherRoles?: string[] } | null)?.otherRoles ?? []).map(String) }) }] });
+            juris, guide: guide ? guideDigest(guide.content) : '', duties: String(nt?.role_duties ?? ''), otherRoles: ((nt?.structure as { otherRoles?: string[] } | null)?.otherRoles ?? []).map(String) }) }] });
         u.inputTokens += r.usage.inputTokens; u.outputTokens += r.usage.outputTokens; u.thinkingTokens += r.usage.thinkingTokens;
-        const rows = arrangeBatch(r.data.questoes).map((q) => toPublic(q, {
-          qid: `ia-${crypto.randomUUID()}`, format, materia: filter.materia ?? subject.name, assunto: filter.assuntos[0] ?? sess!.title, theme, year: new Date().getFullYear(), sources: law.length,
+        const rows = arrangeBatch(r.data.questoes).filter((q) => !citesUnknownPrecedent(q, juris)).map((q) => toPublic(q, {
+          qid: `ia-${crypto.randomUUID()}`, format, materia: filter.materia ?? subject.name, assunto: filter.assuntos[0] ?? sess!.title, theme, year: new Date().getFullYear(), sources: law.length, juris: juris.length,
         })).filter((x) => x !== null);
         if (rows.length) await admin.from('qbank_questions').insert(rows.map((x) => ({ qid: x.payload.qid, materia: x.payload.materia, assunto: x.payload.assunto, payload: x.payload, gabarito: x.gabarito })));
         return rows.map((x) => x.payload as unknown as PublicQuestion);

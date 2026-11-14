@@ -4,6 +4,7 @@
 // erros, explicação e comentários funcionam igual, e são reaproveitadas entre estudantes com o mesmo tema.
 import { z } from 'zod';
 import { MARK_RULE, marksToHtml, missingMark } from '../ai/marks.ts';
+import { unverifiedPrecedents, type Court, type PrecedentKind } from '../legal/juris.ts';
 import { normalizeText } from '../ai/notice.ts';
 import { roleContext } from '../ai/plan.ts';
 
@@ -16,6 +17,8 @@ import { roleContext } from '../ai/plan.ts';
 // qgen-v4: a IA decide primeiro o que a questão cobra e a troca de cada distrator (o fundamento vem antes do enunciado na
 // resposta), confere se só uma alternativa se sustenta, escreve enunciado que não cita "a apostila" nem "o trecho" (o
 // candidato não os vê), limita comando negativo a uma questão por lote e mistura itens certos e errados em certo ou errado.
+// No nível superior, as súmulas e teses oficiais do tema (as mesmas da apostila) entram como fonte: até 2 questões do lote
+// podem cobrá-las, e questão que cita súmula ou tema fora dos fornecidos é descartada (citesUnknownPrecedent).
 export const GENERATED_PROMPT_VERSION = 'qgen-v4';
 export const GENERATED_BANCA = 'Inédita (IA)';
 export const GENERATED_MAX = 5;
@@ -43,6 +46,12 @@ export const GeneratedQuestions = z.object({
 export const generatedJsonSchema = () => z.toJSONSchema(GeneratedQuestions, { target: 'draft-7' });
 
 export interface GenSource { ref: string; text: string }
+// Súmula ou tese oficial do STF/STJ fornecida como fonte: ref é o rótulo citável ("Súmula 17/STJ").
+export interface GenJuris extends GenSource { court: Court; kind: PrecedentKind; number: number }
+export const GENERATED_JURIS_MAX = 6;
+// A questão cita súmula ou tema que não está entre os fornecidos (sem jurisprudência fornecida, qualquer citação).
+export const citesUnknownPrecedent = (q: { enunciado: string; alternativas: string[]; fundamento?: string }, juris: GenJuris[] = []) =>
+  unverifiedPrecedents([q.enunciado, ...q.alternativas, q.fundamento ?? ''].join('\n'), juris).length > 0;
 // Questão real da banca no tema, usada só como modelo de estilo e dificuldade.
 export interface GenExample { enunciado: string; alternativas: string[]; gabarito: string; banca: string }
 const plain = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
@@ -101,8 +110,9 @@ export function guideDigest(g: unknown, max = 6000): string {
 // duties/otherRoles: atribuições do cargo no edital e os outros cargos dele. Sem elas, a IA deduzia pelo nome e, no edital
 // de Suzano, pôs o Agente Escolar na recepção e no controle de acesso, que são do Agente de Segurança Escolar.
 // guide: texto da apostila da sessão (guideDigest), a base do conteúdo quando há; a questão não a contradiz.
-export function generatedPrompt(p: { banca: string; cargo: string; subject: string; title: string; keyword: string; law: GenSource[]; format: string; n: number; avoid: string[]; examples?: GenExample[]; duties?: string; otherRoles?: string[]; guide?: string }) {
+export function generatedPrompt(p: { banca: string; cargo: string; subject: string; title: string; keyword: string; law: GenSource[]; format: string; n: number; avoid: string[]; examples?: GenExample[]; duties?: string; otherRoles?: string[]; guide?: string; juris?: GenJuris[] }) {
   const ce = /certo/i.test(p.format);
+  const juris = (p.juris ?? []).slice(0, GENERATED_JURIS_MAX);
   const kind = themeKind(p);
   const examples = (p.examples ?? []).slice(0, GENERATED_EXAMPLES);
   return `Você é professor especialista em concursos e elabora questões inéditas no estilo da banca ${p.banca || 'do concurso'}${p.cargo ? `, para o cargo ${p.cargo}` : ''}.
@@ -111,6 +121,7 @@ Disciplina: ${p.subject}
 Tema da sessão (cobre SOMENTE este tema): ${p.title}
 Palavra-chave: ${p.keyword || '—'}
 ${p.law.length ? `Trechos oficiais da lei (única fonte legal permitida):\n${p.law.map((l) => `[${l.ref}] ${l.text}`).join('\n\n')}` : 'Nenhum trecho de lei foi fornecido: cobre só regras e conceitos que você tem certeza de que estão em vigor, sem citar número de artigo.'}
+${juris.length ? `Jurisprudência oficial do STF e do STJ sobre esses artigos (texto publicado pelo tribunal; única jurisprudência permitida):\n${juris.map((j) => `[${j.ref}] ${j.text}`).join('\n\n')}` : ''}
 ${p.guide?.trim() ? `Apostila que o estudante leu nesta sessão (base do conteúdo; nenhuma questão pode contradizê-la, e o que não estiver nela só entra se você tiver certeza):\n${p.guide.trim()}` : ''}
 ${examples.length ? `Questões reais de prova neste tema (modelo de estilo e de dificuldade; não copie o conteúdo):\n${examples.map((e, i) => `Exemplo ${i + 1} (${e.banca || 'banca'}):\n${plain(e.enunciado).slice(0, 900)}${e.alternativas.length ? `\n${e.alternativas.map((a, j) => `${String.fromCharCode(65 + j)}) ${plain(a).slice(0, 300)}`).join('\n')}` : ''}\nGabarito: ${e.gabarito}`).join('\n\n')}` : ''}
 ${p.avoid.length ? `Questões já criadas para este tema (não repita o que elas cobram nem a forma):\n${p.avoid.map((e) => `- ${e.slice(0, 200)}`).join('\n')}` : ''}
@@ -119,7 +130,8 @@ Regras:
 - Cada questão cobra o tema da sessão: nada de outros assuntos da matéria, mesmo parecidos.
 - ${MARK_RULE}
 - Caso concreto com servidor do cargo${p.cargo ? ` (${p.cargo})` : ''}: só situações e tarefas que as atribuições dele incluem. Nunca o ponha fazendo o trabalho de outro cargo do edital (ex.: quem cuida da limpeza e conservação não faz controle de acesso nem vigilância).
-- Fundamente nas fontes fornecidas: não invente prazos, números ou regras. Não cite jurisprudência, súmulas ou doutrina.
+- Fundamente nas fontes fornecidas: não invente prazos, números ou regras.
+- ${juris.length ? 'Jurisprudência: até 2 questões do lote podem cobrar um dos itens fornecidos, citado pelo nome do colchete (ex.: "Súmula 17/STJ"), como a banca faz ("de acordo com o entendimento sumulado do STJ"). Reproduza o sentido do enunciado oficial sem acrescentar regra, exceção ou número, e nessas questões o distrator troca um detalhe do próprio enunciado. As demais questões cobram a lei. Não cite outras súmulas, teses, julgados nem doutrina.' : 'Não cite jurisprudência, súmulas ou doutrina.'}
 - Exatamente uma alternativa correta${ce ? '' : '; as alternativas não se referem umas às outras ("todas as anteriores", "A e B") e podem ser lidas em qualquer ordem'}.
 - ${ce ? 'Misture itens certos e errados no lote. O item errado parte de uma afirmação verdadeira e troca um único detalhe.' : 'Antes de fixar o gabarito, confira cada distrator contra as fontes: se algum também puder ser defendido como correto, reescreva-o. Questão com duas respostas defensáveis é anulada na prova.'}
 - Enunciado autossuficiente: o candidato não vê a apostila nem os trechos de lei que você recebeu. Nunca escreva "segundo a apostila", "conforme o trecho" ou "de acordo com o texto fornecido"; cite a lei pelo nome, como a banca faz.${ce ? '' : '\n- Comando negativo ("INCORRETA", "EXCETO") em no máximo uma questão do lote, com a palavra em maiúsculas.'}
@@ -156,7 +168,7 @@ export function arrangeBatch(qs: GenQ[], rand: () => number = Math.random): GenQ
 }
 
 // Questão no formato público das questões reais, mais a marca do tema para reaproveitar.
-export function toPublic(q: z.infer<typeof GeneratedQuestions>['questoes'][number], p: { qid: string; format: string; materia: string; assunto: string; theme: string; year: number; sources?: number }) {
+export function toPublic(q: z.infer<typeof GeneratedQuestions>['questoes'][number], p: { qid: string; format: string; materia: string; assunto: string; theme: string; year: number; sources?: number; juris?: number }) {
   const ce = /certo/i.test(p.format) || !q.alternativas.length;
   const alternativas = ce ? [{ letra: 'C', texto: 'Certo', imagens: [] as string[] }, { letra: 'E', texto: 'Errado', imagens: [] as string[] }]
     : q.alternativas.slice(0, 5).map((t, i) => ({ letra: String.fromCharCode(65 + i), texto: marksToHtml(t.replace(/^\s*[A-Ea-e]\s*[).:-]\s*/, '')), imagens: [] as string[] }));
@@ -172,6 +184,8 @@ export function toPublic(q: z.infer<typeof GeneratedQuestions>['questoes'][numbe
       materia: p.materia, assunto: p.assunto, ia_tema: p.theme, ia_versao: GENERATED_PROMPT_VERSION,
       // Quantos artigos oficiais a IA recebeu: tema que cita artigos só reaproveita questões feitas com o texto da lei.
       ia_fontes: p.sources ?? 0,
+      // Quantas súmulas e teses a IA recebeu: questão feita com jurisprudência só é reaproveitada por quem também a recebe.
+      ia_juris: p.juris ?? 0,
     },
     gabarito,
   };

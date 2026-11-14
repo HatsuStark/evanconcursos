@@ -29,9 +29,11 @@ async function call<T>(body: Record<string, unknown>): Promise<T> {
 // batch: tamanho previsto do lote quando se pede menos para abrir mais rápido (o aquecimento é dimensionado por ele).
 export const nextQuestions = (taskId: string, count = 5, exclude: string[] = [], batch = count) => call<NextResult>({ action: 'next', taskId, count, exclude, batch });
 
-// Primeira busca da tarefa adiantada ao abrir a tela de estudo (a busca leva de 5 a 30 s): quando o estudante chega à aba
-// Questões, ela já veio ou está a caminho. Vale uma vez e por 10 min; falha ou sobra vencida cai na busca normal.
-const PREFETCH_TTL_MS = 10 * 60_000;
+// Primeira busca da tarefa adiantada na tela Hoje (a próxima tarefa) e ao abrir a tela de estudo (a busca leva de 5 a
+// 30 s): quando o estudante chega à aba Questões, ela já veio ou está a caminho. Vale uma vez e por 45 min, o bastante para
+// a leitura da apostila antes das questões; falha ou sobra vencida cai na busca normal. Questão adiantada e não aberta
+// fica no banco e é servida depois, sem novos créditos.
+const PREFETCH_TTL_MS = 45 * 60_000;
 const prefetched = new Map<string, { at: number; result: Promise<NextResult> }>();
 export function prefetchQuestions(taskId: string) {
   const p = prefetched.get(taskId);
