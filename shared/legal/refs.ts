@@ -100,7 +100,8 @@ export function inRanges(ranges: ArticleRange[], n: number, suffix = ''): boolea
     if (n < r.from || n > r.to) return false;
     if (n === r.from && r.fromSuffix && suffix < r.fromSuffix) return false;
     if (n === r.to && r.to !== r.from && suffix && !r.toSuffix) return false;
-    if (r.from === r.to) return r.fromSuffix ? suffix === r.fromSuffix : true;
+    // Mesmo número: "337-E a 337-P" vai do E ao P; "5º" sozinho inclui o 5º-A.
+    if (r.from === r.to) return !r.fromSuffix && !r.toSuffix ? true : suffix >= (r.fromSuffix ?? '') && suffix <= (r.toSuffix ?? r.fromSuffix!);
     return true;
   });
 }

@@ -9,6 +9,7 @@ import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/
 import { aiLawRefs, findLawRefs, inRanges, type LawRef, mergeLawRefs, rangesLabel, rangesOrFilter, sessionLawRefs } from '../../../shared/legal/refs.ts';
 import { LAWS, lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
 import { contentNeed, type LawSize, mergeShortLawSessions, PLAN_PROMPT_VERSION, PlanInputs, PlanStrategy, repairSessions, sessionsJsonSchema, sessionsPrompt, strategyJsonSchema, strategyPrompt, SubjectSessions } from '../../../shared/ai/plan.ts';
+import { articleGaps, fillArticleGaps, lawCite, requiredLaws, type LawArticle, type RequiredLaw } from '../../../shared/ai/plan-coverage.ts';
 import { isOpenEnded } from '../../../shared/domain/rounds.ts';
 import { aiFor, defaultModel, keyFor } from '../_shared/ai.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
@@ -43,6 +44,24 @@ async function lawSize(admin: ReturnType<typeof adminClient>, refs: LawRef[], ow
     });
   }
   return out.length ? out : null;
+}
+
+// Artigos que o edital pede (texto oficial no banco), para conferir a cobertura das sessões. Lei inteira longa (um
+// código citado sem artigos) fica de fora: aí a escolha dos assuntos é da IA.
+async function requiredArticles(admin: ReturnType<typeof adminClient>, reqs: RequiredLaw[], own: LawEntry[]) {
+  const out: (RequiredLaw & { articles: LawArticle[] })[] = [];
+  for (const req of reqs.slice(0, 12)) {
+    const law = lawByKey(req.law, own);
+    const normId = law ? await ensureLaw(admin, law) : null;
+    if (!normId) continue;
+    let q = admin.from('legal_articles').select('num, suffix, revoked').eq('norm_id', normId);
+    if (req.ranges.length) q = q.or(rangesOrFilter(req.ranges));
+    const { data } = await q.order('ord').limit(1000);
+    const articles = ((data ?? []) as LawArticle[]).filter((a) => inRanges(req.ranges, a.num, a.suffix));
+    if (!req.ranges.length && articles.length > 400) continue;
+    out.push({ ...req, articles });
+  }
+  return out;
 }
 
 // Artigos da sessão: os que a IA listou no campo laws, mais os que o próprio título cita com número (a lista às vezes
@@ -143,7 +162,12 @@ Deno.serve(async (req) => {
       // Sessão de lei quase vazia (artigos revogados ou só remissivos) é juntada à vizinha da mesma lei; repairSessions
       // divide a maior para manter as n sessões.
       const sized = await Promise.all(r.data.sessions.map((x) => sessionRefs(admin, x, topics, subject.name, own)));
-      const short = mergeShortLawSessions(r.data.sessions.map((x, i) => ({ ...x, ...(sized[i]!.refs.length ? { refs: sized[i]!.refs } : {}) })), sized.map((z) => z.size));
+      // Artigos do edital que nenhuma sessão pegou (lei citada inteira, buraco entre faixas) vão para a sessão mais
+      // próxima da mesma lei, que é medida de novo: se crescer além de um dia, a divisão em partes abaixo cuida.
+      const gaps = articleGaps(await requiredArticles(admin, requiredLaws(topics, subject.name, own), own), sized);
+      const filled = fillArticleGaps(r.data.sessions.map((x, i) => ({ ...x, refs: sized[i]!.refs })), gaps, (k) => lawCite(k, own), { topicBase: 1 });
+      for (const i of new Set(filled.fixes.map((f) => f.index))) sized[i] = { refs: filled.sessions[i]!.refs, size: await lawSize(admin, filled.sessions[i]!.refs, own) };
+      const short = mergeShortLawSessions(filled.sessions.map(({ refs, ...x }) => ({ ...x, ...(refs.length ? { refs } : {}) })), sized.map((z) => z.size));
       const minutes = int(body.minutes, 15, 960);
       // Plano sem prazo (grow): tantas sessões quanto o conteúdo pede (lei longa em partes), nunca menos que n; o app
       // estende o calendário até caber. Com prazo, exatamente n.
@@ -152,6 +176,7 @@ Deno.serve(async (req) => {
       const { sessions, fixes } = repairSessions({ ...r.data, sessions: short.sessions }, target, topics, { sizes: short.sizes, minutes });
       if (target > n) fixes.unshift(`sem prazo: ${target} sessões para o conteúdo (pedidas ${n})`);
       fixes.unshift(...short.merged.map((m) => `lei curta: ${m}`));
+      fixes.unshift(...filled.fixes.map((f) => `artigos do edital: ${lawCite(f.law, own)}, ${rangesLabel(f)} em "${f.before}"`));
       await logUsage(admin, { ownerId: auth.user.id, operation, model: used, promptVersion: PLAN_PROMPT_VERSION, usage, latencyMs, status: 'ok' });
       return json(200, { sessions, fixes });
     }

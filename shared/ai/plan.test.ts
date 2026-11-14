@@ -32,7 +32,7 @@ describe('repairSessions: qualquer resposta da IA vira n sessões cobrindo todos
       const { sessions } = repairSessions(raw, n, topicsOf(T));
       assertValid(sessions, n, T);
     }
-  });
+  }, 20_000); // 500 montagens: passa dos 5 s padrão com a suíte inteira rodando em paralelo
   it('resposta correta passa sem correções', () => {
     const raw: SubjectSessions = { sessions: [{ title: 'A: x', keyword: 'a', topics: [1, 2] }, { title: 'B: y', keyword: 'b', topics: [3] }] };
     const r = repairSessions(raw, 2, topicsOf(3));

@@ -121,6 +121,11 @@ describe('referências a leis', () => {
     expect(inRanges(rg, 311, 'A')).toBe(true);
     expect(inRanges(rg, 311)).toBe(false);
     expect(inRanges([], 999)).toBe(true);
+    // Mesmo número com sufixos: crimes em licitações (CP, arts. 337-E a 337-P).
+    const lic = parseRanges('337-E a 337-P');
+    expect(['E', 'J', 'P'].map((x) => inRanges(lic, 337, x))).toEqual([true, true, true]);
+    expect([inRanges(lic, 337), inRanges(lic, 337, 'D'), inRanges(lic, 337, 'Q')]).toEqual([false, false, false]);
+    expect(inRanges(parseRanges('5º'), 5, 'A')).toBe(true);
   });
 });
 

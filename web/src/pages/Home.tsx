@@ -6,6 +6,7 @@ import { groupReviews } from '../../../shared/domain/theory-reviews.ts';
 import { RebalanceCard } from '../components/RebalanceCard.tsx';
 import { OpenPlanCard } from '../components/OpenPlanCard.tsx';
 import { CoverageBanner } from '../components/CoverageBanner.tsx';
+import { PlanNoticeBanner } from '../components/PlanNoticeBanner.tsx';
 import { DailyReview } from '../components/DailyReview.tsx';
 import { DayPanel } from '../components/DayPanel.tsx';
 import { ReplanBanner } from '../components/ReplanBanner.tsx';
@@ -133,6 +134,7 @@ export function HomePage() {
       </div>
       <OpenPlanCard active={active.data} />
       <RebalanceCard active={active.data} />
+      <PlanNoticeBanner planId={active.data.plan.id} />
       <ReplanBanner active={active.data} />
       <CoverageBanner active={active.data} />
       <DailyReview themes={dueReviews} errors={due.data?.errors ?? 0} cards={due.data?.cards ?? 0} subjects={subjects} today={t0} hasReviews={!!theoryReviews.data?.length} />
