@@ -57,7 +57,9 @@ export async function fromCache(admin: SupabaseClient, f: CacheFilter, want: num
     if (f.cargo) q = q.ilike('payload->prova->>cargo', `%${f.cargo}%`);
     if (own) return q.like('qid', `${OWN_PREFIX}%`);
     if (f.dificuldades?.length) q = q.in('payload->>dificuldade', f.dificuldades);
-    return q.not('qid', 'like', `${OWN_PREFIX}%`);
+    // As inéditas da IA (qid "ia-…") nunca saem por aqui: valem só para o tema, o cargo e a versão do prompt em que foram
+    // feitas, e a sessão as busca por essa chave. Pelo assunto, voltavam as de versões antigas e as de outros temas.
+    return q.not('qid', 'like', `${OWN_PREFIX}%`).not('qid', 'like', 'ia-%');
   };
   const board = normalizeText(f.preferBanca ?? ''), organ = normalizeText(f.preferOrgao ?? ''), careers = new Set(f.preferCarreiras ?? []);
   // Nas da Quest: provas do mesmo órgão primeiro, depois as da mesma carreira (só as compradas depois de o cache guardar a
