@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { citesUnknownPrecedent, generatedPrompt, generatedRoom, type GenJuris } from './generated.ts';
+import { citesUnknownPrecedent, coveredLine, dropRepeated, sameAnswer, generatedPrompt, generatedRoom, type GenJuris } from './generated.ts';
 
 const api = (n: number) => Array.from({ length: n }, (_, i) => `q${i}`);
 const ai = (n: number) => Array.from({ length: n }, (_, i) => `ia-${i}`);
@@ -18,9 +18,15 @@ describe('generatedRoom', () => {
     expect(generatedRoom({ missing: 5, sessionQids: [...api(12), ...ai(2)], apiDry: false })).toBe(2);
   });
 
-  it('banco esgotado ou sem questão real na sessão: a IA completa', () => {
+  it('banco esgotado no tema: a IA completa', () => {
     expect(generatedRoom({ missing: 4, sessionQids: [...api(3), ...ai(5)], apiDry: true })).toBe(4);
-    expect(generatedRoom({ missing: 4, sessionQids: ai(3), apiDry: false })).toBe(4);
+  });
+
+  it('começo da sessão ou pedido sem questão nova, com o banco rendendo: a proporção vale; sem nada para mostrar, só 1', () => {
+    expect(generatedRoom({ missing: 4, sessionQids: [], apiDry: false })).toBe(0);
+    expect(generatedRoom({ missing: 4, sessionQids: ai(3), apiDry: false })).toBe(0);
+    expect(generatedRoom({ missing: 4, sessionQids: ai(3), apiDry: false, empty: true })).toBe(1);
+    expect(generatedRoom({ missing: 5, sessionQids: api(9), apiDry: false, empty: true })).toBe(3);
   });
 
   it('nada faltando, nada da IA', () => {
@@ -45,5 +51,29 @@ describe('jurisprudência como fonte das inéditas', () => {
     expect(citesUnknownPrecedent(q('De acordo com a Súmula 48 do STJ, compete ao juízo…'), juris)).toBe(true);
     expect(citesUnknownPrecedent(q('De acordo com a Súmula 17 do STJ, …'), [])).toBe(true);
     expect(citesUnknownPrecedent(q('Nessa situação, de acordo com o Código Penal, …'), [])).toBe(false);
+  });
+});
+
+describe('variedade das inéditas', () => {
+  const right = 'suspende a prescrição, para todos os efeitos de direito, por 180 dias, ou até a distribuição da execução fiscal, se esta ocorrer antes de findo aquele prazo.';
+  const reworded = 'suspende a prescrição por cento e oitenta dias, ou até a distribuição da execução fiscal, se esta ocorrer antes de findo aquele prazo.';
+  const other = 'abrange atualização monetária, juros e multa de mora e demais encargos previstos em lei ou contrato.';
+  const mk = (correct: string, gabarito = 'B') => ({ enunciado: 'Um Oficial de Justiça cumpre mandado em execução fiscal. Nos termos da Lei nº 6.830/1980, a inscrição em dívida ativa', alternativas: ['interrompe a prescrição.', correct, 'x', 'y', 'z'], gabarito });
+
+  it('a mesma resposta certa com outras palavras é repetição; resposta curta ou de outro ponto, não', () => {
+    expect(sameAnswer(right, reworded)).toBe(true);
+    expect(sameAnswer(right, other)).toBe(false);
+    expect(sameAnswer('30 dias', '30 dias')).toBe(false);
+  });
+
+  it('descarta do lote a questão que repete uma já criada ou outra do lote', () => {
+    expect(dropRepeated([mk(reworded), mk(other)], [right]).map((q) => q.alternativas[1])).toEqual([other]);
+    expect(dropRepeated([mk(right), mk(reworded), mk(other)], [])).toHaveLength(2);
+  });
+
+  it('a lista de já criadas leva o comando e a resposta certa, não só a moldura do caso', () => {
+    const line = coveredLine(mk(right).enunciado, mk(right).alternativas, 'B');
+    expect(line).toContain('a inscrição em dívida ativa → suspende a prescrição');
+    expect(coveredLine('A inscrição em dívida ativa suspende a prescrição por 180 dias.', [], 'C')).toBe('A inscrição em dívida ativa suspende a prescrição por 180 dias.');
   });
 });

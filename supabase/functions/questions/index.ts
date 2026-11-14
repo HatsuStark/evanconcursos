@@ -6,7 +6,7 @@
 //   {action:'mnemonic', qid, taskId?}     → mnemônico compartilhado (ou nenhum), vira flashcard do estudante
 // A chave da Quest API e o gabarito ficam só no servidor. taskId é opcional fora do cronograma.
 import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
-import { arrangeBatch, generatedRoom, GENERATED_EXAMPLES, GENERATED_MAX, GENERATED_PROMPT_VERSION, GeneratedQuestions, generatedJsonSchema, generatedPrompt, generatedTheme, guideDigest, toPublic, citesUnknownPrecedent, GENERATED_JURIS_MAX, type GenJuris } from '../../../shared/qbank/generated.ts';
+import { arrangeBatch, generatedRoom, GENERATED_EXAMPLES, GENERATED_MAX, GENERATED_PROMPT_VERSION, GeneratedQuestions, generatedJsonSchema, generatedPrompt, generatedTheme, guideDigest, toPublic, citesUnknownPrecedent, answerText, coveredLine, dropRepeated, GENERATED_JURIS_MAX, type GenJuris } from '../../../shared/qbank/generated.ts';
 import { guideCacheKey, roleSpecific } from '../../../shared/ai/guide.ts';
 import { missingMark } from '../../../shared/ai/marks.ts';
 import { loadLawSources } from '../_shared/law.ts';
@@ -329,11 +329,12 @@ Deno.serve(async (req) => {
       // reaproveita as feitas com o texto oficial (antes de a norma entrar na base, a IA escrevia de memória).
       const grounded = !!storedLawRefs(sess!.law_refs) || findLawRefs(sess!.title, subject.name, await ownLaws(admin, auth.user.id)).some((r) => r.ranges.length);
       const madeAll = async () => {
-        let madeQuery = admin.from('qbank_questions').select('payload').eq('payload->>ia_tema', theme).eq('payload->>ia_versao', GENERATED_PROMPT_VERSION);
+        let madeQuery = admin.from('qbank_questions').select('payload, gabarito').eq('payload->>ia_tema', theme).eq('payload->>ia_versao', GENERATED_PROMPT_VERSION);
         if (grounded) madeQuery = madeQuery.gt('payload->ia_fontes', 0);
         const { data: made } = await madeQuery.limit(200);
         // As feitas antes da marca de destaque e que falam em termo destacado não têm como ser respondidas: ficam de fora.
         // Questão feita com jurisprudência (nível superior) não serve a quem não a recebe.
+        for (const r of made ?? []) madeKeys.set((r.payload as PublicQuestion).qid, String(r.gabarito ?? ''));
         return (made ?? []).map((r) => r.payload as PublicQuestion).filter((q) => !missingMark(q.enunciado) && (withJuris || !((q as { ia_juris?: number }).ia_juris ?? 0)));
       };
       const pick = (all: PublicQuestion[]) => {
@@ -371,6 +372,8 @@ Deno.serve(async (req) => {
       for (const q of fresh) seen.add(q.qid);
       return [...reuse, ...fresh];
     };
+    // Gabarito das inéditas já criadas no tema, para dizer à IA o que já foi cobrado e descartar a que repete a resposta.
+    const madeKeys = new Map<string, string>();
     const genUsage: GeminiUsage = { inputTokens: 0, outputTokens: 0, thinkingTokens: 0 };
     // Trava do tema: livre, ou presa há mais que o limite da função (pedido que morreu sem soltar).
     const lockTheme = async (theme: string) => {
@@ -408,14 +411,15 @@ Deno.serve(async (req) => {
           const q = r.payload as PublicQuestion;
           return { enunciado: q.enunciado, alternativas: /certo/i.test(String(q.tipo ?? '')) ? [] : q.alternativas.map((a) => a.texto), gabarito: String(r.gabarito ?? ''), banca: q.prova?.banca ?? '' };
         });
+        const alts = (q: PublicQuestion) => /certo/i.test(String(q.tipo ?? '')) ? [] : q.alternativas.map((a) => a.texto);
         // Pelo menos 3 por vez: as que sobram servem ao próximo lote e a outros estudantes.
         const k = Math.min(GENERATED_MAX, Math.max(3, missing));
         const r = await generateJson({ apiKey, model, schema: GeneratedQuestions, jsonSchema: generatedJsonSchema(), temperature: 0.5, timeoutMs: GENERATE_TIMEOUT_MS,
           parts: [{ text: generatedPrompt({ banca: String(nt?.board ?? ''), cargo, subject: subject.name, title: sess!.title, keyword: sess!.keyword ?? '',
-            law, format, n: k, avoid: all.map((q) => plain(q.enunciado)).slice(-15), examples,
+            law, format, n: k, avoid: all.slice(-30).map((q) => coveredLine(q.enunciado, alts(q), madeKeys.get(q.qid) ?? '')), examples,
             juris, guide: guide ? guideDigest(guide.content) : '', duties: String(nt?.role_duties ?? ''), otherRoles: ((nt?.structure as { otherRoles?: string[] } | null)?.otherRoles ?? []).map(String) }) }] });
         u.inputTokens += r.usage.inputTokens; u.outputTokens += r.usage.outputTokens; u.thinkingTokens += r.usage.thinkingTokens;
-        const rows = arrangeBatch(r.data.questoes).filter((q) => !citesUnknownPrecedent(q, juris)).map((q) => toPublic(q, {
+        const rows = dropRepeated(arrangeBatch(r.data.questoes).filter((q) => !citesUnknownPrecedent(q, juris)), all.map((q) => answerText(q.enunciado, alts(q), madeKeys.get(q.qid) ?? ''))).map((q) => toPublic(q, {
           qid: `ia-${crypto.randomUUID()}`, format, materia: filter.materia ?? subject.name, assunto: filter.assuntos[0] ?? sess!.title, theme, year: new Date().getFullYear(), sources: law.length, juris: juris.length,
         })).filter((x) => x !== null);
         if (rows.length) await admin.from('qbank_questions').insert(rows.map((x) => ({ qid: x.payload.qid, materia: x.payload.materia, assunto: x.payload.assunto, payload: x.payload, gabarito: x.gabarito })));
@@ -540,14 +544,14 @@ Deno.serve(async (req) => {
       mark(`triagem:${found.length}`);
     }
     // Plano B: questões inéditas da IA, reaproveitadas entre estudantes com o mesmo tema. Com o banco ainda rendendo no tema,
-    // no máximo 1 da IA para cada 3 da API na sessão (respondidas, na tela e deste lote; o aquecimento não conta). Lote sem
-    // nenhuma questão real nova também libera a IA: o estudante não fica sem questão.
+    // no máximo 1 da IA para cada 3 reais na sessão (respondidas, na tela e deste lote; o aquecimento não conta), também no
+    // começo dela. Banco esgotado no tema (sem estourar o tempo): a IA completa. Nada para mostrar: 1 da IA (generatedRoom).
     const sessionQids = [
       ...(done ?? []).filter((d) => sid && d.session_id === sid).map((d) => d.qid as string),
       ...(Array.isArray(body.exclude) ? (body.exclude as unknown[]).map(String).slice(0, 500) : []),
       ...result.slice(opening).map((q) => q.qid),
     ];
-    const room = generatedRoom({ missing: count - result.length, sessionQids: [...new Set(sessionQids)], apiDry: apiDry || result.length === opening });
+    const room = generatedRoom({ missing: count - result.length, sessionQids: [...new Set(sessionQids)], apiDry: apiDry && !timedOut, empty: !result.length });
     if (sess && room > 0 && Date.now() - started < GENERATE_BEFORE_MS) { result.push(...await generated(room, result.length > 0)); mark(`ia:${room}`); }
     // O registro de uso fica para depois da resposta: o estudante não espera por ele.
     EdgeRuntime.waitUntil(log('qbank_fetch', 'ok').catch(() => {}));

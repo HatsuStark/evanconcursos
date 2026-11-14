@@ -37,7 +37,7 @@ describe('questões inéditas da IA', () => {
     const p = generatedPrompt({ banca: 'VUNESP', cargo: 'Escrevente', ...session, law: [{ ref: 'CPP, art. 798', text: 'Todos os prazos…' }], format: 'multipla escolha', n: 3, avoid: ['Questão antiga'] });
     expect(p).toMatch(/cobre SOMENTE este tema/);
     expect(p).toMatch(/\[CPP, art. 798\]/);
-    expect(p).toMatch(/não repita/);
+    expect(p).toMatch(/já foram cobrados/);
     expect(p).toMatch(/5 alternativas/);
   });
   it('média a difícil: caso concreto, distrator quase verdadeiro e questões reais como modelo', () => {

@@ -19,19 +19,26 @@ import { roleContext } from '../ai/plan.ts';
 // candidato não os vê), limita comando negativo a uma questão por lote e mistura itens certos e errados em certo ou errado.
 // No nível superior, as súmulas e teses oficiais do tema (as mesmas da apostila) entram como fonte: até 2 questões do lote
 // podem cobrá-las, e questão que cita súmula ou tema fora dos fornecidos é descartada (citesUnknownPrecedent).
-export const GENERATED_PROMPT_VERSION = 'qgen-v4';
+// qgen-v5: variedade. Num tema curto (LEF, arts. 1º e 2º) quase todas as questões cobravam o mesmo parágrafo, com o mesmo
+// caso de moldura e a mesma resposta certa. A lista de "já criadas" levava só o começo do enunciado (a moldura), sem o
+// ponto cobrado; agora leva o comando e a resposta certa (coveredLine). O prompt manda dar um ponto diferente das fontes
+// a cada questão e variar a situação, e o código descarta a questão cuja resposta certa repete a de outra (sameAnswer).
+export const GENERATED_PROMPT_VERSION = 'qgen-v5';
 export const GENERATED_BANCA = 'Inédita (IA)';
 export const GENERATED_MAX = 5;
 
-// Proporção na sessão: enquanto o banco ainda tem questão no tema (só demorou, ou a triagem descartou parte), a IA entra
-// no máximo 1 para cada 3 da API. Sem questão real para servir agora (banco esgotado, nenhum assunto, nada no lote), a IA
-// completa o que faltar.
+// Proporção na sessão: enquanto o banco ainda tem questão no tema, a IA entra no máximo 1 para cada 3 reais, também no
+// começo da sessão (antes, sem questão real respondida, ou num pedido que não achou questão nova por demora ou triagem, a
+// IA completava tudo, e os estudantes reclamavam do excesso). Só com o banco esgotado no tema (apiDry: nenhum assunto
+// vivo ou busca vazia sem estourar o tempo) a IA completa o que faltar. Sem nada para mostrar (empty), 1 da IA, para o
+// estudante não ficar parado.
 export const API_PER_GENERATED = 3;
-export function generatedRoom(o: { missing: number; sessionQids: string[]; apiDry: boolean }) {
+export function generatedRoom(o: { missing: number; sessionQids: string[]; apiDry: boolean; empty?: boolean }) {
   if (o.missing <= 0) return 0;
+  if (o.apiDry) return o.missing;
   const ai = o.sessionQids.filter((q) => q.startsWith('ia-')).length, api = o.sessionQids.length - ai;
-  if (o.apiDry || !api) return o.missing;
-  return Math.max(0, Math.min(o.missing, Math.floor(api / API_PER_GENERATED) - ai));
+  const ratio = Math.max(0, Math.min(o.missing, Math.floor(api / API_PER_GENERATED) - ai));
+  return o.empty ? Math.max(1, ratio) : ratio;
 }
 
 export const GeneratedQuestions = z.object({
@@ -52,6 +59,38 @@ export const GENERATED_JURIS_MAX = 6;
 // A questão cita súmula ou tema que não está entre os fornecidos (sem jurisprudência fornecida, qualquer citação).
 export const citesUnknownPrecedent = (q: { enunciado: string; alternativas: string[]; fundamento?: string }, juris: GenJuris[] = []) =>
   unverifiedPrecedents([q.enunciado, ...q.alternativas, q.fundamento ?? ''].join('\n'), juris).length > 0;
+// O que a questão cobra, para comparar e para a lista de "já criadas": em múltipla escolha, o texto da alternativa certa;
+// em certo ou errado, o próprio item.
+export function answerText(enunciado: string, alternativas: string[], gabarito: string) {
+  const i = gabarito.trim().slice(0, 1).toUpperCase().charCodeAt(0) - 65;
+  return plain(alternativas.length > 2 && alternativas[i] ? alternativas[i]! : enunciado);
+}
+// Linha da lista de "já criadas": o fim do enunciado (o comando, não a moldura do caso) e a resposta certa.
+export function coveredLine(enunciado: string, alternativas: string[], gabarito: string) {
+  const e = plain(enunciado), a = answerText(enunciado, alternativas, gabarito);
+  return alternativas.length > 2 ? `${e.length > 180 ? '…' : ''}${e.slice(-180)} → ${a.slice(0, 220)}` : e.slice(0, 320);
+}
+// Duas questões com a mesma resposta certa (ou o mesmo item), ainda que com outras palavras: palavras em comum sobre o
+// total de palavras das duas. Resposta curta ("30 dias", um número) não entra: coincide sem ser repetição.
+export const SAME_ANSWER_RATIO = 0.6;
+const words = (s: string) => new Set(normalizeText(s).split(' ').filter((w) => w.length > 2));
+export function sameAnswer(a: string, b: string) {
+  const x = words(a), y = words(b);
+  if (Math.min(x.size, y.size) < 6) return false;
+  let both = 0;
+  for (const w of x) if (y.has(w)) both++;
+  return both / (x.size + y.size - both) >= SAME_ANSWER_RATIO;
+}
+// Tira do lote a questão que repete a resposta de uma já criada ou de outra do mesmo lote.
+export function dropRepeated<T extends { enunciado: string; alternativas: string[]; gabarito: string }>(qs: T[], made: string[]): T[] {
+  const keys = [...made];
+  return qs.filter((q) => {
+    const k = answerText(q.enunciado, q.alternativas, q.gabarito);
+    if (keys.some((m) => sameAnswer(k, m))) return false;
+    keys.push(k);
+    return true;
+  });
+}
 // Questão real da banca no tema, usada só como modelo de estilo e dificuldade.
 export interface GenExample { enunciado: string; alternativas: string[]; gabarito: string; banca: string }
 const plain = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
@@ -124,7 +163,7 @@ ${p.law.length ? `Trechos oficiais da lei (única fonte legal permitida):\n${p.l
 ${juris.length ? `Jurisprudência oficial do STF e do STJ sobre esses artigos (texto publicado pelo tribunal; única jurisprudência permitida):\n${juris.map((j) => `[${j.ref}] ${j.text}`).join('\n\n')}` : ''}
 ${p.guide?.trim() ? `Apostila que o estudante leu nesta sessão (base do conteúdo; nenhuma questão pode contradizê-la, e o que não estiver nela só entra se você tiver certeza):\n${p.guide.trim()}` : ''}
 ${examples.length ? `Questões reais de prova neste tema (modelo de estilo e de dificuldade; não copie o conteúdo):\n${examples.map((e, i) => `Exemplo ${i + 1} (${e.banca || 'banca'}):\n${plain(e.enunciado).slice(0, 900)}${e.alternativas.length ? `\n${e.alternativas.map((a, j) => `${String.fromCharCode(65 + j)}) ${plain(a).slice(0, 300)}`).join('\n')}` : ''}\nGabarito: ${e.gabarito}`).join('\n\n')}` : ''}
-${p.avoid.length ? `Questões já criadas para este tema (não repita o que elas cobram nem a forma):\n${p.avoid.map((e) => `- ${e.slice(0, 200)}`).join('\n')}` : ''}
+${p.avoid.length ? `Questões já criadas para este tema (comando → resposta certa). Estes pontos já foram cobrados: nenhuma questão nova pode ter a mesma resposta certa, nem com outras palavras, nem repetir a situação do caso:\n${p.avoid.map((e) => `- ${e.slice(0, 420)}`).join('\n')}` : ''}
 Regras:
 - Crie ${p.n} questões ${ce ? 'de certo ou errado (alternativas vazias; gabarito "C" ou "E")' : 'de múltipla escolha com 5 alternativas (gabarito A a E)'}, de dificuldade média a difícil: quem só leu o tema por cima erra.
 - Cada questão cobra o tema da sessão: nada de outros assuntos da matéria, mesmo parecidos.
@@ -138,7 +177,8 @@ Regras:
 Como chegar à dificuldade média a difícil:
 ${RECIPES[kind]}
 - Alternativas de tamanho parecido; a correta não pode ser a mais longa nem a mais detalhada.
-- Varie o que cada questão cobra.
+- Variedade: antes de escrever, liste os pontos cobráveis das fontes (cada parágrafo, inciso, prazo, exceção, conceito, legitimado, consequência) e dê a cada questão do lote um ponto diferente, ainda não cobrado pelas questões já criadas. Duas questões nunca têm a mesma resposta certa. Se os pontos mais conhecidos já foram cobrados, vá aos menos óbvios em vez de repeti-los.
+- Varie também a forma: personagens, fatos, começo do enunciado e comando diferentes entre as questões e diferentes das já criadas. Os fatos do caso concreto têm de importar para a resposta; caso que é só moldura (some e a questão continua igual) vira pergunta direta.
 - Sem markdown e sem letras antes das alternativas.`;
 }
 
