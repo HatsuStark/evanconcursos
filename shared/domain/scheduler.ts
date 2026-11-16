@@ -3,7 +3,7 @@
 // - Dia com 2 ou 3 blocos de 1 h a 1h30, de matérias diferentes, alternando específica e básica.
 // - Teoria sempre com questões no fim do bloco, com meta que cresce ao longo do plano; blocos de reforço (questões dos
 //   pontos fracos) desde a 3ª semana; na reta final, pente-fino do que já foi estudado e revisão final, sem teoria nova.
-// - Simulado diagnóstico na 2ª semana e depois a cada 2 ou 3 semanas; na reta final, um por semana.
+// - Simulado só depois de ~70% do edital estudado, a cada 2 ou 3 semanas; na reta final, um por semana.
 // - Proporções pelo prazo: com pouco tempo, menos teoria nova e mais questões e revisão.
 // - Tempo de cada matéria pelos pontos em jogo (questões × peso), pela distância até a meta (nível) e pela prioridade da IA.
 // - Lei seca diária em concurso de legislação: releitura dos artigos das sessões estudadas (no dia seguinte e uma semana depois).
@@ -12,6 +12,7 @@
 // - Partes de um mesmo tema perto uma da outra (até 2 ou 3 dias de estudo), nunca no mesmo dia.
 import { parseYmd, ymd } from './dates.ts';
 import { isNextPart } from './parts.ts';
+import { FULL_COVERAGE } from './simulado-scope.ts';
 
 export const LEVELS = ['Iniciante', 'Básico', 'Intermediário', 'Avançado'] as const;
 // Padrão do questionário: 3 h em todos os dias (o candidato ajusta).
@@ -268,13 +269,18 @@ export function generateSchedule(input: ScheduleInput, rawConfig: unknown): Sche
   for (const s of study.slice(study.length - finalN)) s.final = true;
   const byWeek = new Map<number, Slot[]>();
   for (const s of study) { if (!byWeek.has(s.week)) byWeek.set(s.week, []); byWeek.get(s.week)!.push(s); }
-  // Simulados no maior dia da semana: diagnóstico na 2ª semana, depois a cada 2 ou 3; na reta final, toda semana
-  // (menos a da prova).
+  // Simulados no maior dia da semana, só depois de ~70% do edital estudado (FULL_COVERAGE): antes disso a prova completa
+  // cobraria o que o estudante não viu e mediria chute. A teoria se espalha por igual nos dias fora da reta final, e cada
+  // matéria também (interleave), então a cobertura no começo de uma semana é a parte desses dias que já passou. A partir
+  // daí, a cada 2 ou 3 semanas; na reta final, toda semana (menos a da prova).
   const examWeek = slots.find((s) => s.kind === 'exam')?.week;
   if (share.simuladoEvery && study.length >= 20) {
+    const theoryDays = study.filter((s) => !s.final), coveredBy = (w: number) => theoryDays.filter((s) => s.week < w).length / Math.max(1, theoryDays.length);
+    let firstDue = -1;
     for (const [w, list] of byWeek) {
       const rel = w - firstWeek, inFinal = list.some((s) => s.final);
-      const due = inFinal ? w !== examWeek : rel === 1 || (rel > 1 && (rel - 1) % share.simuladoEvery === 0);
+      if (!inFinal && firstDue < 0 && coveredBy(w) >= FULL_COVERAGE) firstDue = rel;
+      const due = inFinal ? w !== examWeek : firstDue >= 0 && (rel - firstDue) % share.simuladoEvery === 0;
       const free = list.filter((s) => s.kind === 'study');
       if (!due || free.length < 2) continue;
       Object.assign(free.reduce((a, b) => (b.hours > a.hours ? b : a)), { kind: 'simulado', text: 'Simulado completo da banca + correção' });

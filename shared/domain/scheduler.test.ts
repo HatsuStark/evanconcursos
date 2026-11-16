@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   apportion, apportionWithFloors, generateSchedule, horizonShares, interleave, splitDay, splitTopics, subjectDemand, theoryGoal, topicKeyword, WEAK_MARK,
-  type Block, type ScheduleConfig, type ScheduleInput,
+  type Block, type ScheduleConfig, type ScheduleInput, type Week,
 } from './scheduler.ts';
 
 describe('utilitários', () => {
@@ -108,7 +108,8 @@ describe('generateSchedule', () => {
     const goals = theory.map((b) => b.goal), third = Math.floor(goals.length / 3);
     const avg = (l: number[]) => l.reduce((a, b) => a + b, 0) / l.length;
     expect(goals.slice(0, third).every((g) => g >= 5 && g <= 10)).toBe(true);
-    expect(goals.slice(-third).every((g) => g >= 15 && g <= 30)).toBe(true);
+    // A fase vem dos dias, não dos blocos: dia longo no começo (3 blocos) puxa o terço final dos blocos um pouco para trás.
+    expect(goals.slice(-Math.floor(goals.length / 4)).every((g) => g >= 15 && g <= 30)).toBe(true);
     expect(avg(goals.slice(-third))).toBeGreaterThan(avg(goals.slice(third, -third)));
     expect(avg(goals.slice(third, -third))).toBeGreaterThan(avg(goals.slice(0, third)));
     expect([theoryGoal(75), theoryGoal(75, 0.5), theoryGoal(75, 0.9)]).toEqual([6, 15, 25]);
@@ -124,10 +125,14 @@ describe('generateSchedule', () => {
     expect(pente.length).toBeGreaterThan(0);
     expect(pente.every((b) => b.subject && b.goal >= 5 && b.goal <= 10)).toBe(true);
   });
-  it('simulado diagnóstico na 2ª semana, periódicos depois e semanais na reta final', () => {
+  it('simulado só depois de ~70% da teoria, periódicos depois e semanais na reta final', () => {
     const weeksWith = r.weeks.map((w, i) => (w.days.some((d) => d.kind === 'simulado') ? i : -1)).filter((i) => i >= 0);
-    expect(weeksWith[0]).toBe(1);
-    expect(weeksWith.length).toBeGreaterThanOrEqual(8);
+    const theoryIn = (ws: Week[]) => ws.flatMap((w) => w.days.flatMap((d) => d.blocks)).filter((b) => b.kind === 'theory').length;
+    const before = theoryIn(r.weeks.slice(0, weeksWith[0])) / theoryIn(r.weeks);
+    expect(before).toBeGreaterThanOrEqual(0.65);
+    expect(weeksWith[0]).toBeGreaterThan(1);
+    expect(weeksWith.length).toBeGreaterThanOrEqual(3);
+    expect(weeksWith[1]! - weeksWith[0]!).toBeLessThanOrEqual(3);
     const finalWeeks = r.weeks.map((w, i) => (w.days.some((d) => d.blocks.some((b) => b.kind === 'final_review')) ? i : -1)).filter((i) => i >= 0);
     expect(finalWeeks.length).toBeGreaterThan(0);
     for (const w of finalWeeks.slice(0, -1)) expect(weeksWith).toContain(w);
