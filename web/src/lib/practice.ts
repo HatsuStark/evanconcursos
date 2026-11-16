@@ -100,7 +100,11 @@ export async function reviewCard(c: Flashcard, knew: boolean) {
 export async function deleteCard(id: string) { await supabase.from('flashcards').delete().eq('id', id); }
 
 // ---------- simulados ----------
-export interface SimuladoConfig { kind: 'concurso' | 'custom'; blocks: { name: string; minPct: number; subjects: { name: string; count: number }[] }[]; timed: boolean; minutes: number; tipo?: string; banca?: string; missing?: string[] }
+// scope/coverage: no simulado do concurso, se cobrou só o conteúdo estudado ou o edital inteiro, e a parte do edital já
+// estudada (0–1) quando foi montado.
+export interface SimuladoConfig { kind: 'concurso' | 'custom'; blocks: { name: string; minPct: number; subjects: { name: string; count: number }[] }[]; timed: boolean; minutes: number; tipo?: string; banca?: string; missing?: string[]; scope?: 'estudado' | 'edital'; coverage?: number | null }
+export interface SimuladoCoverage { coverage: number; scope: 'estudado' | 'edital'; full: number; subjects: { name: string; done: number; total: number }[] }
+export const simuladoCoverage = (planId: string, size: string) => practice<SimuladoCoverage>({ action: 'simulado_coverage', planId, size });
 export interface SimuladoResult { total: number; correct: number; answered: number; pct: number; passed: boolean; seconds: number; blocks: { name: string; total: number; correct: number; pct: number; minPct: number; passed: boolean }[]; subjects: { name: string; total: number; correct: number; pct: number }[] }
 export interface SimuladoRow { id: string; title: string; config: SimuladoConfig; status: 'in_progress' | 'finished'; started_at: string; finished_at: string | null; result: SimuladoResult | null; task_id: string | null }
 export interface SimuladoData { simulado: SimuladoRow; questions: { qid: string; block: string; subject: string; question: Question | null; gabarito: string | null }[]; answers: { qid: string; chosen: string; struck: string[] }[] }

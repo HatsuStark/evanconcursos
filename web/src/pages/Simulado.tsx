@@ -107,6 +107,9 @@ function SimuladoResult({ d }: { d: SimuladoData }) {
         <div className="stat"><strong style={{ fontSize: 48, color: `var(--${tone})` }}>{r.pct}%</strong><span>{r.correct} de {r.total} · {r.answered} respondidas</span></div>
         <span className={'badge ' + tone}>{goalText}</span>
         <span className={'badge ' + (r.passed ? 'lime' : 'orange')}>{r.passed ? 'Passou nos mínimos dos blocos do edital' : 'Abaixo do mínimo do edital em algum bloco'}</span>
+        {d.simulado.config.scope === 'estudado' && (
+          <span className="badge">Só o conteúdo estudado{d.simulado.config.coverage != null ? ` · cobre ${Math.round(d.simulado.config.coverage * 100)}% do edital` : ''}</span>
+        )}
       </div>
       <div className="section-title"><h2>Por bloco</h2></div>
       <div className="grid" style={{ gap: 10 }}>

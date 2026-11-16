@@ -3,7 +3,8 @@
 //   {action:'search', filters:{materia, assuntos?: string[] (qualquer um; ou assunto), banca?, ano?, dificuldade?, orgao?, cargo?, tipo?, onlyNew?, fonte?}, count}
 //   {action:'by_id', qid}              → uma questão pelo id da API (do cache, se já veio; sem gabarito)
 //   {action:'review', count}           → questões do caderno de erros que vencem hoje (do cache, sem créditos)
-//   {action:'simulado_create', kind:'concurso'|'custom', planId?, taskId?, size?, subjects?, banca?, tipo?, timed, minutes?}
+//   {action:'simulado_coverage', planId, size?} → quanto do edital já foi estudado e o escopo recomendado
+//   {action:'simulado_create', kind:'concurso'|'custom', planId?, taskId?, size?, scope?: 'estudado'|'edital', subjects?, banca?, tipo?, timed, minutes?}
 //   {action:'simulado_get', id} · {action:'simulado_finish', id}
 // Questões livres, revisão e simulados entram no histórico com contexto próprio, no concurso ativo do estudante.
 import type { GeminiUsage } from '../../../shared/ai/gemini.ts';
@@ -12,9 +13,14 @@ import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts
 import { genericSubject } from '../../../shared/qbank/materias.ts';
 import { interleave, mapSubject, MEDIUM_OR_HARD, pickBoard, QMAP_PROMPT_VERSION, recentMinYear, SESSION_DIFFICULTIES } from '../../../shared/qbank/map.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-import { activePlan, cacheQuestions, ensureCarreiras, fromCache, mapDeps, publicQuestion, questFailure, recordAnswer, takeNewest, withStatus, type PublicQuestion } from '../_shared/qbank.ts';
+import { isDeepTitle } from '../../../shared/domain/priority.ts';
+import { chooseScope, examCoverage, FULL_COVERAGE, studiedCounts, type SimuladoScope } from '../../../shared/domain/simulado-scope.ts';
+import { activePlan, cacheQuestions, ensureCarreiras, ensureSessionMap, fromCache, mapDeps, publicQuestion, questFailure, recordAnswer, takeNewest, withStatus, type PublicQuestion } from '../_shared/qbank.ts';
 
 const MAX_FREE_ASSUNTOS = 10;
+// Sessões concluídas sem mapa de assuntos (questões nunca abertas) mapeadas pela IA ao montar um simulado.
+const MAX_NEW_SESSION_MAPS = 12;
+const shuffle = <T>(a: T[]) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j]!, a[i]!]; } return a; };
 const PARAM_ORDER = ['materia', 'assunto', 'banca', 'ano', 'orgao', 'cargo', 'tipo', 'dificuldade'];
 const str = (v: unknown, n = 160) => String(v ?? '').trim().slice(0, n);
 const hash = (s: string) => { let h = 0; for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) >>> 0; return h.toString(36); };
@@ -43,6 +49,77 @@ Deno.serve(async (req) => {
     let q = admin.from('question_attempts').select('qid').eq('owner_id', auth.user.id).limit(20000);
     q = plan ? q.eq('plan_id', plan) : q.is('plan_id', null);
     return new Set(((await q).data ?? []).map((d) => d.qid as string));
+  };
+
+  // Estrutura da prova do edital e o quanto dela já foi estudado: blocos (com nota mínima), questões de cada disciplina no
+  // tamanho escolhido e, de cada uma, as sessões de teoria do plano ativo e as concluídas (de qualquer versão do plano;
+  // aprofundamentos não contam como conteúdo novo).
+  const examLayout = async (planIdIn: string, size: unknown) => {
+    const { data: plan } = await auth.client.from('study_plans').select('id, notice_id, active_version_id').eq('id', planIdIn).maybeSingle();
+    if (!plan) return null;
+    const [{ data: notice }, { data: subs }, { data: sessions }, { data: doneTasks }] = await Promise.all([
+      auth.client.from('notices').select('board, role_name, organization, total_questions, structure, education_level').eq('id', plan.notice_id).single(),
+      auth.client.from('notice_subjects').select('id, name, block, questions, weight, notice_topics(text)').eq('notice_id', plan.notice_id).order('position'),
+      plan.active_version_id
+        ? auth.client.from('study_sessions').select('subject_id, title').eq('plan_version_id', plan.active_version_id).limit(5000)
+        : Promise.resolve({ data: [] as { subject_id: string; title: string }[] }),
+      auth.client.from('tasks').select('subject_id, session_id').eq('plan_id', plan.id).eq('kind', 'theory').not('done_at', 'is', null).not('session_id', 'is', null).limit(5000),
+    ]);
+    const totals = new Map<string, number>(), done = new Map<string, Set<string>>();
+    for (const s of sessions ?? []) if (!isDeepTitle(s.title)) totals.set(s.subject_id, (totals.get(s.subject_id) ?? 0) + 1);
+    for (const t of doneTasks ?? []) if (t.subject_id && t.session_id) done.set(t.subject_id, (done.get(t.subject_id) ?? new Set()).add(t.session_id));
+    const structure = (notice?.structure ?? {}) as { blocks?: { name: string; questions: number; rule: string }[] };
+    const list = (subs ?? []) as { id: string; name: string; block: string; questions: number; weight: number; notice_topics: { text: string }[] }[];
+    const groups = structure.blocks?.length ? structure.blocks : [{ name: 'Prova', questions: notice?.total_questions || list.length * 5, rule: '' }];
+    const total = groups.reduce((a, g) => a + g.questions, 0) || 1, factor = size === 'reduzido' ? Math.min(1, 30 / total) : 1;
+    const layout = groups.map((g) => {
+      const inBlock = list.filter((s) => normalizeText(s.block) === normalizeText(g.name) || (groups.length === 1));
+      const fixed = inBlock.reduce((a, s) => a + (s.questions || 0), 0), loose = inBlock.filter((s) => !s.questions);
+      return {
+        name: g.name, minPct: minPctOf(g.rule),
+        subjects: inBlock.map((s) => {
+          const n = s.questions || Math.max(1, Math.round(Math.max(0, g.questions - fixed) / Math.max(1, loose.length)));
+          const ids = [...(done.get(s.id) ?? [])];
+          return { sub: s, count: Math.max(1, Math.round(n * factor)), total: totals.get(s.id) ?? 0, done: ids.length, doneIds: ids };
+        }),
+      };
+    }).filter((b) => b.subjects.length);
+    const coverage = examCoverage(layout.flatMap((b) => b.subjects.map((s) => ({ key: s.sub.id, count: s.count, total: s.total, done: s.done }))));
+    return { plan, notice, layout, coverage };
+  };
+
+  // Questões dos assuntos já estudados: primeiro as já compradas (sem créditos), um assunto de cada vez; faltando, busca
+  // poucas de cada assunto, para a prova passar por muitos deles. Escolaridade e banca do edital primeiro.
+  const studiedQuestions = async (pairs: { materia: string; assunto: string }[], count: number, seen: Set<string>, o: { banca: string; tipo: string; level: string; carreiras: string[] }) => {
+    const out: string[] = [], pools = new Map<string, string[]>(), byMateria = new Map<string, string[]>();
+    for (const p of pairs) byMateria.set(p.materia, [...(byMateria.get(p.materia) ?? []), p.assunto]);
+    for (const [materia, assuntos] of byMateria) {
+      const cached = await fromCache(admin, { materia, assuntos, tipo: o.tipo || undefined, minAno: recentMinYear(materia) || undefined, preferBanca: o.banca, preferCarreiras: o.carreiras }, Math.min(300, count * 4), (id) => !seen.has(id));
+      for (const q of cached) { const k = `${materia}>${q.assunto}`; pools.set(k, [...(pools.get(k) ?? []), q.qid]); }
+    }
+    const queues = shuffle([...pools.values()]);
+    while (out.length < count && queues.some((q) => q.length)) {
+      for (const q of queues) {
+        if (out.length >= count) break;
+        const id = q.shift();
+        if (id && !seen.has(id)) { seen.add(id); out.push(id); }
+      }
+    }
+    const tries = pairs.slice(0, count + 10);
+    for (const [i, p] of tries.entries()) {
+      const left = count - out.length;
+      if (left <= 0) break;
+      const want = Math.ceil(left / (tries.length - i)), minYear = recentMinYear(p.materia);
+      const base: Record<string, string> = { materia: p.materia, assunto: p.assunto, ...(o.tipo ? { tipo: o.tipo } : {}) };
+      const dated = minYear ? [minYear + 1, minYear].map((ano) => ({ ...base, ano: String(ano) })) : [base];
+      const places = o.banca ? [...dated.map((x) => ({ ...x, banca: o.banca })), ...dated] : dated;
+      let got = 0;
+      for (const params of [...(o.level ? places.map((x) => ({ ...x, nivel_escolaridade: o.level })) : []), ...places]) {
+        if (got >= want) break;
+        for (const q of await fetchFresh('simulado', params, want - got, seen)) { seen.add(q.id); out.push(q.id); got++; }
+      }
+    }
+    return out;
   };
 
   try {
@@ -129,39 +206,78 @@ Deno.serve(async (req) => {
       return json(200, { questions: await withStatus(admin, auth.user.id, qids.map((id) => byId.get(id)).filter((q): q is PublicQuestion => !!q)), stages: Object.fromEntries((due ?? []).map((d) => [d.qid, { stage: d.stage, wrong: d.wrong_count }])) });
     }
 
+    if (body.action === 'simulado_coverage') {
+      const ex = await examLayout(str(body.planId, 40), body.size);
+      if (!ex) return json(404, { error: 'Plano não encontrado.' });
+      return json(200, {
+        coverage: ex.coverage, scope: chooseScope(ex.coverage), full: FULL_COVERAGE,
+        subjects: ex.layout.flatMap((b) => b.subjects.map((s) => ({ name: s.sub.name, done: s.done, total: s.total }))),
+      });
+    }
+
     if (body.action === 'simulado_create') {
       const tipo = str(body.tipo, 60);
-      const blocks: { name: string; minPct: number; subjects: { name: string; materia: string | null; count: number }[] }[] = [];
+      type Pair = { materia: string; assunto: string };
+      // assuntos: no simulado do conteúdo estudado, os assuntos das sessões concluídas da matéria (só eles são cobrados).
+      const blocks: { name: string; minPct: number; subjects: { name: string; materia: string | null; count: number; assuntos?: Pair[] }[] }[] = [];
       let banca = str(body.banca, 80), planId: string | null = null, title = 'Simulado', level = '', carreiras: string[] = [];
+      let scope: SimuladoScope = 'edital', coverage: number | null = null;
       if (body.kind === 'concurso') {
-        // Estrutura da prova do edital: blocos (com nota mínima) e questões por disciplina.
-        const { data: plan } = await auth.client.from('study_plans').select('id, notice_id').eq('id', str(body.planId, 40)).maybeSingle();
-        if (!plan) return json(404, { error: 'Plano não encontrado.' });
+        const ex = await examLayout(str(body.planId, 40), body.size);
+        if (!ex) return json(404, { error: 'Plano não encontrado.' });
+        const { plan, notice } = ex;
         planId = plan.id;
-        const { data: notice } = await auth.client.from('notices').select('board, role_name, organization, total_questions, structure, education_level').eq('id', plan.notice_id).single();
         level = String(notice?.education_level ?? '');
-        const { data: subs } = await auth.client.from('notice_subjects').select('id, name, block, questions, weight, notice_topics(text)').eq('notice_id', plan.notice_id).order('position');
+        coverage = ex.coverage;
+        scope = chooseScope(ex.coverage, body.scope);
+        const studied = scope === 'estudado' ? studiedCounts(ex.layout.flatMap((b) => b.subjects.map((s) => ({ key: s.sub.id, count: s.count, total: s.total, done: s.done })))) : null;
+        if (studied && !studied.size) return json(400, { error: 'Você ainda não concluiu nenhuma sessão de teoria deste concurso. Estude algumas e volte, ou faça o simulado com o edital inteiro.' });
         const deps = mapDeps(admin, quest, usage);
         carreiras = await ensureCarreiras(admin, quest, deps, plan.notice_id);
         if (!banca && notice?.board) banca = await pickBoard(String(notice.board), (q) => quest.bancas(q));
-        title = `Simulado ${body.size === 'reduzido' ? 'reduzido' : 'completo'} · ${notice?.role_name ?? ''}`.trim();
-        const structure = (notice?.structure ?? {}) as { blocks?: { name: string; questions: number; rule: string }[] };
-        const list = (subs ?? []) as { id: string; name: string; block: string; questions: number; weight: number; notice_topics: { text: string }[] }[];
-        const groups = structure.blocks?.length ? structure.blocks : [{ name: 'Prova', questions: notice?.total_questions || list.length * 5, rule: '' }];
-        const total = groups.reduce((a, g) => a + g.questions, 0) || 1, factor = body.size === 'reduzido' ? Math.min(1, 30 / total) : 1;
-        for (const g of groups) {
-          const inBlock = list.filter((s) => normalizeText(s.block) === normalizeText(g.name) || (groups.length === 1));
-          const fixed = inBlock.reduce((a, s) => a + (s.questions || 0), 0), loose = inBlock.filter((s) => !s.questions);
-          const block = { name: g.name, minPct: minPctOf(g.rule), subjects: [] as { name: string; materia: string | null; count: number }[] };
-          for (const s of inBlock) {
-            const n = s.questions || Math.max(1, Math.round(Math.max(0, g.questions - fixed) / Math.max(1, loose.length)));
+        title = (scope === 'estudado'
+          ? `Simulado do conteúdo estudado (${Math.round(ex.coverage * 100)}% do edital) · ${notice?.role_name ?? ''}`
+          : `Simulado ${body.size === 'reduzido' ? 'reduzido' : 'completo'} · ${notice?.role_name ?? ''}`).trim();
+        // Assuntos de cada sessão concluída: os mapas já feitos (uma consulta); sessão sem mapa (concluída sem abrir as
+        // questões) é mapeada agora, até MAX_NEW_SESSION_MAPS por simulado, para não demorar nem gastar demais com a IA.
+        const { data: ownMaps } = studied ? await admin.from('qbank_session_maps').select('session_id, materia, assuntos, materia_of').eq('owner_id', auth.user.id).limit(5000) : { data: [] };
+        const mapOf = new Map((ownMaps ?? []).map((m) => [m.session_id as string, m as { materia: string | null; assuntos: string[] | null; materia_of: Record<string, string> | null }]));
+        let mapBudget = MAX_NEW_SESSION_MAPS;
+        const studiedAssuntos = async (subjectName: string, materia: string | null, sessionIds: string[]): Promise<Pair[]> => {
+          const unmapped = sessionIds.filter((id) => !mapOf.has(id)).slice(0, Math.max(0, mapBudget));
+          mapBudget -= unmapped.length;
+          await Promise.all(unmapped.map(async (sid) => {
+            try {
+              const m = await ensureSessionMap(admin, deps, auth.user.id, sid, materia, async () => {
+                const { data: ss } = await auth.client.from('study_sessions').select('title, keyword, topic_ids').eq('id', sid).single();
+                const { data: tt } = ss?.topic_ids?.length ? await auth.client.from('notice_topics').select('text').in('id', ss.topic_ids) : { data: [] };
+                return { subject: subjectName, title: ss?.title ?? '', keyword: ss?.keyword ?? '', topics: (tt ?? []).map((t) => t.text), organization: String(notice?.organization ?? '') };
+              });
+              mapOf.set(sid, { materia: m.materia, assuntos: m.assuntos, materia_of: m.materiaOf ?? null });
+            } catch (e) { console.error('mapa da sessão:', e); }
+          }));
+          const pairs = new Map<string, Pair>();
+          for (const id of sessionIds) {
+            const m = mapOf.get(id);
+            for (const a of m?.assuntos ?? []) {
+              const mt = m?.materia_of?.[a] ?? m?.materia;
+              if (mt) pairs.set(`${mt}>${a}`, { materia: mt, assunto: a });
+            }
+          }
+          return shuffle([...pairs.values()]);
+        };
+        for (const b of ex.layout) {
+          const block = { name: b.name, minPct: b.minPct, subjects: [] as typeof blocks[number]['subjects'] };
+          for (const { sub: s, count: full, doneIds } of b.subjects) {
+            const count = studied ? studied.get(s.id) ?? 0 : full;
+            if (!count) continue;
             let { data: sm } = await admin.from('qbank_subject_maps').select('materia, prompt_version').eq('subject_id', s.id).maybeSingle();
             if (!sm || (sm.prompt_version !== QMAP_PROMPT_VERSION && (!sm.materia || genericSubject(s.name)))) {
               const r = await mapSubject(deps, { name: s.name, topics: (s.notice_topics ?? []).map((t) => t.text), organization: String(notice?.organization ?? '') });
               sm = { materia: r.materia, prompt_version: QMAP_PROMPT_VERSION };
               await admin.from('qbank_subject_maps').upsert({ subject_id: s.id, owner_id: auth.user.id, materia: r.materia, banca, how: r.how, prompt_version: QMAP_PROMPT_VERSION });
             }
-            block.subjects.push({ name: s.name, materia: sm.materia, count: Math.max(1, Math.round(n * factor)) });
+            block.subjects.push({ name: s.name, materia: sm.materia, count, ...(studied ? { assuntos: await studiedAssuntos(s.name, sm.materia, doneIds) } : {}) });
           }
           if (block.subjects.length) blocks.push(block);
         }
@@ -184,6 +300,13 @@ Deno.serve(async (req) => {
       const missing: string[] = [];
       for (const b of blocks) for (const s of b.subjects) {
         if (!s.materia) { missing.push(s.name); continue; }
+        if (s.assuntos) {
+          // Conteúdo estudado: matéria sem assunto mapeado fica fora (cobrar a matéria toda traria o que não foi visto).
+          const got = s.assuntos.length ? await studiedQuestions(s.assuntos, s.count, seen, { banca, tipo, level, carreiras }) : [];
+          for (const qid of got) chosen.push({ qid, block: b.name, subject: s.name });
+          if (got.length < s.count) missing.push(`${s.name} (${got.length}/${s.count})`);
+          continue;
+        }
         const base: Record<string, string> = { materia: s.materia, ...(tipo ? { tipo } : {}), ...('assunto' in s && (s as { assunto?: string }).assunto ? { assunto: (s as { assunto: string }).assunto } : {}) };
         // Atualidades: só provas deste ano e do anterior, como nas sessões do cronograma.
         const minYear = recentMinYear(s.materia);
@@ -202,7 +325,10 @@ Deno.serve(async (req) => {
       const minutes = Math.max(5, Math.min(600, Number(body.minutes) || chosen.length * 3));
       const { data: sim, error } = await admin.from('simulados').insert({
         owner_id: auth.user.id, plan_id: planId, task_id: str(body.taskId, 40) || null, title: title.slice(0, 160),
-        config: { kind: body.kind === 'concurso' ? 'concurso' : 'custom', blocks: blocks.map((b) => ({ name: b.name, minPct: b.minPct, subjects: b.subjects.map((s) => ({ name: s.name, count: s.count })) })), timed: !!body.timed, minutes, tipo, banca, missing },
+        config: {
+          kind: body.kind === 'concurso' ? 'concurso' : 'custom', blocks: blocks.map((b) => ({ name: b.name, minPct: b.minPct, subjects: b.subjects.map((s) => ({ name: s.name, count: s.count })) })), timed: !!body.timed, minutes, tipo, banca, missing,
+          ...(body.kind === 'concurso' ? { scope, coverage } : {}),
+        },
         questions: chosen,
       }).select('id').single();
       if (error || !sim) throw new Error(error?.message ?? 'Falha ao criar o simulado.');
