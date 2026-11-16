@@ -55,13 +55,15 @@ Deno.serve(async (req) => {
   // tamanho escolhido e, de cada uma, as sessões de teoria do plano ativo e as concluídas (de qualquer versão do plano;
   // aprofundamentos não contam como conteúdo novo).
   const examLayout = async (planIdIn: string, size: unknown) => {
-    const { data: plan } = await auth.client.from('study_plans').select('id, notice_id, active_version_id').eq('id', planIdIn).maybeSingle();
+    const { data: plan } = await auth.client.from('study_plans').select('id, notice_id').eq('id', planIdIn).maybeSingle();
     if (!plan) return null;
+    // Sessões em vigor: depois de reorganizar, a versão ativa não tem sessões próprias.
+    const { data: sessionVersion } = await auth.client.rpc('plan_session_version', { p_plan: plan.id });
     const [{ data: notice }, { data: subs }, { data: sessions }, { data: doneTasks }] = await Promise.all([
       auth.client.from('notices').select('board, role_name, organization, total_questions, structure, education_level').eq('id', plan.notice_id).single(),
       auth.client.from('notice_subjects').select('id, name, block, questions, weight, notice_topics(text)').eq('notice_id', plan.notice_id).order('position'),
-      plan.active_version_id
-        ? auth.client.from('study_sessions').select('subject_id, title').eq('plan_version_id', plan.active_version_id).limit(5000)
+      sessionVersion
+        ? auth.client.from('study_sessions').select('subject_id, title').eq('plan_version_id', sessionVersion).limit(5000)
         : Promise.resolve({ data: [] as { subject_id: string; title: string }[] }),
       auth.client.from('tasks').select('subject_id, session_id').eq('plan_id', plan.id).eq('kind', 'theory').not('done_at', 'is', null).not('session_id', 'is', null).limit(5000),
     ]);

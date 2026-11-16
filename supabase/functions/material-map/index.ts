@@ -15,9 +15,11 @@ Deno.serve(async (req) => {
   if (!pages) return json(400, { error: 'O texto do PDF não chegou. Recarregue a página e tente de novo.' });
   const { data: material } = await auth.client.from('materials').select('id, plan_id').eq('id', String(body.materialId ?? '')).maybeSingle();
   if (!material) return json(404, { error: 'Material não encontrado.' });
-  // Sessões da versão ativa do plano (lidas como o usuário).
-  const { data: plan } = await auth.client.from('study_plans').select('active_version_id').eq('id', material.plan_id).single();
-  const { data: sessions } = await auth.client.from('study_sessions').select('id, title, notice_subjects(name)').eq('plan_version_id', plan?.active_version_id ?? '').order('subject_id').order('position');
+  // Sessões em vigor do plano (lidas como o usuário). Depois de reorganizar, a versão ativa não tem sessões próprias.
+  const { data: version } = await auth.client.rpc('plan_session_version', { p_plan: material.plan_id });
+  const { data: sessions } = version
+    ? await auth.client.from('study_sessions').select('id, title, notice_subjects(name)').eq('plan_version_id', version).order('subject_id').order('position')
+    : { data: [] };
   if (!sessions?.length) return json(400, { error: 'O plano ainda não tem sessões.' });
 
   const admin = adminClient();

@@ -29,12 +29,14 @@ async function start(auth: Auth, admin: Admin, model: string, body: Record<strin
   let topics: string[] = [], law: { ref: string; text: string }[] = [], articles: Awaited<ReturnType<typeof loadLawSources>>['articles'] = [], extra: Awaited<ReturnType<typeof loadLawSources>>['extra'] = [];
 
   if (rules.format === 'questao') {
-    const { data: plan } = await auth.client.from('study_plans').select('id, active_version_id').eq('notice_id', notice.id).eq('status', 'active').order('created_at', { ascending: false }).limit(1).maybeSingle();
-    if (!plan?.active_version_id) return json(400, { error: 'Monte o cronograma primeiro: os temas vêm das sessões dele.' });
+    const { data: plan } = await auth.client.from('study_plans').select('id').eq('notice_id', notice.id).eq('status', 'active').order('created_at', { ascending: false }).limit(1).maybeSingle();
+    // Sessões em vigor: depois de reorganizar, a versão ativa não tem sessões próprias.
+    const { data: sessionVersion } = plan ? await auth.client.rpc('plan_session_version', { p_plan: plan.id }) : { data: null };
+    if (!plan || !sessionVersion) return json(400, { error: 'Monte o cronograma primeiro: os temas vêm das sessões dele.' });
     const { data: subs } = await auth.client.from('notice_subjects').select('id, name, is_core').eq('notice_id', notice.id);
     const eligible = (subs ?? []).filter((s) => !rules.specificOnly || s.is_core);
     const ids = (eligible.length ? eligible : subs ?? []).filter((s) => !body.subjectId || s.id === body.subjectId).map((s) => s.id);
-    const { data: sessions } = await auth.client.from('study_sessions').select('id, subject_id, title, topic_ids, law_refs').eq('plan_version_id', plan.active_version_id).in('subject_id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']);
+    const { data: sessions } = await auth.client.from('study_sessions').select('id, subject_id, title, topic_ids, law_refs').eq('plan_version_id', sessionVersion).in('subject_id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']);
     const { data: done } = await auth.client.from('tasks').select('session_id').eq('plan_id', plan.id).not('done_at', 'is', null).not('session_id', 'is', null);
     const { data: past } = await auth.client.from('discursive_answers').select('session_id').eq('notice_id', notice.id).not('session_id', 'is', null);
     const doneSet = new Set((done ?? []).map((t) => t.session_id));
