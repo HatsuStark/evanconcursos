@@ -23,6 +23,7 @@ const ReviewPage = page(() => import('./pages/Review.tsx'), 'ReviewPage');
 const ReviewsPage = page(() => import('./pages/Reviews.tsx'), 'ReviewsPage');
 const SchedulePage = page(() => import('./pages/Schedule.tsx'), 'SchedulePage');
 const StudyPage = page(() => import('./pages/Study.tsx'), 'StudyPage');
+const TutorReviewPage = page(() => import('./pages/TutorReview.tsx'), 'TutorReviewPage');
 const VerticalizedPage = page(() => import('./pages/Verticalized.tsx'), 'VerticalizedPage');
 
 const Loading = () => <div className="center-page"><div className="spinner" /></div>;
@@ -48,6 +49,7 @@ export function App() {
         <Route path="/cronograma" element={<SchedulePage />} />
         <Route path="/edital" element={<VerticalizedPage />} />
         <Route path="/revisoes" element={<ReviewsPage />} />
+        <Route path="/aprender/revisao" element={<TutorReviewPage />} />
         <Route path="/estudo/:taskId" element={<StudyPage />} />
         <Route path="/materiais" element={<MaterialsPage />} />
         <Route path="/questoes" element={<QuestionsHubPage />} />

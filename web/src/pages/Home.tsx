@@ -22,6 +22,7 @@ import { useDueCounts } from '../lib/practice.ts';
 import { prepareGuides, today, useActivePlan } from '../lib/plans.ts';
 import { prefetchQuestions } from '../lib/questions.ts';
 import { useTheoryReviews } from '../lib/theoryReviews.ts';
+import { useTutorConcepts } from '../lib/tutor.ts';
 
 const DISCURSIVE_NUDGE_DAYS = 7;
 const NEXT_TASKS_STEP = 5;
@@ -37,6 +38,7 @@ export function HomePage() {
   const discursive = useDiscursiveRules(active.data?.notice.id);
   const lastDiscursive = useLastDiscursive(active.data?.notice.id);
   const theoryReviews = useTheoryReviews(planId);
+  const tutorConcepts = useTutorConcepts(planId);
   const activity = useStudyActivity(planId);
   useEffect(() => { if (planId) prepareGuides(planId); }, [planId]);
   // A busca de questões da próxima tarefa começa já na tela Hoje: quando o estudante chega às Questões, a primeira está pronta.
@@ -137,7 +139,7 @@ export function HomePage() {
       <PlanNoticeBanner planId={active.data.plan.id} noticeId={active.data.plan.notice_id} />
       <ReplanBanner active={active.data} />
       <CoverageBanner active={active.data} />
-      <DailyReview themes={dueReviews} errors={due.data?.errors ?? 0} cards={due.data?.cards ?? 0} subjects={subjects} today={t0} hasReviews={!!theoryReviews.data?.length} />
+      <DailyReview themes={dueReviews} errors={due.data?.errors ?? 0} cards={due.data?.cards ?? 0} concepts={(tutorConcepts.data ?? []).filter((c) => c.due_on && c.due_on <= t0).length} subjects={subjects} today={t0} hasReviews={!!theoryReviews.data?.length || !!tutorConcepts.data?.length} />
       {discursive.data?.rules && (lastDiscursive.data === null || (lastDiscursive.data ?? 0) >= DISCURSIVE_NUDGE_DAYS) && !lastDiscursive.isLoading && (
         <div className="glass card review-today">
           <PenLine size={20} style={{ color: 'var(--violet)' }} />

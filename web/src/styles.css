@@ -990,3 +990,48 @@ details.card summary { cursor: pointer; font-weight: 600; }
 .task-done-card h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 22px; }
 .task-done-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 @keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(.985); } to { opacity: 1; transform: none; } }
+
+/* Aprender por questões */
+.tutor-intro, .tutor-summary { display: grid; gap: 14px; }
+.tutor-intro h2, .tutor-summary h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 22px; }
+.tutor-intro p { margin: 0; line-height: 1.55; }
+.tutor-summary h3 { margin: 0 0 8px; }
+.tutor-steps { margin: 0; padding-left: 20px; display: flex; flex-wrap: wrap; gap: 6px 26px; color: var(--muted); font-size: 14px; }
+.tutor-wait { display: flex; align-items: center; gap: 12px; color: var(--muted); }
+.tutor-help { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.tutor-head { display: grid; gap: 10px; }
+.tutor-stages { display: flex; gap: 6px; flex-wrap: wrap; }
+.tutor-stage { font-size: 12.5px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--faint); }
+.tutor-stage.done { color: var(--lime); border-color: color-mix(in srgb, var(--lime) 40%, transparent); }
+.tutor-stage.on { color: var(--violet); border-color: var(--violet); background: color-mix(in srgb, var(--violet) 12%, transparent); font-weight: 600; }
+.tutor-aside { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; background: color-mix(in srgb, var(--cyan) 8%, transparent); border: 1px solid color-mix(in srgb, var(--cyan) 25%, transparent); line-height: 1.5; }
+.tutor-aside svg { flex: none; margin-top: 3px; color: var(--cyan); }
+.tutor-ce { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tutor-text { display: flex; gap: 10px; flex-wrap: wrap; }
+.tutor-text .input { flex: 1; min-width: 200px; }
+.tutor-order { display: grid; gap: 8px; }
+.tutor-order-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; background: var(--well); border: var(--bw) solid var(--line-2); line-height: 1.45; }
+.tutor-order-item > span:first-of-type { flex: 1; }
+.tutor-order-item b { display: grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--surface-3); font-size: 13px; }
+.tutor-order-item.right { border-color: var(--lime); }
+.tutor-order-item.wrong { border-color: var(--danger); }
+.tutor-order-btns { display: flex; gap: 4px; flex: none; }
+.tutor-order-btns .btn { padding: 6px 8px; }
+.tutor-report { display: grid; gap: 10px; padding: 14px; border-radius: 14px; border: 1px solid var(--line-2); background: var(--surface-2); }
+.spinner.sm { width: 14px; height: 14px; }
+.tutor-count { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
+.tutor-count strong { font-size: 14.5px; }
+.tutor-teach h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 19px; }
+.tutor-teach p { margin: 0; line-height: 1.6; }
+.tutor-blank { display: inline-block; min-width: 96px; padding: 1px 10px; margin: 0 3px; border-bottom: 2px dashed var(--cyan); border-radius: 8px 8px 2px 2px; text-align: center; transition: background .15s, border-color .15s; cursor: pointer; }
+.tutor-blank.filled { border-bottom-style: solid; background: color-mix(in srgb, var(--cyan) 12%, transparent); font-weight: 600; }
+.tutor-blank.over { background: color-mix(in srgb, var(--cyan) 22%, transparent); box-shadow: 0 0 0 2px var(--cyan); }
+.tutor-blank.right { border-color: var(--lime); background: color-mix(in srgb, var(--lime) 12%, transparent); }
+.tutor-blank.wrong { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.tutor-balloons { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.tutor-balloon { padding: 9px 16px; border-radius: 999px; border: var(--bw) solid var(--line-2); background: var(--well); color: var(--text); font-size: var(--fs-opt); cursor: grab; touch-action: none; user-select: none; transition: opacity .15s, border-color .15s; }
+.tutor-balloon:hover { border-color: var(--cyan); }
+.tutor-balloon.used { opacity: .35; }
+.tutor-balloon.ghost { position: fixed; z-index: 50; transform: translate(-50%, -50%); pointer-events: none; border-color: var(--cyan); box-shadow: 0 6px 20px rgb(0 0 0 / .25); cursor: grabbing; }
+.tutor-balloons > .btn { margin-left: auto; }
+.q-opt.tutor-short p { font-weight: 500; }
