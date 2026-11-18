@@ -6,6 +6,8 @@
 //   {action:'grade', subject, question, answer} → 200 {correta, comentario}; correção de resposta escrita.
 //   {action:'review', planId} → 200 {questions, concepts}; uma pergunta nova para cada conceito vencido (até 8).
 //   {action:'report', lessonKey, taskId, question, reason, note} → 200; tira a pergunta da aula e manda para a triagem.
+//   {action:'practice', taskId, concepts} → 200 {groups}; questões reais já no banco do app que treinam cada conceito (as
+//     que o estudante ainda não resolveu). Elas são resolvidas na tarefa e contam na meta de questões.
 // A aula é reaproveitada entre sessões e estudantes com o mesmo tema, fontes e banca (tutor_lessons).
 import type { z } from 'zod';
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
@@ -14,6 +16,7 @@ import { missingMark } from '../../../shared/ai/marks.ts';
 import { lawKeys, topicKeys } from '../../../shared/ai/guide.ts';
 import {
   applyVerdicts, cleanConcepts, cleanExample, cleanQuestions, TutorPractice, tutorPracticeJsonSchema, lessonUsable, TUTOR_GRADE_VERSION, TUTOR_PROMPT_VERSION, TUTOR_REVIEW_VERSION, tutorCacheKey, TutorGrade, tutorGradeJsonSchema, tutorGradePrompt,
+  TUTOR_PICK_VERSION, TutorPicks, tutorPicksJsonSchema, tutorPickPrompt, PICKS_PER_CONCEPT,
   TutorOutline, tutorOutlineJsonSchema, tutorOutlinePrompt, TutorQuestions, tutorQuestionsJsonSchema, tutorQuestionsPrompt, tutorReviewPrompt, TutorVerdicts, tutorVerdictsJsonSchema, tutorVerifyPrompt,
   type TutorInput, type TutorPart,
 } from '../../../shared/ai/tutor.ts';
@@ -21,6 +24,8 @@ import { dueConcepts, LETTERS, type Level, type TutorConcept, type TutorLesson, 
 import { aiFor } from '../_shared/ai.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { loadLawSources } from '../_shared/law.ts';
+import { plain, withStatus, type PublicQuestion } from '../_shared/qbank.ts';
+import { materiaOf, type SessionFilter } from '../../../shared/qbank/map.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -227,6 +232,54 @@ async function review(auth: Auth, admin: Admin, planId: string) {
   }
 }
 
+// Candidatas: as questões do banco do app (compradas da Quest API ou próprias) nos assuntos da sessão, ainda não
+// resolvidas pelo estudante, da banca do concurso primeiro. Sem questões guardadas (a sessão nunca buscou questões),
+// não há o que ligar: a tela fica com o atalho para a aba Questões.
+const PRACTICE_CANDIDATES = 60, PRACTICE_TEXT_MAX = 420;
+async function practice(auth: Auth, admin: Admin, body: Record<string, unknown>) {
+  const concepts = (Array.isArray(body.concepts) ? body.concepts : []).slice(0, 8).map((c: { id?: unknown; nome?: unknown; essencial?: unknown }, i: number) =>
+    ({ key: String(c.id ?? ''), id: `k${i + 1}`, nome: String(c.nome ?? '').slice(0, 200), essencial: String(c.essencial ?? '').slice(0, 600) })).filter((c) => c.key && c.nome);
+  const { data: task } = await auth.client.from('tasks').select('session_id, subject_id').eq('id', String(body.taskId ?? '')).maybeSingle();
+  if (!concepts.length || !task?.session_id) return json(200, { groups: [] });
+  const [{ data: m }, { data: subject }] = await Promise.all([
+    admin.from('qbank_session_maps').select('materia, assuntos, materia_of').eq('session_id', task.session_id).maybeSingle(),
+    task.subject_id ? auth.client.from('notice_subjects').select('notice_id').eq('id', task.subject_id).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
+  const filter: SessionFilter | null = m ? { materia: m.materia, assuntos: m.assuntos ?? [], how: '', materiaOf: m.materia_of } : null;
+  if (!filter?.materia || !filter.assuntos.length) return json(200, { groups: [] });
+  const { data: notice } = subject?.notice_id ? await auth.client.from('notices').select('board').eq('id', subject.notice_id).maybeSingle() : { data: null };
+  const materias = [...new Set(filter.assuntos.map((a) => materiaOf(filter, a)!).filter(Boolean))];
+  const { data: rows } = await admin.from('qbank_questions').select('qid, payload').in('materia', materias).in('assunto', filter.assuntos).not('qid', 'like', 'ia-%').limit(400);
+  const all = (rows ?? []).map((r) => r.payload as PublicQuestion).filter((q) => q?.qid && q.enunciado);
+  const { data: done } = all.length ? await admin.from('question_attempts').select('qid').eq('owner_id', auth.user.id).in('qid', all.map((q) => q.qid)).limit(2000) : { data: [] };
+  const answered = new Set((done ?? []).map((d) => d.qid as string));
+  const board = normalizeText(String(notice?.board ?? ''));
+  const candidates = all.filter((q) => !answered.has(q.qid))
+    .sort((a, b) => Number(!!board && normalizeText(b.prova?.banca ?? '') === board) - Number(!!board && normalizeText(a.prova?.banca ?? '') === board) || (b.prova?.ano ?? 0) - (a.prova?.ano ?? 0))
+    .slice(0, PRACTICE_CANDIDATES);
+  if (!candidates.length) return json(200, { groups: [] });
+  const ids = new Map(candidates.map((q, i) => [`q${i + 1}`, q]));
+  const text = (q: PublicQuestion) => `${plain(q.enunciado)} ${q.alternativas.map((a) => `${a.letra}) ${plain(a.texto)}`).join(' ')}`.replace(/\s+/g, ' ').slice(0, PRACTICE_TEXT_MAX);
+  const ai = aiFor('tutor'), started = Date.now();
+  try {
+    const r = await generateJson({ ...ai, schema: TutorPicks, jsonSchema: tutorPicksJsonSchema(), temperature: 0, thinkingLevel: THINKING, timeoutMs: 60_000,
+      parts: [{ text: tutorPickPrompt(concepts, [...ids].map(([id, q]) => ({ id, text: text(q) }))) }] });
+    await logUsage(admin, { ownerId: auth.user.id, operation: 'tutor_practice', model: ai.model, promptVersion: TUTOR_PICK_VERSION, usage: r.usage, latencyMs: Date.now() - started, status: 'ok' });
+    const used = new Set<string>();
+    const groups = [];
+    for (const c of concepts) {
+      const picked = (r.data.escolhas.find((e) => e.conceito === c.id)?.questoes ?? []).filter((id) => ids.has(id) && !used.has(id)).slice(0, PICKS_PER_CONCEPT);
+      picked.forEach((id) => used.add(id));
+      if (picked.length) groups.push({ conceito: c.key, questions: await withStatus(admin, auth.user.id, picked.map((id) => ids.get(id)!)) });
+    }
+    return json(200, { groups });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await logUsage(admin, { ownerId: auth.user.id, operation: 'tutor_practice', model: ai.model, promptVersion: TUTOR_PICK_VERSION, usage: err instanceof GeminiError ? err.usage : null, latencyMs: Date.now() - started, status: 'error', error: message }).catch(() => {});
+    return json(502, { error: 'Não foi possível escolher as questões agora.', detail: message.slice(0, 300) });
+  }
+}
+
 const REASONS: Record<string, string> = { gabarito: 'Gabarito errado ou discutível', enunciado: 'Enunciado confuso ou com erro', fora: 'Fora do tema', outro: 'Outro problema' };
 
 // Contestação: a pergunta sai da aula para todos (até a triagem) e o relato entra na fila de /relatos.
@@ -266,6 +319,7 @@ Deno.serve(async (req) => {
     if (body.action === 'grade') return await grade(auth, admin, body);
     if (body.action === 'review') return await review(auth, admin, String(body.planId ?? ''));
     if (body.action === 'report') return await report(auth, admin, body);
+    if (body.action === 'practice') return await practice(auth, admin, body);
     return await lesson(auth, admin, body);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -1043,3 +1043,6 @@ details.card summary { cursor: pointer; font-weight: 600; }
 .tutor-steps-solved li strong { display: block; margin-bottom: 4px; }
 .tutor-steps-solved li.open span { color: var(--muted); }
 .tutor-steps-solved li.closed { opacity: .5; }
+.tutor-real { display: grid; gap: 10px; padding: 14px; border-radius: 16px; border: 1px solid color-mix(in srgb, var(--violet) 35%, transparent); background: color-mix(in srgb, var(--violet) 5%, transparent); }
+.tutor-real h3 { display: flex; align-items: center; gap: 8px; margin: 0; }
+.tutor-real-row { display: grid; gap: 10px; }

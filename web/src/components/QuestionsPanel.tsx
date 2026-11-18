@@ -16,8 +16,11 @@ import { CommentsPanel } from './CommentsPanel.tsx';
 import { ErrorReasonPicker } from './ErrorReason.tsx';
 import { QuestionBody } from './QuestionBody.tsx';
 
-// De onde vêm as questões: tarefa do cronograma, busca livre, uma questão pelo ID ou revisão do caderno de erros.
-export type Source = { kind: 'task'; taskId: string; planId: string } | { kind: 'free'; filters: FreeFilters } | { kind: 'id'; qid: string } | { kind: 'review' };
+// De onde vêm as questões: tarefa do cronograma, busca livre, uma questão pelo ID, revisão do caderno de erros ou uma
+// lista já escolhida para a tarefa (as questões reais de um conceito da Aula guiada: contam na meta como as da tarefa).
+export type Source = { kind: 'task'; taskId: string; planId: string } | { kind: 'free'; filters: FreeFilters } | { kind: 'id'; qid: string } | { kind: 'review' }
+  | { kind: 'list'; taskId: string; planId: string; questions: Question[] };
+const taskOf = (s: Source) => (s.kind === 'task' || s.kind === 'list' ? s : null);
 
 const REASON: Record<string, string> = {
   'sem-materia': 'Esta tarefa não tem matéria para buscar questões.',
@@ -30,6 +33,7 @@ const REASON: Record<string, string> = {
   'fim-revisao': 'Você revisou todos os erros desta semana. Os próximos voltam na revisão semanal seguinte.',
   'id-inexistente': 'Nenhuma questão com esse ID. Confira o número e tente de novo.',
   'id-indisponivel': 'Essa questão existe, mas foi anulada ou não tem gabarito, então não dá para resolvê-la aqui.',
+  lista: 'Você resolveu as questões escolhidas para este ponto.',
 };
 
 type Tab = 'explicacao' | 'mnemonico' | 'anotacoes' | 'comentarios';
@@ -47,7 +51,7 @@ const storedPageSize = () => { try { const n = Number(localStorage.getItem(PAGE_
 // Resolução de questões: navegação livre, tachar, responder com botão, abas (explicação, mnemônico,
 // anotações) e resumo da bateria. Com `paged`, o estudante escolhe quantas ver por página. Tempo só existe no simulado.
 export function QuestionsPanel({ source, goal = 0, answered = 0, paged = false }: { source: Source; goal?: number; answered?: number; paged?: boolean }) {
-  const taskId = source.kind === 'task' ? source.taskId : null;
+  const taskId = taskOf(source)?.taskId ?? null;
   const [queue, setQueue] = useState<Question[]>([]);
   const queueRef = useRef<Question[]>([]);
   queueRef.current = queue;
@@ -81,13 +85,14 @@ export function QuestionsPanel({ source, goal = 0, answered = 0, paged = false }
       const pre = source.kind === 'task' && !queueRef.current.length ? takePrefetched(source.taskId) : null;
       const r = source.kind === 'task' ? (pre && await pre.catch(() => null)) || await nextQuestions(source.taskId, initial ? 1 : Math.min(2, Math.max(1, needRef.current)), queueRef.current.map((q) => q.qid), 5)
         : source.kind === 'free' ? await searchFree(source.filters, Math.max(sizeRef.current, 5), queueRef.current.map((q) => q.qid))
+        : source.kind === 'list' ? { questions: source.questions, reason: 'lista' as string | null }
         : source.kind === 'id' ? await questionById(source.qid)
         : { ...(await reviewDue(20)), reason: 'revisao' as string | null };
       setQueue((q) => [...q, ...r.questions.filter((n) => !q.some((o) => o.qid === n.qid))]);
       const filter = (r as { filter?: { assuntos: string[] } }).filter;
       if (filter) setAssuntos(filter.assuntos);
       // Revisão e busca por ID vêm num lote só; nas demais, lista vazia significa fim.
-      if (!r.questions.length || source.kind === 'review' || source.kind === 'id') setReason(r.reason ?? 'esgotado');
+      if (!r.questions.length || source.kind === 'review' || source.kind === 'id' || source.kind === 'list') setReason(r.reason ?? 'esgotado');
       setError('');
     } catch (e) { setError((e as Error).message); } finally { setLoading(false); fetching.current = false; }
   }, [srcKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -181,7 +186,7 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
   onPatch: (p: Partial<QState>) => void; onPrev: () => void; onNext: () => void; onSummary: () => void;
 }) {
   const qc = useQueryClient();
-  const taskId = source.kind === 'task' ? source.taskId : null;
+  const taskId = taskOf(source)?.taskId ?? null;
   const [busy, setBusy] = useState<'' | 'answer' | 'explain' | 'mnemonic'>('');
   const [error, setError] = useState('');
   const patch = onPatch;
@@ -195,7 +200,7 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
     if (!st.chosen || st.result) return;
     setBusy('answer'); setError('');
     try {
-      const r = await answerQuestion(taskId, q.qid, st.chosen, source.kind === 'review' ? 'review' : source.kind === 'task' ? 'plan' : 'free', q.warmupOf);
+      const r = await answerQuestion(taskId, q.qid, st.chosen, source.kind === 'review' ? 'review' : taskOf(source) ? 'plan' : 'free', q.warmupOf);
       patch({ result: r, tab: 'explicacao' });
       // Na tarefa, a resposta entra direto nos dados da tela (meta e placar), sem buscar tudo de novo a cada questão.
       const cached = taskId ? qc.getQueryData<StudyData>(['study', taskId]) : undefined;
@@ -274,7 +279,7 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
         {tab === 'explicacao' && st.result && <ExplanationView ex={st.explanation} busy={busy === 'explain'} onExplain={explain} />}
         {tab === 'mnemonico' && st.result && showMnemo && <MnemonicView m={st.mnemonic} busy={busy === 'mnemonic'} onLoad={mnemonic} />}
         {st.mnemonic === null && tab === 'explicacao' && <p className="faint small" style={{ margin: 0 }}>Esta questão não pede memorização; o mnemônico foi dispensado.</p>}
-        {tab === 'anotacoes' && <NoteBox qid={q.qid} planId={source.kind === 'task' ? source.planId : undefined} />}
+        {tab === 'anotacoes' && <NoteBox qid={q.qid} planId={taskOf(source)?.planId} />}
         {tab === 'comentarios' && st.result && <CommentsPanel qid={q.qid} />}
         {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
       </article>

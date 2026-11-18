@@ -12,6 +12,7 @@ import { LETTERS, matchesText, type TutorConcept, type TutorLesson, type TutorQu
 export const TUTOR_PROMPT_VERSION = 'tutor-v4';
 export const TUTOR_REVIEW_VERSION = 'tutor-review-v3';
 export const TUTOR_GRADE_VERSION = 'tutor-grade-v1';
+export const TUTOR_PICK_VERSION = 'tutor-pick-v1';
 
 export interface TutorSource { ref: string; text: string }
 export interface TutorInput { banca: string; cargo: string; subject: string; title: string; topics: string[]; law: TutorSource[]; format: string }
@@ -68,6 +69,12 @@ export const TutorVerdicts = z.object({
 });
 export type TutorVerdicts = z.infer<typeof TutorVerdicts>;
 
+// Questões reais do banco que treinam cada conceito da aula (ligação da aula com o treino para a prova).
+export const TutorPicks = z.object({
+  escolhas: z.array(z.object({ conceito: z.string(), questoes: z.array(z.string()).describe('ids das questões, as mais diretas primeiro.') })),
+});
+export type TutorPicks = z.infer<typeof TutorPicks>;
+
 export const TutorGrade = z.object({ correta: z.boolean(), comentario: z.string().describe('Até 2 frases: o que faltou ou o que acertou.') });
 export type TutorGrade = z.infer<typeof TutorGrade>;
 
@@ -77,6 +84,7 @@ export const tutorQuestionsJsonSchema = () => js(TutorQuestions);
 export const tutorPracticeJsonSchema = () => js(TutorPractice);
 export const tutorVerdictsJsonSchema = () => js(TutorVerdicts);
 export const tutorGradeJsonSchema = () => js(TutorGrade);
+export const tutorPicksJsonSchema = () => js(TutorPicks);
 
 // ---------- Prompts ----------
 
@@ -187,6 +195,17 @@ Resposta esperada: ${p.gabarito}${p.aceitas.length ? ` (também aceitas: ${p.ace
 Explicação: ${p.explicacao}
 Resposta do candidato: ${p.resposta.slice(0, 600)}
 Considere correta se tiver o mesmo sentido da resposta esperada, mesmo com outras palavras ou pequenos erros de grafia. Errada se faltar a ideia principal, se trocar o conceito ou se for vaga demais. Sem markdown.`;
+}
+
+// Para cada conceito, as questões reais (já no banco do app) cuja resolução depende diretamente dele.
+export const PICKS_PER_CONCEPT = 3;
+export function tutorPickPrompt(concepts: { id: string; nome: string; essencial: string }[], questions: { id: string; text: string }[]) {
+  return `Você é professor de concursos. O candidato terminou uma aula e precisa treinar, com questões reais de prova, os conceitos abaixo.
+Conceitos (id — nome: ideia central):
+${concepts.map((c) => `${c.id} — ${c.nome}: ${c.essencial}`).join('\n')}
+Questões reais disponíveis (id: enunciado e alternativas, resumidos):
+${questions.map((q) => `[${q.id}] ${q.text}`).join('\n')}
+Para cada conceito, escolha até ${PICKS_PER_CONCEPT} questões cuja resolução dependa DIRETAMENTE dele (o candidato precisa aplicar ou reconhecer esse conceito para acertar), da mais direta para a menos. Uma questão pode servir a um só conceito. Conceito sem questão adequada fica com a lista vazia: é melhor nenhuma do que uma questão que só passa perto do assunto. Use só os ids fornecidos.`;
 }
 
 // Revisão espaçada: uma pergunta nova por conceito vencido, diferente das que o estudante já viu.

@@ -1,15 +1,17 @@
 // Aba "Aula guiada" da tela de estudo: aula do tema guiada por perguntas da IA (diagnóstico → construção → aplicação →
 // fixação → verificação final), salva a cada resposta. É atividade didática: não conta na meta de questões reais, no
 // acerto por banca nem nos simulados.
-import { BookOpen, GraduationCap, ListChecks, Play, RotateCcw } from 'lucide-react';
+import { BookOpen, ChevronDown, GraduationCap, ListChecks, Play, RotateCcw, Target } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ymd } from '../../../shared/domain/dates.ts';
 import { applyAnswer, initialState, isStrong, LEVEL_LABEL, markTaught, needsExample, needsTeaching, offersRoadmap, progress, reportQuestion, scheduleAfterLesson, STAGE_LABEL, STAGE_ORDER, summarize, syncQueue, type AnswerLog, type ConceptOutcome, type Level, type TutorLesson } from '../../../shared/domain/tutor.ts';
 import { missingMark } from '../../../shared/ai/marks.ts';
-import { createSession, knownConcepts, lastTaskSession, saveLessonConcepts, saveSession, waitLesson, type SavedState, type TutorSessionRow } from '../lib/tutor.ts';
+import { createSession, fetchPractice, knownConcepts, lastTaskSession, saveLessonConcepts, saveSession, waitLesson, type SavedState, type TutorSessionRow } from '../lib/tutor.ts';
 import { fmtDate } from './ui.tsx';
 import { TutorQuestionCard, WorkedExampleCard } from './TutorQuestion.tsx';
+import { QuestionsPanel } from './QuestionsPanel.tsx';
+import type { Question } from '../lib/questions.ts';
 import { useQueryClient } from '@tanstack/react-query';
 
 type Phase = 'carregando' | 'inicio' | 'preparando' | 'aula' | 'resumo';
@@ -142,7 +144,7 @@ export function TutorPanel({ taskId, planId, subjectId, subject, banca, title, e
   }
 
   if (phase === 'resumo' && row) {
-    return <TutorSummary lesson={row.state.lesson} state={row.state} finishedAt={row.finished_at} examDate={examDate} onRestart={start} onGoQuestions={onGoQuestions} onGoApostila={onGoApostila} />;
+    return <TutorSummary lesson={row.state.lesson} state={row.state} finishedAt={row.finished_at} examDate={examDate} taskId={taskId} planId={planId} onRestart={start} onGoQuestions={onGoQuestions} onGoApostila={onGoApostila} />;
   }
 
   if (!saved) return null;
@@ -186,8 +188,8 @@ export function TutorPanel({ taskId, planId, subjectId, subject, banca, title, e
 const LEVEL_ORDER: Level[] = ['atencao', 'em_progresso', 'dominado'];
 const LEVEL_COLOR: Record<Level, string> = { dominado: 'lime', em_progresso: 'cyan', atencao: 'orange' };
 
-function TutorSummary({ lesson, state, finishedAt, examDate, onRestart, onGoQuestions, onGoApostila }: {
-  lesson: TutorLesson; state: SavedState; finishedAt: string | null; examDate: string | null; onRestart: () => void; onGoQuestions?: () => void; onGoApostila?: () => void;
+function TutorSummary({ lesson, state, finishedAt, examDate, taskId, planId, onRestart, onGoQuestions, onGoApostila }: {
+  lesson: TutorLesson; state: SavedState; finishedAt: string | null; examDate: string | null; taskId: string; planId: string; onRestart: () => void; onGoQuestions?: () => void; onGoApostila?: () => void;
 }) {
   const outcomes = summarize(lesson, state);
   const known = lesson.conceitos.filter((c) => state.known.includes(c.id) && !outcomes.some((o) => o.id === c.id));
@@ -215,12 +217,71 @@ function TutorSummary({ lesson, state, finishedAt, examDate, onRestart, onGoQues
         {firstReview ? <>Revisões espaçadas agendadas: a primeira em <b>{fmtDate(firstReview)}</b>, com perguntas novas. {attention.length ? 'Os conceitos que pedem atenção voltam antes e com mais frequência.' : ''}</> : 'Sem revisões agendadas: a prova está muito perto.'}
       </p>
       <p className="faint small" style={{ margin: 0 }}>Esta aula não conta na meta de questões da tarefa. Para treinar para a prova, resolva questões reais da banca.</p>
+      <RealPractice lesson={lesson} outcomes={outcomes} taskId={taskId} planId={planId} onGoQuestions={onGoQuestions} />
       <div className="tutor-help">
-        {onGoQuestions && <button className="btn" onClick={onGoQuestions}><ListChecks size={16} /> Resolver questões reais</button>}
+        {onGoQuestions && <button className="btn ghost" onClick={onGoQuestions}><ListChecks size={16} /> Todas as questões da tarefa</button>}
         {onGoApostila && attention.length > 0 && <button className="btn ghost" onClick={onGoApostila}><BookOpen size={16} /> Reforçar na apostila</button>}
         <Link className="btn ghost" to="/revisoes">Ver revisões</Link>
         <button className="btn ghost" onClick={onRestart}><RotateCcw size={16} /> Refazer a aula</button>
       </div>
     </div>
+  );
+}
+
+// Ligação com o treino para a prova: para os conceitos que mais precisam (atenção, depois em construção; com tudo
+// dominado, os principais), questões reais da banca já no banco do app, escolhidas pela IA por conceito. A busca só
+// acontece quando o estudante pede (tem custo). As respostas contam na meta de questões da tarefa.
+const PRACTICE_CONCEPTS = 6;
+function RealPractice({ lesson, outcomes, taskId, planId, onGoQuestions }: {
+  lesson: TutorLesson; outcomes: ConceptOutcome[]; taskId: string; planId: string; onGoQuestions?: () => void;
+}) {
+  const weak = [...outcomes.filter((o) => o.level === 'atencao'), ...outcomes.filter((o) => o.level === 'em_progresso')];
+  const targets = (weak.length ? weak : outcomes).slice(0, PRACTICE_CONCEPTS);
+  const [groups, setGroups] = useState<{ conceito: string; questions: Question[] }[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [open, setOpen] = useState<string | null>(null);
+  if (!targets.length) return null;
+  async function find() {
+    setBusy(true); setError('');
+    try {
+      const g = await fetchPractice(taskId, targets.map((o) => ({ id: o.id, nome: o.nome, essencial: lesson.conceitos.find((c) => c.id === o.id)?.essencial ?? '' })));
+      setGroups(g); setOpen(g[0]?.conceito ?? null);
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  }
+  return (
+    <section className="tutor-real">
+      <h3><Target size={18} /> Treinar com questões reais</h3>
+      {!groups ? (
+        <>
+          <p className="muted" style={{ margin: 0 }}>{weak.length ? 'Questões de prova da banca que cobram exatamente os pontos em que você teve dificuldade.' : 'Questões de prova da banca sobre os conceitos da aula.'} Contam na meta de questões da tarefa.</p>
+          {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
+          <div className="tutor-help">
+            {busy ? <div className="tutor-wait"><span className="spinner" /> <span>Escolhendo as questões de cada ponto…</span></div>
+              : <button className="btn" onClick={find}><Target size={16} /> Buscar questões {weak.length ? 'dos pontos fracos' : 'desses conceitos'}</button>}
+          </div>
+        </>
+      ) : !groups.length ? (
+        <p className="muted" style={{ margin: 0 }}>Ainda não há questões reais guardadas que cobrem esses pontos. {onGoQuestions ? 'Resolva as questões da tarefa: elas também treinam o tema.' : ''}</p>
+      ) : (
+        <div className="grid" style={{ gap: 10 }}>
+          {targets.map((o) => {
+            const g = groups.find((x) => x.conceito === o.id);
+            return (
+              <div key={o.id} className="tutor-real-row">
+                <div className="material-row">
+                  <div style={{ flex: 1, minWidth: 180 }}>
+                    <div>{o.nome}</div>
+                    <div className="muted small">{LEVEL_LABEL[o.level]} · {g ? `${g.questions.length} ${g.questions.length === 1 ? 'questão' : 'questões'} da banca` : 'nenhuma questão guardada cobre este ponto'}</div>
+                  </div>
+                  {g && <button className={'btn sm' + (open === o.id ? ' ghost' : '')} onClick={() => setOpen(open === o.id ? null : o.id)}>{open === o.id ? <><ChevronDown size={15} /> Fechar</> : 'Resolver'}</button>}
+                </div>
+                {g && open === o.id && <QuestionsPanel source={{ kind: 'list', taskId, planId, questions: g.questions }} />}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }

@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { ymd } from '../../../shared/domain/dates.ts';
 import { isStrong, scheduleAfterLesson, scheduleAfterReview, reviewOutcome, type AnswerLog, type ConceptMemory, type Level, type TutorConcept, type TutorLesson, type TutorQuestion, type TutorState } from '../../../shared/domain/tutor.ts';
+import type { Question } from './questions.ts';
 import { supabase } from './supabase.ts';
 
 async function call<T>(body: Record<string, unknown>): Promise<{ data: T }> {
@@ -50,6 +51,10 @@ export const gradeAnswer = async (subject: string, q: TutorQuestion, answer: str
 
 export const reportTutorQuestion = async (p: { lessonKey: string | null; taskId: string | null; question: TutorQuestion; reason: string; note: string }) =>
   void await call({ action: 'report', ...p });
+
+// Questões reais que treinam cada conceito (as ainda não resolvidas, já no banco do app).
+export const fetchPractice = async (taskId: string, concepts: { id: string; nome: string; essencial: string }[]) =>
+  (await call<{ groups: { conceito: string; questions: Question[] }[] }>({ action: 'practice', taskId, concepts })).data.groups;
 
 export const fetchReview = async (planId: string) =>
   (await call<{ questions: TutorQuestion[]; concepts: TutorConcept[] }>({ action: 'review', planId })).data;
