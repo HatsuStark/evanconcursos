@@ -34,6 +34,14 @@ describe('cleanQuestions', () => {
     expect(kept[1]!.gabarito).toBe('C');
     expect(dropped.map((d) => d.id)).toEqual(['k2', 'k3', 'k4', 'k5']);
   });
+  it('descarta pergunta que fala em termo destacado sem marcar', () => {
+    const { kept, dropped } = cleanQuestions([
+      q('k1', { enunciado: 'No trecho "este e aquele", os pronomes destacados retomam quem?' }),
+      q('k2', { enunciado: 'No trecho, os pronomes **este** e **aquele** destacados retomam quem?' }),
+    ], { concepts, provided, subject: 'Português' });
+    expect(dropped).toMatchObject([{ id: 'k1', motivo: 'destaque sem marcação' }]);
+    expect(kept.map((x) => x.id)).toEqual(['k2']);
+  });
   it('descarta pergunta que cita artigo fora das fontes', () => {
     const { kept, dropped } = cleanQuestions([q('k1', { explicacao: 'Conforme o art. 5º da CF.' }), q('k2', { enunciado: 'Segundo o art. 37 da CF, algo novo', explicacao: 'CF, art. 37.' })], { concepts, provided, subject: 'Direito Constitucional' });
     expect(dropped[0]).toMatchObject({ id: 'k1' });

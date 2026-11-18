@@ -10,6 +10,7 @@
 import type { z } from 'zod';
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
+import { missingMark } from '../../../shared/ai/marks.ts';
 import { lawKeys, topicKeys } from '../../../shared/ai/guide.ts';
 import {
   applyVerdicts, cleanConcepts, cleanQuestions, lessonUsable, TUTOR_GRADE_VERSION, TUTOR_PROMPT_VERSION, TUTOR_REVIEW_VERSION, tutorCacheKey, TutorGrade, tutorGradeJsonSchema, tutorGradePrompt,
@@ -145,10 +146,11 @@ async function generate(admin: Admin, ownerId: string, jobId: string, ctx: Ctx) 
   }
 }
 
-// Aula servida sem as perguntas reportadas.
+// Aula servida sem as perguntas reportadas e sem as que falam em termo destacado sem marcá-lo (aulas gravadas antes
+// da conferência).
 const served = (row: { content: TutorLesson; blocked: string[] | null }): TutorLesson => {
   const blocked = new Set(row.blocked ?? []);
-  return { ...row.content, questoes: row.content.questoes.filter((q) => !blocked.has(q.id)) };
+  return { ...row.content, questoes: row.content.questoes.filter((q) => !blocked.has(q.id) && !missingMark(q.enunciado)) };
 };
 
 async function lesson(auth: Auth, admin: Admin, body: { taskId?: unknown; poll?: unknown }) {

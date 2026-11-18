@@ -3,7 +3,11 @@
 import { ArrowDown, ArrowUp, BookOpen, CheckCircle2, ChevronRight, Flag, HelpCircle, Lightbulb, MessageCircleQuestion, Repeat, XCircle } from 'lucide-react';
 import { Fragment, useMemo, useRef, useState } from 'react';
 import { answerOptions, canAskHelp, checkClosed, LETTERS, matchesText, shuffledOrder, STAGE_LABEL, type AnswerLog, type TutorConcept, type TutorQuestion } from '../../../shared/domain/tutor.ts';
+import { missingMark, splitMarks } from '../../../shared/ai/marks.ts';
 import { gradeAnswer, reportTutorQuestion } from '../lib/tutor.ts';
+
+// Trecho que o comando chama de "destacado" vem entre **…** e aparece em negrito.
+const Marked = ({ text }: { text: string }) => <>{splitMarks(text).map((p, i) => (p.bold ? <b key={i}>{p.text}</b> : <span key={i}>{p.text}</span>))}</>;
 
 const STYLE_LABEL: Record<TutorQuestion['estilo'], string> = { conceito: '', situacao: 'Situação-problema', erro: 'Encontre o erro', comparacao: 'Comparação', aplicacao: 'Aplicação' };
 const FORMAT_HINT: Record<TutorQuestion['formato'], string> = {
@@ -117,8 +121,8 @@ export function TutorQuestionCard({ q, concept, subject, lessonKey, taskId, pool
           <span ref={i === 1 ? blankRef : undefined} role="button" tabIndex={-1} aria-label={picked ? `Lacuna: ${picked}. Tocar para tirar` : 'Lacuna'}
             className={'tutor-blank' + (picked || result ? ' filled' : '') + (over ? ' over' : '') + (result ? (result.correct ? ' right' : ' wrong') : '')}
             onClick={() => { if (!result) setPicked(null); }}>{(result?.response ?? picked) || '\u00a0'}</span>
-        )}{t}</Fragment>)
-        : q.enunciado}</p></div>
+        )}<Marked text={t} /></Fragment>)
+        : <Marked text={q.enunciado} />}</p></div>
 
       {hint && !result && <div className="tutor-aside"><Lightbulb size={16} /> <span>{q.dica}</span></div>}
       {explained && !result && concept && <div className="tutor-aside"><HelpCircle size={16} /> <span>{concept.explicacao}</span></div>}
@@ -128,7 +132,7 @@ export function TutorQuestionCard({ q, concept, subject, lessonKey, taskId, pool
           {q.alternativas.map((a, i) => {
             const L = LETTERS[i]!, chosen = (result?.response ?? picked) === L;
             const cls = result ? (L === answerLetter ? ' right' : chosen ? ' wrong' : ' dim') : chosen ? ' picked' : '';
-            return <button key={L} className={'q-opt' + cls} disabled={!!result || busy} onClick={() => setPicked(L)}><b>{L}</b><p>{a}</p></button>;
+            return <button key={L} className={'q-opt' + cls} disabled={!!result || busy} onClick={() => setPicked(L)}><b>{L}</b><p><Marked text={a} /></p></button>;
           })}
           {!result && <button className="btn" disabled={!picked || busy} onClick={() => picked && submit(picked)}>Responder</button>}
         </div>
@@ -224,7 +228,7 @@ export function TutorQuestionCard({ q, concept, subject, lessonKey, taskId, pool
             {!result.correct && <p><b>Resposta:</b> {expected}</p>}
             {result.comment && <p>{result.comment}</p>}
             {wrongWhy && <p><b>Por que a {result.response} não serve:</b> {wrongWhy}</p>}
-            <p>{q.explicacao}</p>
+            <p><Marked text={q.explicacao} /></p>
             {!result.correct && concept?.explicacao && concept.explicacao !== q.explicacao && <p className="muted">{concept.explicacao}</p>}
             {other && concept?.outro_jeito && <p><b>De outro jeito:</b> {concept.outro_jeito}</p>}
             {concept?.base && <p className="faint small">Base: {concept.base}</p>}

@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ymd } from '../../../shared/domain/dates.ts';
 import { applyAnswer, initialState, isStrong, LEVEL_LABEL, markTaught, needsTeaching, progress, reportQuestion, scheduleAfterLesson, STAGE_LABEL, STAGE_ORDER, summarize, syncQueue, type AnswerLog, type ConceptOutcome, type Level, type TutorLesson } from '../../../shared/domain/tutor.ts';
+import { missingMark } from '../../../shared/ai/marks.ts';
 import { createSession, knownConcepts, lastTaskSession, saveLessonConcepts, saveSession, waitLesson, type SavedState, type TutorSessionRow } from '../lib/tutor.ts';
 import { fmtDate } from './ui.tsx';
 import { TutorQuestionCard } from './TutorQuestion.tsx';
@@ -147,6 +148,8 @@ export function TutorPanel({ taskId, planId, subjectId, subject, banca, title, e
   if (!saved) return null;
   const qid = shown ?? saved.queue[0];
   const q = saved.lesson.questoes.find((x) => x.id === qid);
+  // Cópia antiga da aula com pergunta que fala em termo destacado sem marcá-lo: pula (a conferência nova já a descarta).
+  if (q && !shown && missingMark(q.enunciado)) { queueMicrotask(() => reported(q.id)); return <div className="glass card"><div className="spinner" /></div>; }
   const p = progress(saved);
   // Contador da etapa atual (o reforço conta como construção): mostra que o diagnóstico tem só 3 perguntas, não a aula toda.
   const group = (id: string) => { const e = saved.lesson.questoes.find((x) => x.id === id)?.etapa; return e === 'reforco' ? 'construcao' : e; };

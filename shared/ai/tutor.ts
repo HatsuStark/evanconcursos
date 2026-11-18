@@ -1,6 +1,7 @@
 // Aprender por Questões: o que a IA gera (roteiro, perguntas, conferência, correção de resposta escrita e perguntas de
 // revisão) e as verificações feitas antes de mostrar qualquer pergunta. O motor da aula fica em shared/domain/tutor.ts.
 import { z } from 'zod';
+import { MARK_RULE, missingMark } from './marks.ts';
 import { unverifiedLawRefs, type ProvidedArticle } from './guide.ts';
 import type { LawEntry } from '../legal/registry.ts';
 import { LETTERS, matchesText, type TutorConcept, type TutorLesson, type TutorQuestion } from '../domain/tutor.ts';
@@ -110,7 +111,8 @@ const QUESTION_RULES = (p: TutorInput) => `Regras de qualidade:
 - explicacao começa pelo porquê do gabarito e termina com a confusão que a pergunta testou, em até 4 frases.
 - lacuna e curta: aceitas traz as variações corretas (sinônimo, sigla, com ou sem artigo).
 ${SOURCE_RULES(p)}
-- Sem markdown e sem letras ("A)") no início das alternativas.`;
+- Sem markdown e sem letras ("A)") no início das alternativas.
+- ${MARK_RULE}`;
 
 const outlineText = (o: { conceitos: TutorConcept[] }) => o.conceitos.map((c) => `${c.id} — ${c.nome}: ${c.essencial}${c.base ? ` [${c.base}]` : ''}`).join('\n');
 
@@ -179,7 +181,7 @@ Conceitos (id — matéria — nome: ideia central [base]; perguntas já vistas,
 ${concepts.map((c) => `${c.id} — ${c.subject}${c.banca ? ` (banca ${c.banca})` : ''} — ${c.nome}: ${c.essencial}${c.base ? ` [${c.base}]` : ''}${c.level === 'atencao' ? ' (o candidato tem dificuldade aqui: cobre o ponto central)' : ''}${c.recent.length ? `\n   já vistas: ${c.recent.slice(-5).map((r) => `"${r.slice(0, 160)}"`).join(' | ')}` : ''}`).join('\n')}
 Monte exatamente uma pergunta por conceito (id da pergunta = "v" + número; conceito = id do conceito; etapa "revisao"), com formulação e ângulo diferentes das já vistas (outro caso, o inverso da regra, a exceção). Varie os formatos entre os conceitos e prefira os que exigem lembrar (curta, lacuna, certo_errado). Distratores de multipla representam confusões reais; afirmação errada de certo_errado erra em um ponto só e relevante.
 Formatos: multipla (4 ou 5 alternativas, "erros" por alternativa), certo_errado (gabarito C ou E), lacuna (frase com "___"), curta (resposta de até 8 palavras), ordenacao (itens na ordem correta). Lacuna e curta trazem 3 distratores (respostas erradas plausíveis, do mesmo tipo e tamanho).
-Regras: uma única resposta correta; a pergunta não entrega a resposta; dica faz pensar; explicacao em até 4 frases. ${law.length ? 'Cite artigos SOMENTE dos trechos fornecidos.' : 'Não cite números de artigos.'} Não cite jurisprudência nem doutrina; não invente leis, prazos ou números. Sem markdown.`.replace(/\n{2,}/g, '\n');
+Regras: uma única resposta correta; a pergunta não entrega a resposta; dica faz pensar; explicacao em até 4 frases. ${law.length ? 'Cite artigos SOMENTE dos trechos fornecidos.' : 'Não cite números de artigos.'} Não cite jurisprudência nem doutrina; não invente leis, prazos ou números. Sem markdown. ${MARK_RULE}`.replace(/\n{2,}/g, '\n');
 }
 
 // ---------- Verificações sem IA ----------
@@ -245,7 +247,8 @@ export function cleanQuestions(questions: TutorQuestion[], o: { concepts: TutorC
       distratores: raw.formato === 'lacuna' || raw.formato === 'curta' ? (raw.distratores ?? []).map((d) => d.trim()).filter((d) => d && !matchesText(d, raw)).slice(0, 4) : [],
       erros: raw.formato === 'multipla' ? raw.alternativas.map((_, i) => raw.erros[i] ?? '') : [],
     };
-    const problem = structureProblem(q, ids);
+    // Comando que fala em termo "destacado" sem nada marcado não tem como ser respondido.
+    const problem = structureProblem(q, ids) ?? (missingMark(q.enunciado) ? 'destaque sem marcação' : null);
     if (problem) { dropped.push({ id: q.id, motivo: problem }); continue; }
     if (q.formato === 'multipla' && o.shuffle !== false) Object.assign(q, shuffleOptions(q));
     const text = [q.enunciado, ...q.alternativas, q.gabarito, q.dica, q.explicacao, ...q.erros].join('\n');
