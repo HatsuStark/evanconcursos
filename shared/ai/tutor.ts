@@ -4,12 +4,12 @@ import { z } from 'zod';
 import { MARK_RULE, missingMark } from './marks.ts';
 import { unverifiedLawRefs, type ProvidedArticle } from './guide.ts';
 import type { LawEntry } from '../legal/registry.ts';
-import { LETTERS, matchesText, type TutorConcept, type TutorLesson, type TutorQuestion } from '../domain/tutor.ts';
+import { LETTERS, matchesText, type TutorConcept, type TutorLesson, type TutorQuestion, type WorkedExample } from '../domain/tutor.ts';
 
 // v2: explicação autossuficiente (cartão do modo iniciante), construção com andaime, regras de distratores e de
 // certo/errado, alternativas embaralhadas no servidor.
-// v3: distratores para responder lacuna e resposta curta sem digitar.
-export const TUTOR_PROMPT_VERSION = 'tutor-v3';
+// v3: distratores para responder lacuna e resposta curta sem digitar. v4: exemplo resolvido antes da aplicação.
+export const TUTOR_PROMPT_VERSION = 'tutor-v4';
 export const TUTOR_REVIEW_VERSION = 'tutor-review-v3';
 export const TUTOR_GRADE_VERSION = 'tutor-grade-v1';
 
@@ -50,6 +50,19 @@ const Questao = z.object({
 export const TutorQuestions = z.object({ questoes: z.array(Questao) });
 export type TutorQuestions = z.infer<typeof TutorQuestions>;
 
+const Exemplo = z.object({
+  conceito: z.string().describe('id do conceito aplicado.'),
+  caso: z.string().describe('Situação-problema concreta, no estilo da prova, com personagens, órgãos e fatos (até 5 frases).'),
+  passos: z.array(z.object({
+    pergunta: z.string().describe('O que o candidato deve se perguntar neste passo, de forma genérica (serve para outros casos). Ex.: "Quem praticou o ato e com qual competência?"'),
+    resposta: z.string().describe('A resposta desse passo aplicada ao caso, com a regra que a sustenta (até 2 frases).'),
+  })).describe('3 a 5 passos do raciocínio, na ordem.'),
+  conclusao: z.string().describe('A solução do caso em 1 ou 2 frases.'),
+});
+// Segunda parte da aula: as perguntas e o exemplo resolvido mostrado antes da aplicação.
+export const TutorPractice = TutorQuestions.extend({ exemplo: Exemplo });
+export type TutorPractice = z.infer<typeof TutorPractice>;
+
 export const TutorVerdicts = z.object({
   avaliacoes: z.array(z.object({ id: z.string(), aprovada: z.boolean(), motivo: z.string() })),
 });
@@ -61,6 +74,7 @@ export type TutorGrade = z.infer<typeof TutorGrade>;
 const js = (s: z.ZodType) => z.toJSONSchema(s, { target: 'draft-7' });
 export const tutorOutlineJsonSchema = () => js(TutorOutline);
 export const tutorQuestionsJsonSchema = () => js(TutorQuestions);
+export const tutorPracticeJsonSchema = () => js(TutorPractice);
 export const tutorVerdictsJsonSchema = () => js(TutorVerdicts);
 export const tutorGradeJsonSchema = () => js(TutorGrade);
 
@@ -128,7 +142,8 @@ export function tutorQuestionsPrompt(p: TutorInput, outline: TutorOutline, part:
     : `Monte agora SÓ estas perguntas (ids a1…, f1…, z1…):
 - aplicacao: 3 ou 4 perguntas (ids a1…) que exijam interpretar, comparar conceitos, aplicar regras e analisar situações práticas, no estilo da ${p.banca || 'banca'}.
 - fixacao: 1 pergunta por conceito (${n} no total, ids f1…), com formulação diferente das anteriores, para recuperar da memória sem pista: pelo menos metade em curta ou lacuna; o resto em certo_errado.
-- final: 4 a 6 perguntas (ids z1…) cobrindo os conceitos mais importantes, sem pistas, no nível e no estilo da prova da ${p.banca || 'banca'}, com pelo menos uma situação-problema e uma que compare conceitos.`;
+- final: 4 a 6 perguntas (ids z1…) cobrindo os conceitos mais importantes, sem pistas, no nível e no estilo da prova da ${p.banca || 'banca'}, com pelo menos uma situação-problema e uma que compare conceitos.
+- exemplo: um exemplo resolvido, mostrado antes da aplicação. Escolha o conceito mais cobrado em casos práticos, monte um caso concreto e resolva em 3 a 5 passos. As perguntas dos passos são genéricas e formam um roteiro que o candidato reaproveita nas perguntas de aplicação; o caso não pode ser igual a nenhuma delas.`;
   return `Você é professor especialista em concursos públicos brasileiros e está ensinando o tema por meio de perguntas.
 ${context(p)}
 Roteiro da aula (conceitos na ordem de ensino):
@@ -147,7 +162,9 @@ const questionText = (q: TutorQuestion) => [
 ].filter(Boolean).join('\n');
 
 // Segunda leitura, como revisor de banca: reprova o que não deveria chegar ao estudante.
-export function tutorVerifyPrompt(p: TutorInput, questions: TutorQuestion[]) {
+const exampleText = (e: WorkedExample) => [`[ex] (exemplo resolvido) ${e.caso}`, ...e.passos.map((s, i) => `Passo ${i + 1}: ${s.pergunta} → ${s.resposta}`), `Conclusão: ${e.conclusao}`].join('\n');
+
+export function tutorVerifyPrompt(p: TutorInput, questions: TutorQuestion[], example?: WorkedExample | null) {
   return `Você é revisor técnico de uma banca de concursos. Confira cada pergunta didática abaixo antes de ela chegar ao candidato.
 ${context(p)}
 Reprove (aprovada: false) a pergunta que tiver QUALQUER destes problemas:
@@ -157,9 +174,9 @@ Reprove (aprovada: false) a pergunta que tiver QUALQUER destes problemas:
 - contradição com os trechos de lei fornecidos, ou cita artigo, lei, súmula ou jurisprudência que não está nos trechos;
 - enunciado ambíguo, confuso ou que entrega a resposta; explicação que não sustenta o gabarito;
 - fora do tema da sessão.
-Aprove o que estiver correto, mesmo que simples. motivo: uma frase (vazio se aprovada).
+${example ? '- no exemplo resolvido (id "ex"): passo com regra errada, conclusão que não decorre dos passos, ou citação fora dos trechos;\n' : ''}Aprove o que estiver correto, mesmo que simples. motivo: uma frase (vazio se aprovada).
 Perguntas:
-${questions.map(questionText).join('\n\n')}`.replace(/\n{2,}/g, '\n');
+${questions.map(questionText).join('\n\n')}${example ? `\n\n${exampleText(example)}` : ''}`.replace(/\n{2,}/g, '\n');
 }
 
 export function tutorGradePrompt(p: { subject: string; enunciado: string; gabarito: string; aceitas: string[]; explicacao: string; resposta: string }) {
@@ -268,6 +285,17 @@ export function cleanConcepts(concepts: TutorConcept[], o: { provided: ProvidedA
     const text = [c.essencial, c.explicacao, c.outro_jeito, c.base].join('\n');
     return unverifiedLawRefs(text, o.provided, o.subject, o.extra ?? []).length ? { ...c, base: '' } : c;
   });
+}
+
+// Exemplo resolvido completo, de um conceito da aula e sem citação fora das fontes; senão, a aula segue sem ele.
+export function cleanExample(e: WorkedExample | null | undefined, o: { concepts: TutorConcept[]; provided: ProvidedArticle[]; subject: string; extra?: LawEntry[] }): WorkedExample | null {
+  if (!e) return null;
+  const passos = e.passos.filter((s) => s.pergunta.trim() && s.resposta.trim()).slice(0, 6);
+  if (!e.caso.trim() || !e.conclusao.trim() || passos.length < 2) return null;
+  const text = [e.caso, ...passos.flatMap((s) => [s.pergunta, s.resposta]), e.conclusao].join('\n');
+  if (missingMark(e.caso) || unverifiedLawRefs(text, o.provided, o.subject, o.extra ?? []).length) return null;
+  const conceito = o.concepts.some((c) => c.id === e.conceito) ? e.conceito : o.concepts[0]?.id ?? '';
+  return { conceito, caso: e.caso.trim(), passos, conclusao: e.conclusao.trim() };
 }
 
 // Pergunta reprovada pelo revisor sai; avaliação ausente conta como aprovada (o revisor pode pular uma).

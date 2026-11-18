@@ -15,7 +15,7 @@ web/         React + TypeScript (Vite)
 supabase/
   migrations/ SQL versionado (aplicado com scripts/db.mjs push)
   tests/     testes pgTAP de isolamento entre usuários (scripts/db.mjs test)
-  functions/ Edge Functions: notice-extract (leitura do edital), plan-design (estratégia e sessões), study-guide (apostila), tutor (Aprender por questões), discursive (treino e correção), videos (vídeo-aulas da sessão), entre outras
+  functions/ Edge Functions: notice-extract (leitura do edital), plan-design (estratégia e sessões), study-guide (apostila), tutor (Aula guiada), discursive (treino e correção), videos (vídeo-aulas da sessão), entre outras
 evals/       editais de referência (gabaritos) e avaliação da extração
 scripts/     legal-seed.ts (carrega as leis do registro), own-questions.ts (importa o banco próprio), db.mjs (migrações e testes do banco), deploy-functions.mjs (funções e segredos), gemini-models.mjs
 ```
@@ -173,14 +173,15 @@ Concluir uma sessão de teoria agenda o tema para voltar em **1, 7 e 30 dias**, 
 
 Perto da prova, a revisão é antecipada para a véspera, e nada novo é agendado a partir da véspera. Desfazer a conclusão apaga a revisão ainda não feita. As regras ficam no banco (`theory_reviews`, `theory_review_answer`), com datas no fuso de Brasília. A única despesa de IA é gerar a revisão curta, uma vez por tema, com reaproveitamento.
 
-## Aprender por questões
+## Aula guiada (aprender por questões)
 
-Aba **Aprender** da tela de estudo (ao lado de Apostila e Vídeos, nas tarefas com sessão de conteúdo): um tutor de IA ensina o tema por meio de perguntas, mesmo para quem não leu a apostila nem viu a videoaula. Função `tutor`, motor em `shared/domain/tutor.ts`, prompts e conferências em `shared/ai/tutor.ts`, migração `tutor`.
+Aba **Aula guiada** da tela de estudo (ao lado de Apostila e Vídeos, nas tarefas com sessão de conteúdo): um tutor de IA ensina o tema por meio de perguntas, mesmo para quem não leu a apostila nem viu a videoaula. Função `tutor`, motor em `shared/domain/tutor.ts`, prompts e conferências em `shared/ai/tutor.ts`, migração `tutor`.
 
 - **Aula em cinco etapas**: diagnóstico (3 perguntas fechadas), construção (uma por conceito, com dica e explicação breve a pedido), aplicação (casos, comparações), fixação (nova formulação, sem pistas) e verificação final (sem pistas). Formatos: múltipla escolha (com o porquê de cada alternativa errada), certo/errado, lacuna, resposta curta e ordenação; estilos de situação-problema, encontrar o erro e comparação.
 - **Adaptação**: acerto de primeira no diagnóstico (sem dica) pula a construção do conceito; conceito já dominado em aula anterior também. Erro na construção, aplicação ou fixação traz o reforço do conceito (outra formulação) uma pergunta depois. "Não sei" conta como erro e mostra a explicação; depois de responder há "Explicar de outro jeito" (analogia/exemplo).
 - **Modo iniciante**: se o diagnóstico mostra que o tema é novo (menos da metade de acertos fortes), cada conceito abre com um cartão de ensino (explicação, exemplo e base legal) antes da primeira pergunta de construção; o acerto depois do cartão conta como com ajuda.
 - **Sem digitar**: na lacuna, o estudante arrasta (ou toca) um de 4 balões até o espaço; na resposta curta, escolhe numa lista de 4. As opções erradas vêm da IA (`distratores`, conferidos pelo revisor) ou, nas aulas antigas, das respostas de outras perguntas da aula (`answerOptions`). "Prefiro digitar" volta ao campo de texto, corrigido pela IA.
+- **Exemplo resolvido**: antes da primeira pergunta de aplicação, um caso resolvido passo a passo (cada passo é aberto pelo estudante, que tenta pensar antes). As perguntas dos passos viram um roteiro que fica à mão na primeira situação-problema (abri-lo conta como ajuda) e some nas seguintes. Gerado com a prática e conferido pelo revisor; reprovado, a aula segue sem ele.
 - **Intercalação**: fixação e verificação final saem fora da ordem em que os conceitos foram ensinados, sem dois do mesmo conceito em sequência. As alternativas de múltipla escolha são embaralhadas no servidor (a IA concentra o gabarito em B e C).
 - **Domínio por conceito**: só acerto de primeira, sem dica, sem ter visto a explicação e sem conferência própria conta como prova (`isStrong`). Dominado: acerto forte na fixação ou na verificação final, sem erro nelas; atenção: erro na verificação final ou dois erros sem dois acertos fortes.
 - **Geração e qualidade**: roteiro de 4 a 7 conceitos, depois as perguntas em duas partes paralelas (a primeira — diagnóstico, construção e reforço — já libera o início da aula). Antes de chegar à tela, cada pergunta passa pela conferência de estrutura (gabarito coerente, alternativas distintas, lacuna com espaço), pela de citações (artigo fora dos trechos oficiais da lei seca descarta a pergunta), pela de repetição (enunciados quase iguais) e por um revisor de IA que reprova gabarito discutível, ambiguidade ou contradição com a lei; sem a revisão, as perguntas não são servidas. A aula fica em `tutor_lessons`, reaproveitada entre sessões e estudantes com mesmo tema, fontes e banca (`TUTOR_MODEL` escolhe o modelo).

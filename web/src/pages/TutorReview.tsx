@@ -1,4 +1,4 @@
-// Revisão espaçada do Aprender por Questões: uma pergunta nova para cada conceito que vence hoje (até 8, os mais
+// Revisão espaçada da Aula guiada: uma pergunta nova para cada conceito que vence hoje (até 8, os mais
 // urgentes primeiro). Cada resposta reagenda o conceito. Atividade didática: fora das metas de questões reais.
 import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, GraduationCap, Play } from 'lucide-react';
@@ -75,7 +75,7 @@ export function TutorReviewPage() {
     })();
   }, [saved, shown, done, concepts.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const title = 'Revisão de conceitos', subtitle = 'Aprender por questões · perguntas novas sobre o que você estudou';
+  const title = 'Revisão de conceitos', subtitle = 'Aula guiada · perguntas novas sobre o que você estudou';
   if (active.isLoading || concepts.isLoading || !checked && !!planId) return <Shell title={title} subtitle={subtitle}><div className="spinner" /></Shell>;
   if (!active.data) return <Shell title={title} subtitle={subtitle}><div className="glass card muted">Monte um cronograma para usar as revisões. <Link to="/concursos">Ir para Concursos</Link></div></Shell>;
 

@@ -1,15 +1,15 @@
-// Aba "Aprender" da tela de estudo: aula do tema guiada por perguntas da IA (diagnóstico → construção → aplicação →
+// Aba "Aula guiada" da tela de estudo: aula do tema guiada por perguntas da IA (diagnóstico → construção → aplicação →
 // fixação → verificação final), salva a cada resposta. É atividade didática: não conta na meta de questões reais, no
 // acerto por banca nem nos simulados.
 import { BookOpen, GraduationCap, ListChecks, Play, RotateCcw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ymd } from '../../../shared/domain/dates.ts';
-import { applyAnswer, initialState, isStrong, LEVEL_LABEL, markTaught, needsTeaching, progress, reportQuestion, scheduleAfterLesson, STAGE_LABEL, STAGE_ORDER, summarize, syncQueue, type AnswerLog, type ConceptOutcome, type Level, type TutorLesson } from '../../../shared/domain/tutor.ts';
+import { applyAnswer, initialState, isStrong, LEVEL_LABEL, markTaught, needsExample, needsTeaching, offersRoadmap, progress, reportQuestion, scheduleAfterLesson, STAGE_LABEL, STAGE_ORDER, summarize, syncQueue, type AnswerLog, type ConceptOutcome, type Level, type TutorLesson } from '../../../shared/domain/tutor.ts';
 import { missingMark } from '../../../shared/ai/marks.ts';
 import { createSession, knownConcepts, lastTaskSession, saveLessonConcepts, saveSession, waitLesson, type SavedState, type TutorSessionRow } from '../lib/tutor.ts';
 import { fmtDate } from './ui.tsx';
-import { TutorQuestionCard } from './TutorQuestion.tsx';
+import { TutorQuestionCard, WorkedExampleCard } from './TutorQuestion.tsx';
 import { useQueryClient } from '@tanstack/react-query';
 
 type Phase = 'carregando' | 'inicio' | 'preparando' | 'aula' | 'resumo';
@@ -124,7 +124,7 @@ export function TutorPanel({ taskId, planId, subjectId, subject, banca, title, e
     const open = row?.status === 'andamento' ? row : null;
     return (
       <div className="glass card tutor-intro">
-        <h2><GraduationCap size={22} style={{ color: 'var(--violet)' }} /> Aprender por questões</h2>
+        <h2><GraduationCap size={22} style={{ color: 'var(--violet)' }} /> Aula guiada</h2>
         <p>Um tutor de IA ensina o tema por meio de perguntas: começa pelo que você já sabe, constrói os conceitos passo a passo, aplica em situações de prova e termina com uma verificação sem pistas. Funciona mesmo sem ter lido a apostila ou visto a videoaula.</p>
         <ol className="tutor-steps">
           {STAGE_ORDER.map((e) => <li key={e}>{STAGE_LABEL[e]}</li>)}
@@ -169,8 +169,11 @@ export function TutorPanel({ taskId, planId, subjectId, subject, banca, title, e
         </div>
       </div>
       {error && <p className="error">{error}</p>}
-      {q ? (
-        <TutorQuestionCard key={q.id} q={q} pool={saved.lesson.questoes} concept={saved.lesson.conceitos.find((c) => c.id === q.conceito)} subject={subject} lessonKey={saved.lessonKey} taskId={taskId}
+      {q && !shown && needsExample(saved, saved.lesson, q) ? (
+        <WorkedExampleCard example={saved.lesson.exemplo!} concept={saved.lesson.conceitos.find((c) => c.id === saved.lesson.exemplo!.conceito)}
+          onDone={() => { const cur = stateRef.current; if (cur) update({ ...cur, exampleSeen: true }); }} />
+      ) : q ? (
+        <TutorQuestionCard roadmap={offersRoadmap(saved, saved.lesson, q) ? saved.lesson.exemplo!.passos.map((s) => s.pergunta) : undefined} key={q.id} q={q} pool={saved.lesson.questoes} concept={saved.lesson.conceitos.find((c) => c.id === q.conceito)} subject={subject} lessonKey={saved.lessonKey} taskId={taskId}
           teach={needsTeaching(saved, q)} onTaught={() => { const cur = stateRef.current; if (cur) update({ ...cur, ...markTaught(cur, q.conceito) }); }}
           onAnswer={answer} onNext={() => setShown(null)} onReported={() => reported(q.id)} />
       ) : waitingRest ? (

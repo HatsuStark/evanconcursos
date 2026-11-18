@@ -13,11 +13,11 @@ import { normalizeText } from '../../../shared/ai/notice.ts';
 import { missingMark } from '../../../shared/ai/marks.ts';
 import { lawKeys, topicKeys } from '../../../shared/ai/guide.ts';
 import {
-  applyVerdicts, cleanConcepts, cleanQuestions, lessonUsable, TUTOR_GRADE_VERSION, TUTOR_PROMPT_VERSION, TUTOR_REVIEW_VERSION, tutorCacheKey, TutorGrade, tutorGradeJsonSchema, tutorGradePrompt,
+  applyVerdicts, cleanConcepts, cleanExample, cleanQuestions, TutorPractice, tutorPracticeJsonSchema, lessonUsable, TUTOR_GRADE_VERSION, TUTOR_PROMPT_VERSION, TUTOR_REVIEW_VERSION, tutorCacheKey, TutorGrade, tutorGradeJsonSchema, tutorGradePrompt,
   TutorOutline, tutorOutlineJsonSchema, tutorOutlinePrompt, TutorQuestions, tutorQuestionsJsonSchema, tutorQuestionsPrompt, tutorReviewPrompt, TutorVerdicts, tutorVerdictsJsonSchema, tutorVerifyPrompt,
   type TutorInput, type TutorPart,
 } from '../../../shared/ai/tutor.ts';
-import { dueConcepts, LETTERS, type Level, type TutorConcept, type TutorLesson, type TutorQuestion } from '../../../shared/domain/tutor.ts';
+import { dueConcepts, LETTERS, type Level, type TutorConcept, type TutorLesson, type TutorQuestion, type WorkedExample } from '../../../shared/domain/tutor.ts';
 import { aiFor } from '../_shared/ai.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { loadLawSources } from '../_shared/law.ts';
@@ -77,18 +77,19 @@ function usageAcc() {
   };
 }
 
-// Conferência pelo revisor (IA), com uma nova tentativa. Sem conferência, as perguntas não são servidas.
-async function verify(ai: { model: string; apiKey: string }, acc: ReturnType<typeof usageAcc>, input: TutorInput, qs: TutorQuestion[]) {
-  if (!qs.length) return qs;
+// Conferência pelo revisor (IA), com uma nova tentativa. Sem conferência, as perguntas não são servidas. O exemplo
+// resolvido, quando há, é conferido junto (id "ex"); reprovado, a aula segue sem ele.
+async function verify(ai: { model: string; apiKey: string }, acc: ReturnType<typeof usageAcc>, input: TutorInput, qs: TutorQuestion[], example: WorkedExample | null = null) {
+  if (!qs.length) return { qs, example: null };
   let last: unknown;
   for (let i = 0; i < 2; i++) {
     try {
-      const r = await generateJson({ ...ai, schema: TutorVerdicts, jsonSchema: tutorVerdictsJsonSchema(), temperature: 0, thinkingLevel: VERIFY_THINKING, parts: [{ text: tutorVerifyPrompt(input, qs) }] });
+      const r = await generateJson({ ...ai, schema: TutorVerdicts, jsonSchema: tutorVerdictsJsonSchema(), temperature: 0, thinkingLevel: VERIFY_THINKING, parts: [{ text: tutorVerifyPrompt(input, qs, example) }] });
       acc.add(r.usage);
       const out = applyVerdicts(qs, r.data);
       const rejected = r.data.avaliacoes.filter((a) => !a.aprovada);
       if (rejected.length) console.log('tutor: reprovadas', rejected.map((a) => `${a.id}: ${a.motivo}`).join(' | '));
-      return out;
+      return { qs: out, example: example && !rejected.some((a) => a.id === 'ex') ? example : null };
     } catch (e) {
       if (e instanceof GeminiError) acc.add(e.usage);
       last = e;
@@ -117,23 +118,25 @@ async function generate(admin: Admin, ownerId: string, jobId: string, ctx: Ctx) 
     if (conceitos.length < 2) throw new Error('Roteiro sem conceitos suficientes.');
     const roteiro = { titulo: outline.titulo, conceitos };
     const part = async (p: TutorPart) => {
-      const r = await ask(TutorQuestions, tutorQuestionsJsonSchema(), tutorQuestionsPrompt(input, roteiro, p));
+      const r: { questoes: unknown[]; exemplo?: WorkedExample } = p === 'pratica'
+        ? await ask(TutorPractice, tutorPracticeJsonSchema(), tutorQuestionsPrompt(input, roteiro, p))
+        : await ask(TutorQuestions, tutorQuestionsJsonSchema(), tutorQuestionsPrompt(input, roteiro, p));
       const { kept, dropped } = cleanQuestions(r.questoes as TutorQuestion[], { ...clean, concepts: conceitos });
       if (dropped.length) console.log(`tutor ${p}: descartadas`, dropped.map((d) => `${d.id}: ${d.motivo}`).join(' | '));
-      return await verify(ai, acc, input, kept);
+      return await verify(ai, acc, input, kept, cleanExample(r.exemplo, { ...clean, concepts: conceitos }));
     };
     // Diagnóstico e construção primeiro: gravados assim que conferidos, o estudante já começa.
     const pratica = part('pratica');
     pratica.catch(() => {}); // tratada no await abaixo
-    const inicio = await part('inicio');
+    const inicio = (await part('inicio')).qs;
     const first: TutorLesson = { ...roteiro, questoes: inicio, parcial: true };
     if (!lessonUsable(first)) throw new Error('Perguntas de construção insuficientes depois da conferência.');
     await save(first);
-    const rest = await pratica;
+    const { qs: rest, example } = await pratica;
     // Repetidas entre as duas partes: fica a primeira (as do início já podem estar na tela).
     // Sem embaralhar de novo: as alternativas das perguntas do início já podem estar na tela.
     const all = cleanQuestions([...inicio, ...rest], { ...clean, concepts: conceitos, shuffle: false }).kept;
-    await save({ ...roteiro, questoes: all });
+    await save({ ...roteiro, questoes: all, exemplo: example });
     await admin.from('ai_jobs').update({ status: 'succeeded', finished_at: new Date().toISOString(), result: { questions: all.length } }).eq('id', jobId);
     await logUsage(admin, { ownerId, jobId, operation: 'tutor_lesson', model: ai.model, promptVersion: TUTOR_PROMPT_VERSION, usage: acc.get(), latencyMs: Date.now() - started, status: 'ok' });
   } catch (err) {
@@ -210,7 +213,7 @@ async function review(auth: Auth, admin: Admin, planId: string) {
     const { kept } = cleanQuestions((r.data.questoes as TutorQuestion[]).map((q) => ({ ...q, etapa: 'revisao' as const })), { concepts, provided: sources?.articles ?? [], subject, extra: sources?.extra ?? [], existing: recent });
     // Uma por conceito: a primeira que passou.
     const one = ids.flatMap((id) => kept.filter((q) => q.conceito === id).slice(0, 1));
-    const verified = await verify(ai, acc, input, one);
+    const verified = (await verify(ai, acc, input, one)).qs;
     await logUsage(admin, { ownerId: auth.user.id, operation: 'tutor_review', model: ai.model, promptVersion: TUTOR_REVIEW_VERSION, usage: acc.get(), latencyMs: Date.now() - started, status: 'ok' });
     const keyOf = new Map(ids.map((id, i) => [id, due[i]!.concept_key]));
     return json(200, {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LETTERS, type TutorQuestion } from '../domain/tutor.ts';
-import { applyVerdicts, cleanQuestions, lessonUsable, shuffleOptions, tutorCacheKey, tutorQuestionsPrompt } from './tutor.ts';
+import { applyVerdicts, cleanExample, cleanQuestions, lessonUsable, shuffleOptions, tutorCacheKey, tutorQuestionsPrompt } from './tutor.ts';
 
 const concepts = [{ id: 'c1', nome: 'Legalidade', essencial: '', explicacao: '', outro_jeito: '', base: '' }];
 const q = (id: string, extra: Partial<TutorQuestion> = {}): TutorQuestion => ({
@@ -46,6 +46,19 @@ describe('cleanQuestions', () => {
     const { kept, dropped } = cleanQuestions([q('k1', { explicacao: 'Conforme o art. 5º da CF.' }), q('k2', { enunciado: 'Segundo o art. 37 da CF, algo novo', explicacao: 'CF, art. 37.' })], { concepts, provided, subject: 'Direito Constitucional' });
     expect(dropped[0]).toMatchObject({ id: 'k1' });
     expect(kept.map((x) => x.id)).toEqual(['k2']);
+  });
+});
+
+describe('exemplo resolvido', () => {
+  const ex = { conceito: 'c1', caso: 'Um servidor praticou o ato.', passos: [{ pergunta: 'Quem?', resposta: 'O servidor.' }, { pergunta: 'Pode?', resposta: 'Sim, CF, art. 37.' }], conclusao: 'Válido.' };
+  it('aceita exemplo completo e corrige conceito desconhecido', () => {
+    expect(cleanExample(ex, { concepts, provided, subject: 'Direito Administrativo' })).toMatchObject({ conceito: 'c1' });
+    expect(cleanExample({ ...ex, conceito: 'c9' }, { concepts, provided, subject: 'Direito Administrativo' })?.conceito).toBe('c1');
+  });
+  it('descarta exemplo incompleto ou com citação fora das fontes', () => {
+    expect(cleanExample({ ...ex, passos: ex.passos.slice(0, 1) }, { concepts, provided, subject: 'Direito Administrativo' })).toBeNull();
+    expect(cleanExample({ ...ex, conclusao: 'Válido pelo art. 5º da CF.' }, { concepts, provided, subject: 'Direito Administrativo' })).toBeNull();
+    expect(cleanExample(null, { concepts, provided, subject: 'x' })).toBeNull();
   });
 });
 

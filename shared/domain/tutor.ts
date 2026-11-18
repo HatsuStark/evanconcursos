@@ -34,7 +34,11 @@ export interface TutorQuestion {
   distratores?: string[]; // lacuna/curta: respostas erradas plausíveis, para responder escolhendo (aulas antigas não têm)
 }
 
-export interface TutorLesson { titulo: string; conceitos: TutorConcept[]; questoes: TutorQuestion[]; parcial?: boolean }
+// Exemplo resolvido mostrado antes da aplicação: um caso resolvido passo a passo. As perguntas dos passos formam o
+// roteiro que o estudante reaproveita na primeira situação-problema (depois, o apoio sai).
+export interface WorkedExample { conceito: string; caso: string; passos: { pergunta: string; resposta: string }[]; conclusao: string }
+
+export interface TutorLesson { titulo: string; conceitos: TutorConcept[]; questoes: TutorQuestion[]; exemplo?: WorkedExample | null; parcial?: boolean }
 
 // Uma resposta. `hint`: pediu dica; `explained`: viu a explicação (ou o cartão do modo iniciante) antes de responder;
 // `unknown`: "Não sei"; `selfGraded`: o próprio estudante conferiu a resposta escrita (a correção automática falhou).
@@ -53,6 +57,7 @@ export interface TutorState {
   known: string[];     // conceitos que o estudante já dominava (aulas anteriores ou diagnóstico)
   novice?: boolean;    // modo iniciante: o diagnóstico mostrou que o tema é novo; cada conceito abre com um cartão de ensino
   taught?: string[];   // conceitos cujo cartão de ensino já foi mostrado
+  exampleSeen?: boolean; // o exemplo resolvido da aplicação já foi mostrado
 }
 
 // Ordem das etapas na aula. Reforço não entra na fila inicial: só aparece depois de um erro.
@@ -147,6 +152,13 @@ export function isNovice(logs: AnswerLog[]) {
 export const needsTeaching = (state: TutorState, q: TutorQuestion) =>
   !!state.novice && (q.etapa === 'construcao' || q.etapa === 'reforco') && !(state.taught ?? []).includes(q.conceito);
 export const markTaught = (state: TutorState, conceito: string): TutorState => ({ ...state, taught: [...new Set([...(state.taught ?? []), conceito])] });
+
+// Exemplo resolvido: aparece uma vez, antes da primeira pergunta de aplicação.
+export const needsExample = (state: TutorState, lesson: TutorLesson, q: TutorQuestion) => q.etapa === 'aplicacao' && !!lesson.exemplo?.passos.length && !state.exampleSeen;
+// Apoio que vai saindo: a primeira situação-problema depois do exemplo oferece o roteiro (as perguntas dos passos, sem as
+// respostas); as seguintes, não.
+export const offersRoadmap = (state: TutorState, lesson: TutorLesson, q: TutorQuestion) =>
+  q.etapa === 'aplicacao' && !!lesson.exemplo?.passos.length && !state.logs.some((l) => l.etapa === 'aplicacao' && l.qid !== q.id);
 
 // Pergunta reportada: sai da fila e as respostas dela deixam de contar.
 export function reportQuestion(state: TutorState, qid: string): TutorState {

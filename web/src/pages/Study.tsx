@@ -29,13 +29,13 @@ import { saveTimeSpent, useStudy, type StudyData } from '../lib/study.ts';
 
 const fmtClock = (s: number) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ':' : ''}${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 // Ordem de estudo: teoria primeiro, questões por último. Lei seca e jurisprudência só em assuntos de legislação; Fontes
-// (obras abertas e livros de referência) nos demais. Aprender (aula por perguntas da IA) é mais um jeito de estudar a
+// (obras abertas e livros de referência) nos demais. Aula guiada (aula por perguntas da IA) é mais um jeito de estudar a
 // teoria, ao lado da apostila e dos vídeos: não conta na meta de questões reais.
 const TABS = [
   { key: 'pente', label: 'Pente-fino', icon: ScanSearch },
   { key: 'apostila', label: 'Apostila', icon: BookOpen },
   { key: 'videos', label: 'Vídeos', icon: Video },
-  { key: 'aprender', label: 'Aprender', icon: GraduationCap },
+  { key: 'aula', label: 'Aula guiada', icon: GraduationCap },
   { key: 'lei', label: 'Lei seca', icon: Scale },
   { key: 'juris', label: 'Jurisprudência', icon: Gavel },
   { key: 'fontes', label: 'Fontes', icon: Library },
@@ -133,7 +133,7 @@ function StudyView({ d }: { d: StudyData }) {
   const lawRefs = sessionLawRefs(d.task.title, d.topics, d.subject?.name ?? '', own, d.session?.law_refs);
   const missing = missingNorms(d.task.title, own);
   const hasSession = !!d.task.session_id;
-  const tabs = TABS.filter((t) => (t.key === 'pente' ? d.task.kind === 'pente_fino' : t.key === 'lei' ? lawRefs.length > 0 || missing.length > 0 : t.key === 'juris' ? lawRefs.length > 0 : t.key === 'fontes' ? hasSession && !lawRefs.length && !missing.length : t.key === 'apostila' || t.key === 'videos' || t.key === 'aprender' || t.key === 'material' ? hasSession : true));
+  const tabs = TABS.filter((t) => (t.key === 'pente' ? d.task.kind === 'pente_fino' : t.key === 'lei' ? lawRefs.length > 0 || missing.length > 0 : t.key === 'juris' ? lawRefs.length > 0 : t.key === 'fontes' ? hasSession && !lawRefs.length && !missing.length : t.key === 'apostila' || t.key === 'videos' || t.key === 'aula' || t.key === 'material' ? hasSession : true));
   // Lei seca abre direto nos artigos.
   const [tab, setTab] = useState<TabKey>(d.task.kind === 'lei_seca' && tabs.some((t) => t.key === 'lei') ? 'lei' : tabs[0]!.key);
   const [videosOpened, setVideosOpened] = useState(false);
@@ -311,7 +311,7 @@ function StudyView({ d }: { d: StudyData }) {
             : tab === 'lei' ? <LawReader refs={lawRefs} own={own} missing={missing} />
             : tab === 'juris' ? <JurisPanel taskId={d.task.id} own={own} />
             : tab === 'fontes' ? <SourcesPanel taskId={d.task.id} />
-            : tab === 'aprender' ? <TutorPanel taskId={d.task.id} planId={d.task.plan_id} subjectId={d.task.subject_id} subject={d.subject?.name ?? ''} banca={planNotice?.board ?? ''} title={d.session?.title ?? d.task.title}
+            : tab === 'aula' ? <TutorPanel taskId={d.task.id} planId={d.task.plan_id} subjectId={d.task.subject_id} subject={d.subject?.name ?? ''} banca={planNotice?.board ?? ''} title={d.session?.title ?? d.task.title}
               examDate={planNotice?.exam_date ?? null} onGoQuestions={tabs.some((t) => t.key === 'questoes') ? () => setTab('questoes') : undefined} onGoApostila={tabs.some((t) => t.key === 'apostila') ? () => setTab('apostila') : undefined} />
             : tab === 'apostila' ? <GuidePanel taskId={d.task.id} hasSession={hasSession} initialDepth={params.has('revisao') || d.task.title.startsWith(REVIEW_PREFIX) || d.task.title.startsWith(PRACTICE_PREFIX) ? 'revisao' : d.task.title.startsWith(DEEP_PREFIX) ? 'aprofundamento' : 'completa'} onGoQuestions={tabs.some((t) => t.key === 'questoes') ? () => setTab('questoes') : undefined} />
             : <SessionMaterials sessionId={d.task.session_id} minutes={d.task.kind === 'theory' ? d.task.minutes : 0} />}

@@ -58,7 +58,7 @@ export function ReviewsPage() {
       </div>
       {!!conceptRows.length && (
         <>
-          <h3 style={{ marginTop: 18 }}>Conceitos (Aprender)</h3>
+          <h3 style={{ marginTop: 18 }}>Conceitos (Aula guiada)</h3>
           <div className="stats">
             {(['dominado', 'em_progresso', 'atencao'] as Level[]).map((lv) => (
               <div key={lv} className="stat"><strong style={{ color: lv === 'dominado' ? 'var(--lime)' : lv === 'atencao' ? 'var(--orange)' : 'var(--cyan)' }}>{conceptRows.filter((c) => c.level === lv).length}</strong><span>{LEVEL_LABEL[lv].toLowerCase()}</span></div>
@@ -74,7 +74,7 @@ export function ReviewsPage() {
       {!rows.length && <div className="glass card muted">Nenhum tema ainda. Concluir uma sessão de teoria agenda a primeira revisão.</div>}
       {!!conceptRows.length && (
         <>
-          <div className="section-title"><h2>Conceitos do Aprender por questões</h2><span className="badge cyan">{dueNow.length}</span></div>
+          <div className="section-title"><h2>Conceitos da Aula guiada</h2><span className="badge cyan">{dueNow.length}</span></div>
           <div className="glass card material-row">
             <div style={{ flex: 1, minWidth: 200 }}>
               <div>{dueNow.length ? `${dueNow.length} ${dueNow.length === 1 ? 'conceito vence' : 'conceitos vencem'} hoje` : 'Nenhum conceito para hoje'}</div>

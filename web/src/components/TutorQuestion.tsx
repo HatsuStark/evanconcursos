@@ -1,8 +1,8 @@
-// Uma pergunta do Aprender por Questões, com ajuda (dica, explicação breve, "Não sei"), correção e o feedback do tutor.
+// Uma pergunta da Aula guiada, com ajuda (dica, explicação breve, "Não sei"), correção e o feedback do tutor.
 // Serve à aula e à revisão espaçada.
-import { ArrowDown, ArrowUp, BookOpen, CheckCircle2, ChevronRight, Flag, HelpCircle, Lightbulb, MessageCircleQuestion, Repeat, XCircle } from 'lucide-react';
+import { ArrowDown, ArrowUp, BookOpen, CheckCircle2, ChevronRight, Flag, ListOrdered, Route, HelpCircle, Lightbulb, MessageCircleQuestion, Repeat, XCircle } from 'lucide-react';
 import { Fragment, useMemo, useRef, useState } from 'react';
-import { answerOptions, canAskHelp, checkClosed, LETTERS, matchesText, shuffledOrder, STAGE_LABEL, type AnswerLog, type TutorConcept, type TutorQuestion } from '../../../shared/domain/tutor.ts';
+import { answerOptions, canAskHelp, checkClosed, LETTERS, type WorkedExample, matchesText, shuffledOrder, STAGE_LABEL, type AnswerLog, type TutorConcept, type TutorQuestion } from '../../../shared/domain/tutor.ts';
 import { missingMark, splitMarks } from '../../../shared/ai/marks.ts';
 import { gradeAnswer, reportTutorQuestion } from '../lib/tutor.ts';
 
@@ -24,10 +24,12 @@ interface Result { correct: boolean; comment?: string; selfCheck?: boolean; resp
 // Lacuna e resposta curta são respondidas sem digitar: na lacuna, arrastando (ou tocando) o balão certo até o espaço; na
 // resposta curta, escolhendo numa lista. "Prefiro digitar" volta ao campo de texto. `pool`: as perguntas da aula, de onde
 // saem opções erradas quando a pergunta não traz as suas.
-export function TutorQuestionCard({ q, concept, subject, lessonKey, taskId, pool, answered, teach, onTaught, onAnswer, onNext, onReported, nextLabel = 'Continuar' }: {
+// `roadmap`: na primeira situação-problema depois do exemplo resolvido, o roteiro do exemplo (só as perguntas) fica à mão;
+// abri-lo conta como ajuda.
+export function TutorQuestionCard({ q, concept, subject, lessonKey, taskId, pool, answered, teach, onTaught, roadmap, onAnswer, onNext, onReported, nextLabel = 'Continuar' }: {
   q: TutorQuestion; concept: TutorConcept | undefined; subject: string; lessonKey: string | null; taskId: string | null; pool?: TutorQuestion[];
   answered?: AnswerLog;                 // já respondida (mostra o feedback): retomada depois de recarregar
-  teach?: boolean; onTaught?: () => void;
+  teach?: boolean; onTaught?: () => void; roadmap?: string[];
   onAnswer: (log: AnswerLog) => void; onNext: () => void; onReported: () => void; nextLabel?: string;
 }) {
   const help = canAskHelp(q.etapa);
@@ -124,6 +126,12 @@ export function TutorQuestionCard({ q, concept, subject, lessonKey, taskId, pool
         )}<Marked text={t} /></Fragment>)
         : <Marked text={q.enunciado} />}</p></div>
 
+      {roadmap && !result && (
+        <details className="tutor-roadmap" onToggle={(e) => { if ((e.currentTarget as HTMLDetailsElement).open) setHint(true); }}>
+          <summary><Route size={15} /> Usar o roteiro do exemplo</summary>
+          <ol>{roadmap.map((s, i) => <li key={i}>{s}</li>)}</ol>
+        </details>
+      )}
       {hint && !result && <div className="tutor-aside"><Lightbulb size={16} /> <span>{q.dica}</span></div>}
       {explained && !result && concept && <div className="tutor-aside"><HelpCircle size={16} /> <span>{concept.explicacao}</span></div>}
 
@@ -241,6 +249,33 @@ export function TutorQuestionCard({ q, concept, subject, lessonKey, taskId, pool
         </>
       )}
       {reporting && <ReportForm q={q} lessonKey={lessonKey} taskId={taskId} onClose={() => setReporting(false)} onDone={onReported} />}
+    </div>
+  );
+}
+
+// Exemplo resolvido antes da aplicação: o caso e os passos aparecem um de cada vez (o estudante tenta pensar antes de ver
+// a resposta de cada passo), e no fim a conclusão.
+export function WorkedExampleCard({ example, concept, onDone }: { example: WorkedExample; concept: TutorConcept | undefined; onDone: () => void }) {
+  const [step, setStep] = useState(0);
+  const all = step >= example.passos.length;
+  return (
+    <div className="glass q-card tutor-q tutor-example">
+      <div className="q-meta"><span className="badge violet">Exemplo resolvido</span>{concept && <span className="muted small">{concept.nome}</span>}</div>
+      <p className="faint small" style={{ margin: 0 }}>Antes das situações-problema, veja como resolver uma. Tente responder cada passo de cabeça antes de abrir.</p>
+      <div className="q-body"><p><Marked text={example.caso} /></p></div>
+      <ol className="tutor-steps-solved">
+        {example.passos.map((s, i) => (
+          <li key={i} className={i < step ? 'open' : i === step ? 'next' : 'closed'}>
+            <strong>{s.pergunta}</strong>
+            {i < step ? <span>{s.resposta}</span> : i === step ? <button className="btn ghost sm" onClick={() => setStep(step + 1)}><ListOrdered size={14} /> Ver este passo</button> : null}
+          </li>
+        ))}
+      </ol>
+      {all && <div className="q-explain"><p><b>Conclusão:</b> <Marked text={example.conclusao} /></p><p className="faint small" style={{ margin: 0 }}>Na próxima pergunta, o roteiro fica à mão se precisar.</p></div>}
+      <div className="tutor-help">
+        {all ? <button className="btn" onClick={onDone}>Ir para as situações-problema <ChevronRight size={16} /></button>
+          : <><button className="btn" onClick={() => setStep(example.passos.length)}>Ver tudo</button><button className="btn ghost sm" onClick={onDone}>Pular o exemplo</button></>}
+      </div>
     </div>
   );
 }

@@ -1035,3 +1035,11 @@ details.card summary { cursor: pointer; font-weight: 600; }
 .tutor-balloon.ghost { position: fixed; z-index: 50; transform: translate(-50%, -50%); pointer-events: none; border-color: var(--cyan); box-shadow: 0 6px 20px rgb(0 0 0 / .25); cursor: grabbing; }
 .tutor-balloons > .btn { margin-left: auto; }
 .q-opt.tutor-short p { font-weight: 500; }
+.tutor-roadmap { padding: 10px 14px; border-radius: 14px; border: 1px dashed color-mix(in srgb, var(--violet) 45%, transparent); }
+.tutor-roadmap summary { cursor: pointer; display: flex; align-items: center; gap: 6px; color: var(--violet); font-weight: 600; font-size: 14px; }
+.tutor-roadmap ol { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 6px; line-height: 1.45; }
+.tutor-steps-solved { margin: 0; padding-left: 22px; display: grid; gap: 12px; }
+.tutor-steps-solved li { line-height: 1.5; }
+.tutor-steps-solved li strong { display: block; margin-bottom: 4px; }
+.tutor-steps-solved li.open span { color: var(--muted); }
+.tutor-steps-solved li.closed { opacity: .5; }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addDays, answerOptions, applyAnswer, checkClosed, conceptLevel, interleave, isNovice, markTaught, needsTeaching, dueConcepts, initialState, matchesText, progress, reportQuestion, scheduleAfterLesson, scheduleAfterReview, shuffledOrder, summarize, syncQueue, type AnswerLog, type Etapa, type TutorLesson, type TutorQuestion } from './tutor.ts';
+import { addDays, answerOptions, applyAnswer, needsExample, offersRoadmap, checkClosed, conceptLevel, interleave, isNovice, markTaught, needsTeaching, dueConcepts, initialState, matchesText, progress, reportQuestion, scheduleAfterLesson, scheduleAfterReview, shuffledOrder, summarize, syncQueue, type AnswerLog, type Etapa, type TutorLesson, type TutorQuestion } from './tutor.ts';
 
 const q = (id: string, etapa: Etapa, conceito: string, extra: Partial<TutorQuestion> = {}): TutorQuestion => ({
   id, etapa, conceito, estilo: 'conceito', formato: 'certo_errado', enunciado: id, alternativas: [], gabarito: 'C', aceitas: [], dica: '', explicacao: '', erros: [], ...extra,
@@ -163,5 +163,24 @@ describe('opções da lacuna e da resposta curta', () => {
     const pool = [lac('a', 'cinco dias'), lac('b', 'dez dias'), q('c', 'final', 'c1', { gabarito: 'E' }), lac('d', 'quinze dias úteis')];
     expect([...answerOptions(lac('x', 'trinta dias'), pool)].sort()).toEqual(['cinco dias', 'dez dias', 'quinze dias úteis', 'trinta dias']);
     expect(answerOptions(lac('x', 'trinta dias'))).toEqual(['trinta dias']);
+  });
+});
+
+describe('exemplo resolvido', () => {
+  const withEx: TutorLesson = { ...lesson, exemplo: { conceito: 'c1', caso: 'caso', passos: [{ pergunta: 'Quem?', resposta: 'Fulano' }], conclusao: 'fim' } };
+  const a1 = lesson.questoes.find((x) => x.id === 'a1')!, a2 = q('a2', 'aplicacao', 'c2');
+  it('aparece uma vez, antes da primeira aplicação', () => {
+    const s = initialState(withEx);
+    expect(needsExample(s, withEx, a1)).toBe(true);
+    expect(needsExample({ ...s, exampleSeen: true }, withEx, a1)).toBe(false);
+    expect(needsExample(s, lesson, a1)).toBe(false);
+    expect(needsExample(s, withEx, lesson.questoes.find((x) => x.id === 'k1')!)).toBe(false);
+  });
+  it('o roteiro só acompanha a primeira situação-problema', () => {
+    const s = initialState(withEx);
+    expect(offersRoadmap(s, withEx, a1)).toBe(true);
+    const after = applyAnswer(s, withEx, log('a1', 'aplicacao', 'c1', true));
+    expect(offersRoadmap(after, withEx, a1)).toBe(true);
+    expect(offersRoadmap(after, withEx, a2)).toBe(false);
   });
 });

@@ -4,7 +4,7 @@ import type { SubjectRow } from '../lib/plans.ts';
 import type { TheoryReview } from '../lib/theoryReviews.ts';
 
 const THEORY_SHOWN = 4;
-// Estimativa de tempo, em minutos: revisão curta de um tema, questão errada refeita, flashcard, conceito do Aprender.
+// Estimativa de tempo, em minutos: revisão curta de um tema, questão errada refeita, flashcard, conceito da Aula guiada.
 const MIN_THEME = 4, MIN_ERROR = 1.5, MIN_CARD = 0.5, MIN_CONCEPT = 1;
 // A revisão de conceitos é uma sessão curta: no máximo 8 por vez (REVIEW_SESSION_MAX), para não pesar no dia.
 const CONCEPTS_PER_SESSION = 8;
@@ -12,7 +12,7 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 // Revisão do dia na tela Hoje: tudo o que vence hoje num cartão só (temas de teoria, erros do caderno e flashcards), com
 // tempo estimado e um botão que começa pelo primeiro item. `hasReviews`: o plano já tem temas em revisão. `concepts`:
-// conceitos do Aprender por questões que vencem hoje.
+// conceitos da Aula guiada que vencem hoje.
 export function DailyReview({ themes, errors, cards, concepts = 0, subjects, today, hasReviews }: {
   themes: TheoryReview[]; errors: number; cards: number; concepts?: number; subjects: SubjectRow[]; today: string; hasReviews: boolean;
 }) {
@@ -58,7 +58,7 @@ export function DailyReview({ themes, errors, cards, concepts = 0, subjects, tod
           )}
           {!!concepts && (
             <div className="material-row">
-              <div style={{ flex: 1, minWidth: 200 }}><div>Conceitos (Aprender por questões)</div><div className="muted small">{plural(concepts, 'conceito para revisar', 'conceitos para revisar')}{concepts > CONCEPTS_PER_SESSION ? ` · ${CONCEPTS_PER_SESSION} por sessão` : ''} · perguntas novas</div></div>
+              <div style={{ flex: 1, minWidth: 200 }}><div>Conceitos da Aula guiada</div><div className="muted small">{plural(concepts, 'conceito para revisar', 'conceitos para revisar')}{concepts > CONCEPTS_PER_SESSION ? ` · ${CONCEPTS_PER_SESSION} por sessão` : ''} · perguntas novas</div></div>
               <Link className="btn ghost sm" to="/aprender/revisao">Revisar</Link>
             </div>
           )}
