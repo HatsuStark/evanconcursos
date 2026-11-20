@@ -8,7 +8,8 @@ const REFERS = /destacad|em destaque|sublinhad|em negrito|grifad/i;
 
 // O comando fala em termo destacado, mas nada foi marcado (nem com a marca, nem em HTML): a questão não tem como ser
 // respondida. Vale para o texto da IA e para o HTML já gravado.
-export const missingMark = (text: string) => REFERS.test(text) && !new RegExp(MARK.source).test(text) && !/<(b|strong|u|em|i)\b[^>]*>/i.test(text);
+export const hasMark = (text: string) => new RegExp(MARK.source).test(text) || /<(b|strong|u|em|i)\b[^>]*>/i.test(text);
+export const missingMark = (text: string) => REFERS.test(text) && !hasMark(text);
 
 // Trechos em sequência, com o que vai em negrito (para montar a tela sem HTML).
 export function splitMarks(text: string): { text: string; bold: boolean }[] {

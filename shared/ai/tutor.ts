@@ -4,12 +4,13 @@ import { z } from 'zod';
 import { MARK_RULE, missingMark } from './marks.ts';
 import { unverifiedLawRefs, type ProvidedArticle } from './guide.ts';
 import type { LawEntry } from '../legal/registry.ts';
-import { LETTERS, matchesText, type TutorConcept, type TutorLesson, type TutorQuestion, type WorkedExample } from '../domain/tutor.ts';
+import { LETTERS, matchesText, type ConceptScheme, type TutorConcept, type TutorLesson, type TutorQuestion, type WorkedExample } from '../domain/tutor.ts';
 
 // v2: explicação autossuficiente (cartão do modo iniciante), construção com andaime, regras de distratores e de
 // certo/errado, alternativas embaralhadas no servidor.
 // v3: distratores para responder lacuna e resposta curta sem digitar. v4: exemplo resolvido antes da aplicação.
-export const TUTOR_PROMPT_VERSION = 'tutor-v4';
+// v5: mnemônico e esquema visual (comparação ou passos) por conceito.
+export const TUTOR_PROMPT_VERSION = 'tutor-v5';
 export const TUTOR_REVIEW_VERSION = 'tutor-review-v3';
 export const TUTOR_GRADE_VERSION = 'tutor-grade-v1';
 export const TUTOR_PICK_VERSION = 'tutor-pick-v1';
@@ -26,6 +27,14 @@ const Conceito = z.object({
   explicacao: z.string().describe('Explicação didática autossuficiente (3 a 5 frases): a regra, o porquê e o detalhe que a prova cobra. Quem nunca viu o tema precisa entender só com ela.'),
   outro_jeito: z.string().describe('Exemplo concreto do conceito aplicado (um caso com personagens, órgãos ou situações reais) ou analogia do cotidiano, em até 3 frases.'),
   base: z.string().describe('Dispositivo legal fornecido que fundamenta o conceito, exatamente como no colchete (ex.: "CF, art. 37"); vazio se não houver.'),
+  mnemonico: z.string().describe('Mnemônico ou frase curta para lembrar (até 15 palavras), só se for natural e correto; vazio se não houver um bom.'),
+  esquema: z.object({
+    tipo: z.enum(['comparacao', 'passos', 'nenhum']),
+    titulo: z.string().describe('Título curto do esquema.'),
+    colunas: z.array(z.string()).describe('comparacao: cabeçalhos (3 ou 4), o primeiro é o aspecto comparado (ex.: "Aspecto"); demais: vazio.'),
+    linhas: z.array(z.array(z.string())).describe('comparacao: 2 a 5 linhas, cada uma com uma célula por coluna (até 8 palavras cada); demais: vazio.'),
+    itens: z.array(z.string()).describe('passos: 3 a 6 etapas na ordem (até 12 palavras cada); demais: vazio.'),
+  }).describe('Síntese visual do conceito para o candidato fixar num olhar.'),
 });
 export const TutorOutline = z.object({
   titulo: z.string(),
@@ -109,6 +118,8 @@ Regras:
 - explicacao é lida antes da primeira pergunta por quem nunca estudou o tema: defina os termos técnicos na primeira vez que aparecem e diga por que a regra existe. Linguagem simples, direta e motivadora, sem enrolação.
 - outro_jeito traz um exemplo concreto aplicado (de preferência um caso parecido com os da prova) ou uma analogia; não repita a explicação com outras palavras.
 - Inclua, quando houver, a diferença ou exceção que a banca mais usa como pegadinha.
+- esquema: comparacao quando o conceito se distingue de um instituto vizinho ou tem regra e exceção (lado a lado, o que muda em cada um); passos quando é procedimento, sequência ou fases; nenhum quando um esquema não ajudaria. Células e itens curtos, sem repetir a explicação. Pelo menos metade dos conceitos com esquema.
+- mnemonico: só quando ajuda de verdade a lembrar uma lista, uma ordem ou uma distinção (acrônimo cujas letras batem com os termos, rima ou associação). Nunca force; vazio é melhor que um mnemônico ruim.
 ${SOURCE_RULES(p)}
 - Sem markdown.`.replace(/\n{2,}/g, '\n');
 }
@@ -136,11 +147,12 @@ ${SOURCE_RULES(p)}
 - Sem markdown e sem letras ("A)") no início das alternativas.
 - ${MARK_RULE}`;
 
-const outlineText = (o: { conceitos: TutorConcept[] }) => o.conceitos.map((c) => `${c.id} — ${c.nome}: ${c.essencial}${c.base ? ` [${c.base}]` : ''}`).join('\n');
+type OutlineLike = { titulo?: string; conceitos: Pick<TutorConcept, 'id' | 'nome' | 'essencial' | 'base'>[] };
+const outlineText = (o: OutlineLike) => o.conceitos.map((c) => `${c.id} — ${c.nome}: ${c.essencial}${c.base ? ` [${c.base}]` : ''}`).join('\n');
 
 // Perguntas da aula em duas partes, pedidas em paralelo: a primeira (diagnóstico e construção) já permite começar.
 export type TutorPart = 'inicio' | 'pratica';
-export function tutorQuestionsPrompt(p: TutorInput, outline: TutorOutline, part: TutorPart) {
+export function tutorQuestionsPrompt(p: TutorInput, outline: OutlineLike, part: TutorPart) {
   const n = outline.conceitos.length;
   const plan = part === 'inicio'
     ? `Monte agora SÓ estas perguntas (ids d1…, k1…, r1…):
@@ -297,12 +309,37 @@ export function cleanQuestions(questions: TutorQuestion[], o: { concepts: TutorC
   return { kept, dropped };
 }
 
-// Conceito citando artigo fora das fontes perde só a base (a explicação continua útil).
-export function cleanConcepts(concepts: TutorConcept[], o: { provided: ProvidedArticle[]; subject: string; extra?: LawEntry[] }): TutorConcept[] {
+// Esquema completo e no formato do tipo; senão, o conceito fica sem ele. Linhas da comparação acertadas ao número de
+// colunas (célula faltando vira vazia; sobrando, sai).
+type RawScheme = { tipo: string; titulo: string; colunas: string[]; linhas: string[][]; itens: string[] };
+export function cleanScheme(e: RawScheme | null | undefined): ConceptScheme | null {
+  if (!e) return null;
+  const t = (x: unknown) => String(x ?? '').trim();
+  const titulo = t(e.titulo);
+  if (e.tipo === 'comparacao') {
+    const colunas = (e.colunas ?? []).map(t);
+    if (colunas.length < 3 || colunas.length > 4 || colunas.slice(1).some((c) => !c)) return null;
+    const linhas = (e.linhas ?? []).map((l) => colunas.map((_, i) => t(l[i]))).filter((l) => l[0] && l.slice(1).some(Boolean)).slice(0, 6);
+    return linhas.length >= 2 ? { tipo: 'comparacao', titulo, colunas, linhas, itens: [] } : null;
+  }
+  if (e.tipo === 'passos') {
+    const itens = (e.itens ?? []).map(t).filter(Boolean).slice(0, 7);
+    return itens.length >= 3 ? { tipo: 'passos', titulo, colunas: [], linhas: [], itens } : null;
+  }
+  return null;
+}
+const schemeText = (e: ConceptScheme | null) => (e ? [e.titulo, ...e.colunas, ...e.linhas.flat(), ...e.itens].join('\n') : '');
+
+// Conceito citando artigo fora das fontes perde só a base (a explicação continua útil); mnemônico ou esquema que cite
+// artigo fora das fontes saem.
+type RawConcept = Omit<TutorConcept, 'esquema'> & { esquema?: RawScheme | ConceptScheme | null };
+export function cleanConcepts(concepts: RawConcept[], o: { provided: ProvidedArticle[]; subject: string; extra?: LawEntry[] }): TutorConcept[] {
   const seen = new Set<string>();
+  const bad = (text: string) => unverifiedLawRefs(text, o.provided, o.subject, o.extra ?? []).length > 0;
   return concepts.filter((c) => c.id && c.nome.trim() && !seen.has(c.id) && seen.add(c.id)).map((c) => {
-    const text = [c.essencial, c.explicacao, c.outro_jeito, c.base].join('\n');
-    return unverifiedLawRefs(text, o.provided, o.subject, o.extra ?? []).length ? { ...c, base: '' } : c;
+    const esquema = cleanScheme(c.esquema), mnemonico = (c.mnemonico ?? '').trim();
+    const out: TutorConcept = { ...c, mnemonico: mnemonico && !bad(mnemonico) ? mnemonico : '', esquema: esquema && !bad(schemeText(esquema)) ? esquema : null };
+    return bad([c.essencial, c.explicacao, c.outro_jeito, c.base].join('\n')) ? { ...out, base: '' } : out;
   });
 }
 

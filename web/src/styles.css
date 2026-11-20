@@ -426,6 +426,7 @@ a.task-title:hover { color: var(--cyan); }
 .law-article .inciso { margin-left: 28px; }
 .law-article .alinea { margin-left: 42px; }
 .law-article.revoked { opacity: .45; }
+.law-article.speaking { border-color: color-mix(in srgb, var(--cyan) 55%, transparent); box-shadow: inset 3px 0 0 var(--cyan); }
 .law-article.mark-yellow { background: color-mix(in srgb, var(--mark-y) 10%, transparent); border-color: color-mix(in srgb, var(--mark-y) 45%, transparent); }
 .law-article.mark-green { background: color-mix(in srgb, var(--lime) 10%, transparent); border-color: color-mix(in srgb, var(--lime) 45%, transparent); }
 .law-article.mark-pink { background: color-mix(in srgb, var(--magenta) 10%, transparent); border-color: color-mix(in srgb, var(--magenta) 45%, transparent); }
@@ -1046,3 +1047,61 @@ details.card summary { cursor: pointer; font-weight: 600; }
 .tutor-real { display: grid; gap: 10px; padding: 14px; border-radius: 16px; border: 1px solid color-mix(in srgb, var(--violet) 35%, transparent); background: color-mix(in srgb, var(--violet) 5%, transparent); }
 .tutor-real h3 { display: flex; align-items: center; gap: 8px; margin: 0; }
 .tutor-real-row { display: grid; gap: 10px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+/* Mapa de conceitos da Aula guiada: nós ligados por uma linha, cada um acende conforme o domínio. */
+.tutor-map-wrap { display: grid; gap: 6px; }
+.tutor-map-wrap .st-pendente { --c: var(--faint); }
+.tutor-map-wrap .st-em_progresso { --c: var(--cyan); }
+.tutor-map-wrap .st-dominado, .tutor-map-wrap .st-conhecido { --c: var(--lime); }
+.tutor-map-wrap .st-atencao { --c: var(--orange); }
+.tutor-map { list-style: none; margin: 0; padding: 6px 0 2px; display: flex; overflow-x: auto; scrollbar-width: thin; }
+.tutor-map li { flex: 1 0 76px; max-width: 150px; display: grid; justify-items: center; align-content: start; gap: 5px; position: relative; text-align: center; }
+.tutor-map li + li::before { content: ''; position: absolute; top: 13px; left: calc(-50% + 16px); width: calc(100% - 32px); height: 2px; border-radius: 2px; background: var(--c); opacity: .45; }
+.tutor-map .node { position: relative; z-index: 1; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 12.5px; font-weight: 700; border: 2px solid var(--c); color: var(--c); background: var(--surface); transition: background .3s, border-color .3s, color .3s; }
+.tutor-map :is(.st-dominado, .st-conhecido) .node { background: var(--lime); border-color: var(--lime); color: #fff; animation: tutor-pop .45s ease-out; }
+.tutor-map .st-atencao .node { background: color-mix(in srgb, var(--orange) 14%, var(--surface)); }
+.tutor-map .label { font-size: 11.5px; line-height: 1.25; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; padding: 0 4px; }
+.tutor-map li.current .node { border-color: var(--violet); color: var(--violet); animation: tutor-pulse 1.8s ease-in-out infinite; }
+.tutor-map li.current .label { color: var(--text); font-weight: 600; }
+.tutor-map-legend { display: flex; gap: 6px 14px; flex-wrap: wrap; }
+.tutor-map-legend span::before { content: ''; display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; background: var(--c); }
+@keyframes tutor-pulse { 0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--violet) 25%, transparent); } 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--violet) 8%, transparent); } }
+@keyframes tutor-pop { 0% { transform: scale(.6); } 70% { transform: scale(1.15); } 100% { transform: scale(1); } }
+@keyframes tutor-in { from { opacity: 0; transform: translateY(6px); } }
+/* Esquema e mnemônico do conceito. */
+.tutor-scheme { margin: 0; display: grid; gap: 8px; padding: 12px 14px; border-radius: 14px; border: 1px solid color-mix(in srgb, var(--cyan) 30%, transparent); background: color-mix(in srgb, var(--cyan) 5%, transparent); }
+.tutor-scheme figcaption { font-weight: 600; font-size: 13.5px; color: var(--cyan); }
+.tutor-scheme .sum-table { font-size: 13.5px; }
+.tutor-scheme .sum-table th[scope="row"] { text-align: left; font-weight: 600; color: var(--text); }
+.tutor-flow { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.tutor-flow li { display: flex; gap: 10px; align-items: flex-start; line-height: 1.45; }
+.tutor-flow b { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; background: color-mix(in srgb, var(--cyan) 18%, transparent); color: var(--cyan); }
+.tutor-mnemo { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; border-radius: 14px; border: 1px dashed color-mix(in srgb, var(--violet) 40%, transparent); background: color-mix(in srgb, var(--violet) 7%, transparent); line-height: 1.5; }
+.tutor-mnemo svg { flex: none; margin-top: 3px; color: var(--violet); }
+/* Recapitulação entre etapas. */
+.tutor-recap { display: grid; gap: 12px; animation: tutor-in .35s ease-out; }
+.tutor-recap h3 { margin: 0; font-size: 19px; }
+.tutor-recap-list { display: grid; gap: 8px; }
+.tutor-recap-list details { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--well); }
+.tutor-recap-list summary { cursor: pointer; display: flex; gap: 8px; align-items: center; justify-content: space-between; font-weight: 600; }
+.tutor-recap-list details > :not(summary) { margin: 8px 0 0; }
+.tutor-recap-list p { line-height: 1.5; }
+.tutor-trail { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 3px; }
+.tutor-next { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--line); }
+.tutor-next span { flex: 1; min-width: 200px; line-height: 1.5; }
+/* Fim da aula: números e cartão de bolso. */
+.tutor-stats { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 560px) { .tutor-stats { grid-template-columns: repeat(2, 1fr); } }
+.tutor-pocket { display: grid; gap: 10px; }
+.tutor-pocket-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tutor-pocket-head h3 { margin: 0; }
+.tutor-pocket-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 10px; }
+.tutor-pocket-list article { display: grid; gap: 8px; align-content: start; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--well); }
+.tutor-pocket-list header { display: flex; gap: 8px; justify-content: space-between; align-items: flex-start; }
+.tutor-pocket-list p { margin: 0; line-height: 1.5; }
+@media print {
+  .tutor-summary > :not(.tutor-pocket) { display: none !important; }
+  .tutor-summary { border: 0; background: none; backdrop-filter: none; padding: 0; color: #111; }
+  .tutor-pocket-list { grid-template-columns: 1fr 1fr; }
+  .tutor-pocket-list article { break-inside: avoid; background: #fff; border-color: #bbb; }
+}

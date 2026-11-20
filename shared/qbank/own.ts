@@ -25,6 +25,8 @@ export interface OwnRow {
   };
 }
 
+import { hasMark, missingMark } from '../ai/marks.ts';
+
 export const OWN_PREFIX = 'own-';
 
 const escape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -42,20 +44,41 @@ export const ownQid = (hash: (s: string) => string, examKey: string, numero: num
 // associado e sem trazer o trecho no próprio enunciado: sem o texto não dá para responder (comum nas provas soltas,
 // montadas à mão). Fica só em Português e afins, onde "o texto" quase sempre é o texto-base; em Direito e Informática
 // ("texto constitucional", "editor de texto") a regra pegaria questões boas.
+// Espaços como \s+: nas da Quest o enunciado vem com as quebras de linha do PDF ("conteúdo do\ntexto").
 const READING = /portuguesa|interpreta|literatura|reda[cç][aã]o/i;
 const CITES_TEXT = new RegExp([
-  String.raw`\b(d|n|pel|a)?o texto\b(?![- ](oficial|jornalístico|constitucional|legal|normativo|expresso|atual|base|dissertativo|narrativo|descritivo|argumentativo|literário|técnico|científico|da|de|do|a seguir|abaixo|seguinte))`,
-  String.raw`\btextos? (I|II|III|1|2|3)\b`, String.raw`\bpersonage(m|ns)\b`, String.raw`\bnarrador`, String.raw`\beu lírico`,
-  String.raw`\bparágrafos? (final|inicial|anterior|seguinte|introdutório|conclusivo)`,
-  String.raw`\b(primeiro|segundo|terceiro|quarto|quinto|sexto|último|penúltimo|\d+º) parágrafo`,
-  String.raw`\blinhas? \d`, String.raw`\bautora?\b`, String.raw`\bcronista\b`, String.raw`\bpoeta\b`,
+  String.raw`\b(d|n|pel|a)?o\s+texto\b(?![- \n](oficial|jornalístico|constitucional|legal|normativo|expresso|atual|base|dissertativo|narrativo|descritivo|argumentativo|literário|técnico|científico|da|de|do|a seguir|abaixo|seguinte))`,
+  String.raw`\btextos?\s+(I|II|III|1|2|3)\b`, String.raw`\bpersonage(m|ns)\b`, String.raw`\bnarrador`, String.raw`\beu\s+lírico`,
+  String.raw`\bparágrafos?\s+(final|inicial|anterior|seguinte|introdutório|conclusivo)`,
+  String.raw`\b(primeiro|segundo|terceiro|quarto|quinto|sexto|último|penúltimo|\d+\s*[ºo°])\s+parágrafo`,
+  String.raw`\blinhas?\s+\d`, String.raw`\bautora?\b`, String.raw`\bcronista\b`, String.raw`\bpoeta\b`,
 ].join('|'), 'i');
 // Trecho citado, texto colado depois do comando, ou "leia/a seguir/abaixo" (o texto vem no enunciado); redação oficial.
 const INLINE = /[“"«]|\n.{100,}|a seguir|abaixo|seguinte|leia|oficia/i;
+// Mesmo com trecho citado, precisam do texto inteiro: o referente de um termo ("“isso” refere-se", "retoma") e o texto
+// pelo código do Cebraspe ("texto CB1A1AAA"). Linha citada com o período entre aspas responde sozinha.
+const WHOLE = /\b(refere-se|(?<!no que )se refere|retoma|faz referência|remete)\b/i;
+const CODED = /\btexto\s+(?=[A-Z]*\d)[A-Z0-9]{5,}\b/;
 export const citesMissingText = (enunciado: string, materia: string) =>
-  READING.test(materia) && enunciado.length <= 350 && CITES_TEXT.test(enunciado) && !INLINE.test(enunciado);
+  READING.test(materia) && enunciado.length <= 350 && CITES_TEXT.test(enunciado)
+  && (!INLINE.test(enunciado) || WHOLE.test(enunciado) || CODED.test(enunciado));
 
-// `dropped`: ids das descartadas por falta de texto, para o importador tirar do banco as que entraram antes da regra.
+// HTML do payload (o das próprias e o da Quest) para o texto que citesMissingText espera.
+const textOf = (html: string) => html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n\n').replace(/<[^>]+>/g, ' ')
+  .replace(/&nbsp;/g, ' ').replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+  .replace(/[ \t]+/g, ' ').trim();
+// Questão já no formato público que cita um texto que não veio (sem texto associado nem anexo, que pode ser a tirinha).
+// Vale para todas as fontes: a Quest às vezes manda `textos_associados` vazio.
+export const lacksText = (p: { enunciado: string; textos?: string[]; anexos?: string[]; materia?: string }) =>
+  !p.textos?.length && !p.anexos?.length && citesMissingText(textOf(p.enunciado ?? ''), p.materia ?? '');
+
+// Comando fala em termo destacado/sublinhado e nada vem marcado (nem no enunciado, nem nas alternativas, nem no texto, sem
+// anexo): a transcrição do PCI perde o negrito e a Quest às vezes também; sem saber qual é o termo, não dá para responder.
+export const lacksMark = (p: { enunciado: string; alternativas?: { texto: string }[]; textos?: string[]; anexos?: string[] }) =>
+  missingMark(p.enunciado ?? '') && !p.anexos?.length
+  && !(p.alternativas ?? []).some((a) => hasMark(a.texto)) && !(p.textos ?? []).some(hasMark);
+
+// `dropped`: ids das descartadas por falta de texto ou de destaque, para o importador tirar do banco as que entraram antes da regra.
 export function ownRows(exam: OwnExam, qidOf: (numero: number) => string): { rows: OwnRow[]; skipped: Record<string, number>; dropped: string[] } {
   const skipped: Record<string, number> = {};
   const dropped: string[] = [];
@@ -75,7 +98,7 @@ export function ownRows(exam: OwnExam, qidOf: (numero: number) => string): { row
     const qid = qidOf(q.numero);
     const textos = (q.texto_associado ?? '').split(/[,;\s]+/).filter(Boolean).map((k) => exam.textos?.[k]).filter((t): t is string => !!t).map(ownHtml);
     if (!textos.length && citesMissingText(q.enunciado, c.materia)) { skip('sem texto'); dropped.push(qid); continue; }
-    rows.push({
+    const row: OwnRow = {
       qid, materia: c.materia, assunto: c.assunto ?? '', gabarito,
       payload: {
         qid, enunciado: ownHtml(q.enunciado), tipo: ce ? 'certo e errado' : 'multipla escolha',
@@ -85,7 +108,9 @@ export function ownRows(exam: OwnExam, qidOf: (numero: number) => string): { row
         prova: { banca, ano: exam.prova.ano, orgao: exam.prova.orgao, cargo: exam.prova.cargo },
         materia: c.materia, assunto: c.assunto ?? '', carreiras: exam.classificacao?.carreiras ?? [], fonte: 'propria',
       },
-    });
+    };
+    if (lacksMark(row.payload)) { skip('sem destaque'); dropped.push(qid); continue; }
+    rows.push(row);
   }
   return { rows, skipped, dropped };
 }

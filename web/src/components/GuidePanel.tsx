@@ -1,4 +1,4 @@
-import { BookOpen, GalleryHorizontal, Info, CheckCircle2, Headphones, Landmark, Pause, Play, Printer, SkipBack, SkipForward, Sparkles, Square } from 'lucide-react';
+import { BookOpen, GalleryHorizontal, Info, CheckCircle2, Headphones, Landmark, Printer, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { dropHotDisclaimer } from '../../../shared/ai/hot.ts';
 import { missingMark, splitMarks } from '../../../shared/ai/marks.ts';
@@ -7,9 +7,9 @@ import { ReviewCards } from './ReviewCards.tsx';
 import { allReviewCards } from '../../../shared/domain/review-cards.ts';
 import { guideSpeech } from '../../../shared/ai/speech.ts';
 import { planNotes, stillUnverified, type Notes, type RelatedArticle } from '../../../shared/ai/related.ts';
-import { localVoiceSupported } from '../lib/piper.ts';
 import { supabase } from '../lib/supabase.ts';
-import { BROWSER_DEFAULT, CADU, RATES, useGuideVoice, voiceSupported } from '../lib/voice.ts';
+import { useGuideVoice } from '../lib/voice.ts';
+import { VoiceBar } from './VoiceBar.tsx';
 
 // Objetivos, esquema, prioridade, quadros, memorizar e questões vêm da guide-v4; apostilas antigas não os têm.
 interface GuideContent {
@@ -303,35 +303,7 @@ export function GuidePanel({ taskId, hasSession, initialDepth = 'completa', onGo
           </footer>
         </article>
       )}
-      {g && !loading && voice.status !== 'idle' && (
-        <div className="glass voice-bar no-print" role="group" aria-label="Leitor por voz">
-          <button className="icon-btn" aria-label="Seção anterior" title="Seção anterior" disabled={voice.section === 0} onClick={() => voice.jump(-1)}><SkipBack size={16} /></button>
-          {voice.status === 'playing'
-            ? <button className="btn sm" onClick={voice.pause}><Pause size={15} /> Pausar</button>
-            : <button className="btn sm" onClick={voice.play}><Play size={15} /> Continuar</button>}
-          <button className="icon-btn" aria-label="Próxima seção" title="Próxima seção" disabled={voice.section >= speech.length - 1} onClick={() => voice.jump(1)}><SkipForward size={16} /></button>
-          <button className="icon-btn" aria-label="Parar" title="Parar" onClick={voice.stop}><Square size={15} /></button>
-          <span className="voice-title small">{speech[voice.section]?.title}</span>
-          <select className="select voice-select" aria-label="Velocidade" value={voice.rate} onChange={(e) => voice.setRate(Number(e.target.value))}>
-            {RATES.map((r) => <option key={r} value={r}>{String(r).replace('.', ',')}x</option>)}
-          </select>
-          <select className="select voice-select" aria-label="Voz" value={voice.value} onChange={(e) => voice.setVoice(e.target.value)}>
-            {localVoiceSupported() && <option value={CADU}>Cadu</option>}
-            {voiceSupported() && (
-              <optgroup label="Voz do navegador">
-                {voice.voices.length ? voice.voices.map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>) : <option value={BROWSER_DEFAULT}>Padrão do navegador</option>}
-              </optgroup>
-            )}
-          </select>
-          {voice.loading && (
-            <span className="faint small" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-              <span className="spinner" /> {voice.download != null ? `Baixando a voz, só na primeira vez (63 MB): ${Math.round(voice.download * 100)}%` : 'Preparando o áudio…'}
-            </span>
-          )}
-          {!voice.isCadu && voiceSupported() && !voice.voices.length && <span className="faint small">Sem voz em português no navegador: a pronúncia pode sair errada.</span>}
-          {voice.error && <span className="error small">{voice.error}</span>}
-        </div>
-      )}
+      {g && !loading && <VoiceBar voice={voice} speech={speech} />}
     </div>
   );
 }

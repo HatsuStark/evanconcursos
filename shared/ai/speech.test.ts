@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { guideSpeech, speechChunks, speechParts, spoken } from './speech.ts';
+import { guideSpeech, lawLineSpoken, lawSpeech, romanToInt, speechChunks, speechParts, spoken } from './speech.ts';
 
 describe('leitura em voz alta', () => {
   it('fala abreviações e siglas por extenso', () => {
@@ -59,5 +59,27 @@ describe('revisão curta falada', () => {
   it('na completa, o mapa não é lido (as seções explicam)', () => {
     const keys = guideSpeech({ ...base, secoes: [{ titulo: 'S', texto: 'x', exemplos: [] }], esquema }).map((s) => s.key);
     expect(keys).not.toContain('mapa');
+  });
+});
+
+describe('lei seca em voz alta', () => {
+  const art = (over: Partial<{ id: string; label: string; heading: string; text: string; revoked: boolean }>) =>
+    ({ id: 'a1', label: '121', heading: 'Título I › Capítulo I - Dos Crimes contra a Vida', text: 'Art. 121. Matar alguém:', revoked: false, ...over });
+  it('converte algarismos romanos', () => {
+    expect(['I', 'IV', 'IX', 'XIV', 'XL', 'XC', 'LXXVIII'].map(romanToInt)).toEqual([1, 4, 9, 14, 40, 90, 78]);
+  });
+  it('fala inciso e alínea e tira notas de alteração', () => {
+    expect(lawLineSpoken('IV - à traição (Redação dada pela Lei nº 13.964, de 2019)')).toBe('Inciso 4: à traição.');
+    expect(lawLineSpoken('b) motivo fútil;')).toBe('Alínea b: motivo fútil;');
+    expect(lawLineSpoken('(Incluído pela Lei nº 1.234)')).toBe('');
+  });
+  it('um artigo por seção, anunciando o capítulo só quando muda', () => {
+    const s = lawSpeech([art({}), art({ id: 'a2', label: '122', text: 'Art. 122. Induzir alguém\nI - por motivo egoístico' })]);
+    expect(s.map((x) => x.key)).toEqual(['a1', 'a2']);
+    expect(s[0]!.chunks.join(' ')).toBe('Capítulo I - Dos Crimes contra a Vida. artigo 121. Matar alguém:');
+    expect(s[1]!.chunks.join(' ')).toBe('artigo 122. Induzir alguém. Inciso 1: por motivo egoístico.');
+  });
+  it('artigo revogado é só anunciado', () => {
+    expect(lawSpeech([art({ revoked: true, text: 'Art. 121. (Revogado)' })])[0]!.chunks.join(' ')).toContain('artigo 121: revogado.');
   });
 });

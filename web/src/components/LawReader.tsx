@@ -1,11 +1,14 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, Highlighter, Search, StickyNote } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { ExternalLink, Headphones, Highlighter, Search, StickyNote } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { lawSpeech } from '../../../shared/ai/speech.ts';
 import { unlistedNorms, type UnlistedNorm } from '../../../shared/legal/norms.ts';
 import type { LawRef } from '../../../shared/legal/refs.ts';
 import { LAWS, lawByKey, type LawEntry } from '../../../shared/legal/registry.ts';
 import { rangesLabel, saveMark, useLawArticles, useMarks, type Article, type Mark } from '../lib/legal.ts';
+import { useGuideVoice } from '../lib/voice.ts';
 import { LawUpload } from './LawUpload.tsx';
+import { VoiceBar } from './VoiceBar.tsx';
 
 const COLORS = ['yellow', 'green', 'pink', 'blue'] as const;
 
@@ -44,14 +47,24 @@ function LawBlock({ lawRef, own }: { lawRef: LawRef; own: LawEntry[] }) {
   const span = q.data?.span;
   const partial = span && span.first.num > 1 ? { first: span.first.label, last: span.last.label } : null;
   const resend = partial ? unlistedNorms(q.data!.norm.name)[0] ?? null : null;
+  // Ouvir: lê os artigos mostrados (os da sessão ou o resultado da busca), um por vez, destacando o lido.
+  const speech = useMemo(() => lawSpeech(articles), [articles]);
+  const voice = useGuideVoice(speech);
+  const box = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (voice.activeKey) box.current?.querySelector(`[data-voice="${CSS.escape(voice.activeKey)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [voice.activeKey]);
 
   return (
-    <section className="glass law-block">
+    <section ref={box} className="glass law-block">
       <header className="law-head">
         <div>
           <strong style={{ fontSize: 17 }}>{law.name}</strong>
           <div className="muted small">{law.short} · {rangesLabel(lawRef)}{q.data?.norm.version === 'Original' ? ' · texto original (sem compilação atualizada)' : ''}</div>
         </div>
+        {!!articles.length && voice.status === 'idle' && (
+          <button className="btn ghost sm no-print" onClick={voice.play} title="Ouvir os artigos em voz alta"><Headphones size={15} /> Ouvir</button>
+        )}
         {!lawRef.ranges.length && (
           <label className="law-search"><Search size={15} /><input className="input" placeholder="Artigo (ex.: 121) ou palavra" value={search} onChange={(e) => setSearch(e.target.value)} /></label>
         )}
@@ -68,7 +81,8 @@ function LawBlock({ lawRef, own }: { lawRef: LawRef; own: LawEntry[] }) {
       )}
       <div className="law-articles">
         {articles.map((a, i) => (
-          <ArticleView key={a.id} a={a} showHeading={i === 0 || articles[i - 1]!.heading !== a.heading} mark={marks.data?.find((m) => m.article_id === a.id)} />
+          <ArticleView key={a.id} a={a} showHeading={i === 0 || articles[i - 1]!.heading !== a.heading} mark={marks.data?.find((m) => m.article_id === a.id)}
+            speaking={voice.activeKey === a.id} onListen={() => voice.playFrom(i)} />
         ))}
       </div>
       {!lawRef.ranges.length && !search && (q.data?.articles.length ?? 0) > 40 && <p className="faint small">Mostrando os 40 primeiros artigos. Use a busca para ir a um artigo.</p>}
@@ -87,11 +101,12 @@ function LawBlock({ lawRef, own }: { lawRef: LawRef; own: LawEntry[] }) {
               Texto para estudo; o oficial é o publicado no Diário Oficial da União.</>}
         </footer>
       )}
+      <VoiceBar voice={voice} speech={speech} unit="artigo" />
     </section>
   );
 }
 
-function ArticleView({ a, showHeading, mark }: { a: Article; showHeading: boolean; mark?: Mark }) {
+function ArticleView({ a, showHeading, mark, speaking, onListen }: { a: Article; showHeading: boolean; mark?: Mark; speaking: boolean; onListen: () => void }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [note, setNote] = useState(mark?.note ?? '');
@@ -100,7 +115,7 @@ function ArticleView({ a, showHeading, mark }: { a: Article; showHeading: boolea
   return (
     <>
       {showHeading && a.heading && <div className="law-heading">{a.heading.split(' › ').slice(-2).join(' › ')}</div>}
-      <article className={'law-article' + (a.revoked ? ' revoked' : '') + (mark ? ` mark-${mark.color}` : '')} id={`art-${a.label}`}>
+      <article data-voice={a.id} className={'law-article' + (a.revoked ? ' revoked' : '') + (mark ? ` mark-${mark.color}` : '') + (speaking ? ' speaking' : '')} id={`art-${a.label}`}>
         <p>{first}</p>
         {rest.map((line, i) => <p key={i} className={/^(§|Parágrafo único)/.test(line) ? 'para' : /^[IVXLC]+\s*-/.test(line) ? 'inciso' : /^[a-z]\)/.test(line) ? 'alinea' : ''}>{line}</p>)}
         {!!a.notes.length && <details className="law-notes"><summary>{a.notes.length} nota(s) de alteração</summary>{a.notes.map((n, i) => <div key={i}>{n}</div>)}</details>}
@@ -108,6 +123,7 @@ function ArticleView({ a, showHeading, mark }: { a: Article; showHeading: boolea
           <Highlighter size={14} />
           {COLORS.map((c) => <button key={c} className={`dot dot-${c}` + (mark?.color === c ? ' on' : '')} aria-label={`Marcar em ${c}`} onClick={() => save(mark?.color === c ? null : c)} />)}
           <button className="link-btn" onClick={() => setEditing(!editing)}><StickyNote size={14} /> {mark?.note ? 'Ver nota' : 'Anotar'}</button>
+          {!speaking && <button className="link-btn" onClick={onListen}><Headphones size={14} /> Ouvir daqui</button>}
         </div>
         {editing && (
           <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>

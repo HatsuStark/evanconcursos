@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LETTERS, type TutorQuestion } from '../domain/tutor.ts';
-import { applyVerdicts, cleanExample, cleanQuestions, lessonUsable, shuffleOptions, tutorCacheKey, tutorQuestionsPrompt } from './tutor.ts';
+import { applyVerdicts, cleanConcepts, cleanExample, cleanScheme, cleanQuestions, lessonUsable, shuffleOptions, tutorCacheKey, tutorQuestionsPrompt } from './tutor.ts';
 
 const concepts = [{ id: 'c1', nome: 'Legalidade', essencial: '', explicacao: '', outro_jeito: '', base: '' }];
 const q = (id: string, extra: Partial<TutorQuestion> = {}): TutorQuestion => ({
@@ -81,5 +81,27 @@ describe('aula', () => {
     expect(p).toContain('fixacao');
     expect(p).not.toContain('diagnostico:');
     expect(p).toContain('é o formato da banca');
+  });
+});
+
+describe('esquema e mnemônico do conceito', () => {
+  const cmp = { tipo: 'comparacao', titulo: 'Anulação x revogação', colunas: ['Aspecto', 'Anulação', 'Revogação'], linhas: [['Motivo', 'ilegalidade', 'conveniência'], ['Efeitos', 'ex tunc', 'ex nunc', 'sobra'], ['', 'sem aspecto', 'x']], itens: [] };
+  it('acerta as linhas da comparação às colunas e descarta linha sem aspecto', () => {
+    expect(cleanScheme(cmp)?.linhas).toEqual([['Motivo', 'ilegalidade', 'conveniência'], ['Efeitos', 'ex tunc', 'ex nunc']]);
+  });
+  it('descarta esquema incompleto ou "nenhum"', () => {
+    expect(cleanScheme({ ...cmp, linhas: [['Motivo', 'a', 'b']] })).toBeNull();
+    expect(cleanScheme({ ...cmp, colunas: ['Aspecto', 'Só um'] })).toBeNull();
+    expect(cleanScheme({ tipo: 'passos', titulo: '', colunas: [], linhas: [], itens: ['a', 'b'] })).toBeNull();
+    expect(cleanScheme({ tipo: 'nenhum', titulo: '', colunas: [], linhas: [], itens: [] })).toBeNull();
+    expect(cleanScheme({ tipo: 'passos', titulo: 'Fases', colunas: ['x'], linhas: [], itens: ['a', ' ', 'b', 'c'] })).toEqual({ tipo: 'passos', titulo: 'Fases', colunas: [], linhas: [], itens: ['a', 'b', 'c'] });
+  });
+  it('tira mnemônico ou esquema que cite artigo fora das fontes', () => {
+    const [c] = cleanConcepts([{ ...concepts[0]!, mnemonico: 'Lembre do art. 5º da CF', esquema: { ...cmp, titulo: 'CF, art. 99' } }], { provided, subject: 'Direito Constitucional' });
+    expect(c!.mnemonico).toBe('');
+    expect(c!.esquema).toBeNull();
+    const [ok] = cleanConcepts([{ ...concepts[0]!, mnemonico: ' LIMPE ', esquema: cmp }], { provided, subject: 'Direito Constitucional' });
+    expect(ok!.mnemonico).toBe('LIMPE');
+    expect(ok!.esquema?.tipo).toBe('comparacao');
   });
 });

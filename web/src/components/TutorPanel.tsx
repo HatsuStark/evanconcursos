@@ -5,11 +5,12 @@ import { BookOpen, ChevronDown, GraduationCap, ListChecks, Play, RotateCcw, Targ
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ymd } from '../../../shared/domain/dates.ts';
-import { applyAnswer, initialState, isStrong, LEVEL_LABEL, markTaught, needsExample, needsTeaching, offersRoadmap, progress, reportQuestion, scheduleAfterLesson, STAGE_LABEL, STAGE_ORDER, summarize, syncQueue, type AnswerLog, type ConceptOutcome, type Level, type TutorLesson } from '../../../shared/domain/tutor.ts';
+import { applyAnswer, bestStreak, conceptStatuses, initialState, isStrong, LEVEL_LABEL, markRecapped, markTaught, needsExample, needsTeaching, offersRoadmap, pendingRecap, progress, reportQuestion, scheduleAfterLesson, STAGE_LABEL, STAGE_ORDER, summarize, syncQueue, type AnswerLog, type ConceptOutcome, type TutorLesson } from '../../../shared/domain/tutor.ts';
 import { missingMark } from '../../../shared/ai/marks.ts';
 import { createSession, fetchPractice, knownConcepts, lastTaskSession, saveLessonConcepts, saveSession, waitLesson, type SavedState, type TutorSessionRow } from '../lib/tutor.ts';
 import { fmtDate } from './ui.tsx';
 import { TutorQuestionCard, WorkedExampleCard } from './TutorQuestion.tsx';
+import { ConceptMap, PocketCard, StageRecap } from './TutorVisuals.tsx';
 import { QuestionsPanel } from './QuestionsPanel.tsx';
 import type { Question } from '../lib/questions.ts';
 import { useQueryClient } from '@tanstack/react-query';
@@ -158,6 +159,10 @@ export function TutorPanel({ taskId, planId, subjectId, subject, banca, title, e
   const cur = q ? group(q.id) : undefined;
   const inStage = { done: saved.logs.filter((l) => group(l.qid) === cur).length, total: saved.logs.filter((l) => group(l.qid) === cur).length + saved.queue.filter((id) => group(id) === cur).length };
   const stage = q ? STAGE_ORDER.indexOf(q.etapa === 'reforco' ? 'construcao' : q.etapa) : STAGE_ORDER.length;
+  // Ao avançar de etapa, antes da primeira pergunta da nova: o cartão de recapitulação da que terminou.
+  const recap = q && !shown ? pendingRecap(saved, q) : null;
+  // O conceito em ensino só acende no mapa na construção: nas etapas de lembrar, ele entregaria a resposta.
+  const teaching = q && (q.etapa === 'construcao' || q.etapa === 'reforco') ? q.conceito : undefined;
   return (
     <div className="grid" style={{ gap: 14 }}>
       <div className="glass card tutor-head">
@@ -165,13 +170,17 @@ export function TutorPanel({ taskId, planId, subjectId, subject, banca, title, e
           {STAGE_ORDER.map((e, i) => <span key={e} className={'tutor-stage' + (i < stage ? ' done' : i === stage ? ' on' : '')}>{STAGE_LABEL[e]}</span>)}
         </div>
         <div className="bar"><span style={{ width: `${p.pct}%`, background: 'var(--violet)' }} /></div>
+        <ConceptMap lesson={saved.lesson} state={saved} current={teaching} />
         <div className="tutor-count">
           {q && <strong>{STAGE_LABEL[q.etapa]}: pergunta {inStage.done + (shown ? 0 : 1)} de {inStage.total}</strong>}
           <span className="faint small">Aula: {p.done} de {p.total}{saved.lesson.parcial && !saved.incomplete ? '+' : ''} perguntas · estudo didático, fora da meta de questões</span>
         </div>
       </div>
       {error && <p className="error">{error}</p>}
-      {q && !shown && needsExample(saved, saved.lesson, q) ? (
+      {q && recap ? (
+        <StageRecap stage={recap} next={STAGE_ORDER[stage] ?? 'final'} lesson={saved.lesson} state={saved}
+          onContinue={() => { const cur = stateRef.current; if (cur) update({ ...cur, recapped: markRecapped(cur, recap).recapped }); }} />
+      ) : q && !shown && needsExample(saved, saved.lesson, q) ? (
         <WorkedExampleCard example={saved.lesson.exemplo!} concept={saved.lesson.conceitos.find((c) => c.id === saved.lesson.exemplo!.conceito)}
           onDone={() => { const cur = stateRef.current; if (cur) update({ ...cur, exampleSeen: true }); }} />
       ) : q ? (
@@ -185,38 +194,42 @@ export function TutorPanel({ taskId, planId, subjectId, subject, banca, title, e
   );
 }
 
-const LEVEL_ORDER: Level[] = ['atencao', 'em_progresso', 'dominado'];
-const LEVEL_COLOR: Record<Level, string> = { dominado: 'lime', em_progresso: 'cyan', atencao: 'orange' };
+// Tempo de estudo (só o tempo entre respostas, sem as pausas longas).
+function studyTime(s: number) {
+  const m = Math.round(s / 60);
+  if (m < 1) return '<1 min';
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`;
+}
 
 function TutorSummary({ lesson, state, finishedAt, examDate, taskId, planId, onRestart, onGoQuestions, onGoApostila }: {
   lesson: TutorLesson; state: SavedState; finishedAt: string | null; examDate: string | null; taskId: string; planId: string; onRestart: () => void; onGoQuestions?: () => void; onGoApostila?: () => void;
 }) {
   const outcomes = summarize(lesson, state);
-  const known = lesson.conceitos.filter((c) => state.known.includes(c.id) && !outcomes.some((o) => o.id === c.id));
   const strong = state.logs.filter(isStrong).length;
   const day = finishedAt ? ymd(new Date(finishedAt)) : ymd(new Date());
   const firstReview = outcomes.map((o) => scheduleAfterLesson(null, o.level, day, examDate).due_on).filter(Boolean).sort()[0];
   const attention = outcomes.filter((o) => o.level === 'atencao');
-  const group = (lv: Level) => outcomes.filter((o) => o.level === lv);
+  // Contagem igual ao mapa: "já sabia" conta como dominado.
+  const statuses = conceptStatuses(lesson, state).filter((c) => c.status !== 'pendente');
+  const mastered = statuses.filter((c) => c.status === 'dominado' || c.status === 'conhecido').length;
+  const streak = bestStreak(state.logs);
   return (
     <div className="glass card tutor-summary">
       <h2><GraduationCap size={22} style={{ color: 'var(--violet)' }} /> Aula concluída</h2>
-      <div className="stats">
-        <div className="stat"><strong style={{ color: 'var(--violet)' }}>{outcomes.length + known.length}</strong><span>conceitos</span></div>
-        <div className="stat"><strong style={{ color: 'var(--lime)' }}>{group('dominado').length + known.length}</strong><span>dominados</span></div>
+      <p className="muted" style={{ margin: 0 }}>{lesson.titulo}</p>
+      <ConceptMap lesson={lesson} state={state} legend />
+      <div className="stats tutor-stats">
+        <div className="stat"><strong style={{ color: 'var(--lime)' }}>{mastered}/{statuses.length}</strong><span>conceitos dominados</span></div>
         <div className="stat"><strong style={{ color: 'var(--cyan)' }}>{strong}/{state.logs.length}</strong><span>de primeira, sem ajuda</span></div>
+        <div className="stat"><strong style={{ color: 'var(--violet)' }}>{streak}</strong><span>melhor sequência</span></div>
+        <div className="stat"><strong>{studyTime(state.elapsed ?? 0)}</strong><span>de estudo</span></div>
       </div>
-      {LEVEL_ORDER.map((lv) => group(lv).length ? (
-        <section key={lv}>
-          <h3><span className={'badge ' + LEVEL_COLOR[lv]}>{LEVEL_LABEL[lv]}</span></h3>
-          <ul className="advice">{group(lv).map((o: ConceptOutcome) => <li key={o.id}>{o.nome}</li>)}</ul>
-        </section>
-      ) : null)}
-      {!!known.length && <section><h3><span className="badge lime">Já sabia</span></h3><ul className="advice">{known.map((c) => <li key={c.id}>{c.nome}</li>)}</ul></section>}
+      {!!attention.length && <p style={{ margin: 0 }}><span className="badge orange">{LEVEL_LABEL.atencao}</span> {attention.map((o: ConceptOutcome) => o.nome).join(' · ')}</p>}
       <p className="muted" style={{ margin: 0 }}>
         {firstReview ? <>Revisões espaçadas agendadas: a primeira em <b>{fmtDate(firstReview)}</b>, com perguntas novas. {attention.length ? 'Os conceitos que pedem atenção voltam antes e com mais frequência.' : ''}</> : 'Sem revisões agendadas: a prova está muito perto.'}
       </p>
       <p className="faint small" style={{ margin: 0 }}>Esta aula não conta na meta de questões da tarefa. Para treinar para a prova, resolva questões reais da banca.</p>
+      <PocketCard lesson={lesson} state={state} />
       <RealPractice lesson={lesson} outcomes={outcomes} taskId={taskId} planId={planId} onGoQuestions={onGoQuestions} />
       <div className="tutor-help">
         {onGoQuestions && <button className="btn ghost" onClick={onGoQuestions}><ListChecks size={16} /> Todas as questões da tarefa</button>}

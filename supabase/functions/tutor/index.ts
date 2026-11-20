@@ -26,6 +26,7 @@ import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.
 import { loadLawSources } from '../_shared/law.ts';
 import { plain, withStatus, type PublicQuestion } from '../_shared/qbank.ts';
 import { materiaOf, type SessionFilter } from '../../../shared/qbank/map.ts';
+import { lacksMark, lacksText } from '../../../shared/qbank/own.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -250,7 +251,8 @@ async function practice(auth: Auth, admin: Admin, body: Record<string, unknown>)
   const { data: notice } = subject?.notice_id ? await auth.client.from('notices').select('board').eq('id', subject.notice_id).maybeSingle() : { data: null };
   const materias = [...new Set(filter.assuntos.map((a) => materiaOf(filter, a)!).filter(Boolean))];
   const { data: rows } = await admin.from('qbank_questions').select('qid, payload').in('materia', materias).in('assunto', filter.assuntos).not('qid', 'like', 'ia-%').limit(400);
-  const all = (rows ?? []).map((r) => r.payload as PublicQuestion).filter((q) => q?.qid && q.enunciado);
+  // Sem o texto citado ou sem o termo destacado marcado, a questão não tem como ser respondida.
+  const all = (rows ?? []).map((r) => r.payload as PublicQuestion).filter((q) => q?.qid && q.enunciado && !lacksText(q) && !lacksMark(q));
   const { data: done } = all.length ? await admin.from('question_attempts').select('qid').eq('owner_id', auth.user.id).in('qid', all.map((q) => q.qid)).limit(2000) : { data: [] };
   const answered = new Set((done ?? []).map((d) => d.qid as string));
   const board = normalizeText(String(notice?.board ?? ''));

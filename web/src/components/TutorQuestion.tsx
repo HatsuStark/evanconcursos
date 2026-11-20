@@ -5,6 +5,7 @@ import { Fragment, useMemo, useRef, useState } from 'react';
 import { answerOptions, canAskHelp, checkClosed, LETTERS, type WorkedExample, matchesText, shuffledOrder, STAGE_LABEL, type AnswerLog, type TutorConcept, type TutorQuestion } from '../../../shared/domain/tutor.ts';
 import { missingMark, splitMarks } from '../../../shared/ai/marks.ts';
 import { gradeAnswer, reportTutorQuestion } from '../lib/tutor.ts';
+import { ConceptVisuals } from './TutorVisuals.tsx';
 
 // Trecho que o comando chama de "destacado" vem entre **…** e aparece em negrito.
 const Marked = ({ text }: { text: string }) => <>{splitMarks(text).map((p, i) => (p.bold ? <b key={i}>{p.text}</b> : <span key={i}>{p.text}</span>))}</>;
@@ -97,6 +98,7 @@ export function TutorQuestionCard({ q, concept, subject, lessonKey, taskId, pool
         <div className="q-meta"><span className="badge violet">Novo conceito</span><span className="muted small">modo iniciante</span></div>
         <h3><BookOpen size={18} /> {concept.nome}</h3>
         <p>{concept.explicacao}</p>
+        <ConceptVisuals concept={concept} />
         {concept.outro_jeito && <div className="tutor-aside"><Lightbulb size={16} /> <span>{concept.outro_jeito}</span></div>}
         {concept.base && <p className="faint small">Base: {concept.base}</p>}
         <p className="faint small">Leia com atenção: em seguida vem uma pergunta para conferir se a ideia ficou clara.</p>
@@ -238,6 +240,7 @@ export function TutorQuestionCard({ q, concept, subject, lessonKey, taskId, pool
             {wrongWhy && <p><b>Por que a {result.response} não serve:</b> {wrongWhy}</p>}
             <p><Marked text={q.explicacao} /></p>
             {!result.correct && concept?.explicacao && concept.explicacao !== q.explicacao && <p className="muted">{concept.explicacao}</p>}
+            {!result.correct && concept && <ConceptVisuals concept={concept} />}
             {other && concept?.outro_jeito && <p><b>De outro jeito:</b> {concept.outro_jeito}</p>}
             {concept?.base && <p className="faint small">Base: {concept.base}</p>}
           </section>

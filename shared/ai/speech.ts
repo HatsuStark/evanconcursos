@@ -76,6 +76,35 @@ export const AI_VOICES = [
 ] as const;
 export const aiVoiceById = (id: string) => AI_VOICES.find((v) => v.id === id);
 
+// Lei seca em voz alta: cada artigo é uma seção (key = id do artigo). Inciso e alínea por extenso, notas de alteração
+// "(Redação dada pela Lei...)" fora, e o capítulo anunciado quando muda.
+interface SpeakableArticle { id: string; label: string; heading: string; text: string; revoked: boolean }
+const ROMAN: Record<string, number> = { I: 1, V: 5, X: 10, L: 50, C: 100 };
+export function romanToInt(r: string): number {
+  let n = 0;
+  for (let i = 0; i < r.length; i++) {
+    const v = ROMAN[r[i]!] ?? 0, next = ROMAN[r[i + 1] ?? ''] ?? 0;
+    n += v < next ? -v : v;
+  }
+  return n;
+}
+const ALTERATION = /\s*\((?:Reda[çc][ãa]o dada|Inclu[íi]d[oa]|Acrescid[oa]|Renumerad[oa]|Revogad[oa]|Vide|Vig[êe]ncia|Regulamento|Promulga[çc][ãa]o)[^)]*\)/gi;
+export function lawLineSpoken(line: string): string {
+  const t = line.replace(ALTERATION, '').trim()
+    .replace(/^([IVXLC]+)\s*[-–—]\s*/, (_, r: string) => `Inciso ${romanToInt(r)}: `)
+    .replace(/^([a-z])\)\s*/, (_, l: string) => `Alínea ${l}: `);
+  return !t || /[.!?;:]$/.test(t) ? t : `${t}.`;
+}
+export function lawSpeech(articles: SpeakableArticle[]): SpeechSection[] {
+  return articles.map((a, i) => {
+    const title = `Art. ${a.label}`;
+    const head = a.heading.split(' › ').pop()?.trim() ?? '';
+    const intro = head && (i === 0 || articles[i - 1]!.heading !== a.heading) ? [lawLineSpoken(head)] : [];
+    const lines = a.revoked ? [`${title}: revogado.`] : a.text.split('\n').map(lawLineSpoken);
+    return { key: a.id, title, chunks: [...intro, ...lines].filter(Boolean).flatMap(speechChunks) };
+  });
+}
+
 export function guideSpeech(g: SpeakableGuide): SpeechSection[] {
   // Ponto depois do título: a voz faz a pausa antes do texto.
   const heading = (t: string) => (/[.!?:]$/.test(t.trim()) ? t : `${t}.`);

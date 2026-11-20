@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addDays, answerOptions, applyAnswer, needsExample, offersRoadmap, checkClosed, conceptLevel, interleave, isNovice, markTaught, needsTeaching, dueConcepts, initialState, matchesText, progress, reportQuestion, scheduleAfterLesson, scheduleAfterReview, shuffledOrder, summarize, syncQueue, type AnswerLog, type Etapa, type TutorLesson, type TutorQuestion } from './tutor.ts';
+import { addDays, bestStreak, conceptStatuses, markRecapped, pendingRecap, stageLogs, answerOptions, applyAnswer, needsExample, offersRoadmap, checkClosed, conceptLevel, interleave, isNovice, markTaught, needsTeaching, dueConcepts, initialState, matchesText, progress, reportQuestion, scheduleAfterLesson, scheduleAfterReview, shuffledOrder, summarize, syncQueue, type AnswerLog, type Etapa, type TutorLesson, type TutorQuestion } from './tutor.ts';
 
 const q = (id: string, etapa: Etapa, conceito: string, extra: Partial<TutorQuestion> = {}): TutorQuestion => ({
   id, etapa, conceito, estilo: 'conceito', formato: 'certo_errado', enunciado: id, alternativas: [], gabarito: 'C', aceitas: [], dica: '', explicacao: '', erros: [], ...extra,
@@ -182,5 +182,34 @@ describe('exemplo resolvido', () => {
     const after = applyAnswer(s, withEx, log('a1', 'aplicacao', 'c1', true));
     expect(offersRoadmap(after, withEx, a1)).toBe(true);
     expect(offersRoadmap(after, withEx, a2)).toBe(false);
+  });
+});
+
+describe('recapitulação, mapa de conceitos e sequência', () => {
+  const base = initialState(lesson);
+  it('recapitula a etapa que terminou ao avançar, uma vez só', () => {
+    const s = { ...base, logs: [log('d1', 'diagnostico', 'c1', false), log('d2', 'diagnostico', 'c2', false)] };
+    expect(pendingRecap(base, q('d1', 'diagnostico', 'c1'))).toBeNull();
+    expect(pendingRecap(s, q('k1', 'construcao', 'c1'))).toBe('diagnostico');
+    expect(pendingRecap(markRecapped(s, 'diagnostico'), q('k1', 'construcao', 'c1'))).toBeNull();
+  });
+  it('reforço no meio da aplicação não fecha etapa nem reabre a construção', () => {
+    const s = markRecapped({ ...base, logs: [log('k1', 'construcao', 'c1', true), log('a1', 'aplicacao', 'c1', false)] }, 'construcao');
+    expect(pendingRecap(s, q('r1', 'reforco', 'c1'))).toBeNull();
+    const back = { ...s, logs: [...s.logs, log('r1', 'reforco', 'c1', true)] };
+    expect(pendingRecap(back, q('a2', 'aplicacao', 'c1'))).toBeNull();
+    expect(pendingRecap(back, q('f1', 'fixacao', 'c1'))).toBe('aplicacao');
+  });
+  it('respostas do reforço contam na construção', () => {
+    const s = { ...base, logs: [log('k1', 'construcao', 'c1', false), log('r1', 'reforco', 'c1', true), log('a1', 'aplicacao', 'c1', true)] };
+    expect(stageLogs(s, 'construcao').map((l) => l.qid)).toEqual(['k1', 'r1']);
+  });
+  it('mapa: pendente, já sabia, em construção e dominado', () => {
+    expect(conceptStatuses(lesson, { logs: [], known: ['c2'] }).map((c) => c.status)).toEqual(['pendente', 'conhecido']);
+    expect(conceptStatuses(lesson, { logs: [log('k1', 'construcao', 'c1', true)], known: [] })[0]!.status).toBe('em_progresso');
+    expect(conceptStatuses(lesson, { logs: [log('k1', 'construcao', 'c1', true), log('f1', 'fixacao', 'c1', true)], known: [] })[0]!.status).toBe('dominado');
+  });
+  it('maior sequência de acertos sem ajuda', () => {
+    expect(bestStreak([log('a', 'construcao', 'c1', true), log('b', 'construcao', 'c1', true), log('c', 'construcao', 'c1', true, { hint: true }), log('d', 'fixacao', 'c1', true)])).toBe(2);
   });
 });

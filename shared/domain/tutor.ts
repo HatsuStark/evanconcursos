@@ -16,7 +16,13 @@ export interface TutorConcept {
   explicacao: string;    // explicação breve, mostrada a pedido ou depois de errar
   outro_jeito: string;   // analogia ou exemplo: "Explicar de outro jeito"
   base: string;          // dispositivo legal fornecido (ex.: "CF, art. 37") ou ''
+  mnemonico?: string;    // frase curta para lembrar (tutor-v5; '' quando nenhuma é natural)
+  esquema?: ConceptScheme | null; // síntese visual (tutor-v5); aulas antigas não têm
 }
+
+// Síntese visual do conceito: comparação lado a lado (colunas + linhas, a 1ª coluna é o aspecto comparado) ou passos
+// em ordem (itens).
+export interface ConceptScheme { tipo: 'comparacao' | 'passos'; titulo: string; colunas: string[]; linhas: string[][]; itens: string[] }
 
 export interface TutorQuestion {
   id: string;
@@ -58,6 +64,7 @@ export interface TutorState {
   novice?: boolean;    // modo iniciante: o diagnóstico mostrou que o tema é novo; cada conceito abre com um cartão de ensino
   taught?: string[];   // conceitos cujo cartão de ensino já foi mostrado
   exampleSeen?: boolean; // o exemplo resolvido da aplicação já foi mostrado
+  recapped?: Etapa[];  // etapas cuja recapitulação já foi mostrada
 }
 
 // Ordem das etapas na aula. Reforço não entra na fila inicial: só aparece depois de um erro.
@@ -165,6 +172,26 @@ export function reportQuestion(state: TutorState, qid: string): TutorState {
   return { ...state, queue: state.queue.filter((id) => id !== qid), logs: state.logs.filter((l) => l.qid !== qid), reported: [...new Set([...state.reported, qid])] };
 }
 
+// Recapitulação entre etapas: ao passar para uma etapa adiante, a que terminou ganha um cartão de resumo, uma vez.
+// Reforço conta como construção: voltar a um reforço no meio da aplicação não fecha etapa.
+export function pendingRecap(state: TutorState, q: TutorQuestion): Etapa | null {
+  if (q.etapa === 'revisao') return null;
+  const ranks = state.logs.filter((l) => l.etapa !== 'revisao').map((l) => rank(l.etapa));
+  if (!ranks.length) return null;
+  const last = Math.max(...ranks), stage = STAGE_ORDER[last]!;
+  return rank(q.etapa) > last && !(state.recapped ?? []).includes(stage) ? stage : null;
+}
+export const markRecapped = (state: TutorState, stage: Etapa): TutorState => ({ ...state, recapped: [...new Set([...(state.recapped ?? []), stage])] });
+// Respostas de uma etapa (as do reforço contam na construção).
+export const stageLogs = (state: TutorState, stage: Etapa) => state.logs.filter((l) => STAGE_ORDER[rank(l.etapa)] === stage);
+
+// Maior sequência de acertos fortes (de primeira e sem ajuda).
+export function bestStreak(logs: AnswerLog[]) {
+  let best = 0, cur = 0;
+  for (const l of logs) { cur = isStrong(l) ? cur + 1 : 0; best = Math.max(best, cur); }
+  return best;
+}
+
 export function progress(state: TutorState) {
   const done = state.logs.length, total = done + state.queue.length;
   return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
@@ -188,6 +215,18 @@ export function conceptLevel(logs: AnswerLog[]): Level | null {
   if (logs.some((l) => l.etapa === 'final' && !l.correct) || (wrong >= 2 && strong < 2)) return 'atencao';
   if (strongLate && !wrongLate && strong > wrong) return 'dominado';
   return 'em_progresso';
+}
+
+// Situação de cada conceito durante a aula (mapa de conceitos): ainda não visto, já sabia (diagnóstico ou aula anterior)
+// ou o domínio medido até aqui. Dominado só aparece depois da fixação: acertar na construção ainda é construção.
+export type ConceptStatus = Level | 'conhecido' | 'pendente';
+export function conceptStatuses(lesson: Pick<TutorLesson, 'conceitos'>, state: Pick<TutorState, 'logs' | 'known'>): { id: string; nome: string; status: ConceptStatus }[] {
+  return lesson.conceitos.map((c) => {
+    const level = conceptLevel(state.logs.filter((l) => l.conceito === c.id));
+    const known = state.known.includes(c.id);
+    const status: ConceptStatus = level === 'dominado' || level === 'atencao' ? level : known ? 'conhecido' : level ?? 'pendente';
+    return { id: c.id, nome: c.nome, status };
+  });
 }
 
 export interface ConceptOutcome { id: string; nome: string; level: Level; strong: number; weak: number; wrong: number }

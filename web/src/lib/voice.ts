@@ -1,5 +1,5 @@
 // Leitor por voz da apostila: voz Cadu (Piper, gerada no aparelho) ou voz do navegador. Ambas sem custo por uso.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { speechParts, type SpeechSection } from '../../../shared/ai/speech.ts';
 import { clearLocalAudio, localPartUrl, localVoiceSupported } from './piper.ts';
 
@@ -26,7 +26,10 @@ function silentUrl() {
 // Sem escolha salva (ou com uma voz antiga: Faber ou de IA), usa a Cadu quando o aparelho aceita.
 const isCadu = (choice: string) => localVoiceSupported() && (!choice || choice === CADU || choice === 'faber' || choice.startsWith('ai:'));
 
+const VOICE_START = 'app-voice-start';
+
 export function useGuideVoice(sections: SpeechSection[]) {
+  const id = useId();
   const [status, setStatus] = useState<'idle' | 'playing' | 'paused'>('idle');
   const [loading, setLoading] = useState(false);
   const [download, setDownload] = useState<number | null>(null);
@@ -46,6 +49,8 @@ export function useGuideVoice(sections: SpeechSection[]) {
   const current = useRef<SpeechSynthesisUtterance | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
   const loaded = useRef('');   // trecho carregado no <audio>: continuar da pausa sem gerar de novo
+  const statusRef = useRef(status);
+  statusRef.current = status;
   const prefs = useRef({ rate, cadu, browserVoice });
   prefs.current = { rate, cadu, browserVoice };
 
@@ -144,6 +149,8 @@ export function useGuideVoice(sections: SpeechSection[]) {
 
   const play = useCallback(() => {
     halt();
+    // Um leitor por vez no app: os outros (outra lei, a apostila) param ao ouvir este aviso.
+    window.dispatchEvent(new CustomEvent(VOICE_START, { detail: id }));
     const mine = run.current;
     setError(''); setStatus('playing');
     if (prefs.current.cadu) {
@@ -168,6 +175,15 @@ export function useGuideVoice(sections: SpeechSection[]) {
     if (status === 'playing') play();
   }, [sections.length, status, play, halt, unload]);
 
+  // Começa (ou pula para) uma seção específica: "ouvir daqui" num artigo.
+  const playFrom = useCallback((index: number) => {
+    const to = Math.max(0, Math.min(sections.length - 1, index));
+    halt(); unload();
+    pos.current = { section: to, chunk: 0 };
+    setSection(to);
+    play();
+  }, [sections.length, play, halt, unload]);
+
   // Mudar a velocidade: no áudio vale na hora; na voz do navegador, recomeça a frase atual.
   const setRate = useCallback((r: number) => {
     setRateState(r); store('voice-rate', String(r)); prefs.current.rate = r;
@@ -191,9 +207,17 @@ export function useGuideVoice(sections: SpeechSection[]) {
     window.addEventListener('pagehide', halt);
     return () => window.removeEventListener('pagehide', halt);
   }, [halt]);
+  useEffect(() => {
+    const other = (e: Event) => {
+      if ((e as CustomEvent).detail === id || statusRef.current !== 'playing') return;
+      halt(); setLoading(false); setStatus('paused');
+    };
+    window.addEventListener(VOICE_START, other);
+    return () => window.removeEventListener(VOICE_START, other);
+  }, [id, halt]);
 
   return {
-    status, loading, download, section, rate, voices, error, play, pause, stop, jump, setRate, setVoice,
+    status, loading, download, section, rate, voices, error, play, playFrom, pause, stop, jump, setRate, setVoice,
     value: cadu ? CADU : browserVoice?.voiceURI ?? BROWSER_DEFAULT,
     isCadu: cadu,
     activeKey: status === 'idle' ? null : sections[section]?.key ?? null,

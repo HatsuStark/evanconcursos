@@ -5,7 +5,7 @@ import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { QuestClient, type QuestQuestion } from '../../../shared/qbank/client.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { genericSubject } from '../../../shared/qbank/materias.ts';
-import { OWN_PREFIX } from '../../../shared/qbank/own.ts';
+import { lacksMark, lacksText, OWN_PREFIX } from '../../../shared/qbank/own.ts';
 import { CarreiraChoice, carreiraJsonSchema, carreiraPrompt, dominantFormat, ORGAO_MIN, mapSession, usefulCarreira, mapSubject, newestPage, pickBoard, QMAP_PROMPT_VERSION, QUESTION_FORMATS, usefulNarrowing, type Incidence, type MapDeps, type SessionFilter } from '../../../shared/qbank/map.ts';
 
 export const plain = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
@@ -73,7 +73,9 @@ export async function fromCache(admin: SupabaseClient, f: CacheFilter, want: num
     if (out.length >= want || f.fonte === (own ? 'quest' : 'propria')) continue;
     const { data, error } = await query(own).limit(300);
     if (error) continue;
-    out.push(...(data ?? []).map((r) => r.payload as PublicQuestion).filter((p) => isNew(p.qid))
+    // Sem o texto que o enunciado cita, ou sem o termo destacado marcado (a Quest às vezes não manda; as próprias de antes
+    // da regra): não serve.
+    out.push(...(data ?? []).map((r) => r.payload as PublicQuestion).filter((p) => isNew(p.qid) && !lacksText(p) && !lacksMark(p))
       .sort(own
         ? (a, b) => sameBoard(b) - sameBoard(a) || newest(a, b)
         : (a, b) => sameOrgan(b) - sameOrgan(a) || sameCareer(b) - sameCareer(a) || sameBoard(b) - sameBoard(a) || newest(a, b))
@@ -102,7 +104,7 @@ export async function takeNewest(admin: SupabaseClient, quest: QuestClient, owne
     const { page, perPage } = newestPage(position, want - out.length);
     const items = await quest.questoesPage(params, page, perPage);
     await cacheQuestions(admin, items);
-    out.push(...[...items].reverse().filter((q) => q.gabarito && isNew(q) && !out.some((o) => o.id === q.id)));
+    out.push(...[...items].reverse().filter((q) => q.gabarito && isNew(q) && !out.some((o) => o.id === q.id) && !lacksText(publicQuestion(q)) && !lacksMark(publicQuestion(q))));
     position -= perPage;
   }
   await admin.from('qbank_cursors').upsert({ owner_id: ownerId, scope, filter_key: filterKey, after_id: String(position), exhausted: position <= 0, updated_at: new Date().toISOString() });
