@@ -55,7 +55,8 @@ const CITES_TEXT = new RegExp([
   // Tirinha, charge e afins: sem a imagem nem a transcrição, não há o que ler.
   String.raw`\b(d|n|pel)?[ae]ss?[ae]s?\s+tiras?\b`, String.raw`\b(d|n|pel)?as?\s+tiras?\b`, String.raw`\btirinhas?\b`, String.raw`\bcharges?\b`, String.raw`\bcartuns?\b`, String.raw`\bquadrinhos?\b`,
   String.raw`\b(primeiro|segundo|terceiro|quarto|último|penúltimo|\d+\s*[ºo°])\s+quadr(o|inho)`,
-  String.raw`\b(d|n|pel)?[oa]s?\s+(poema|crônica|anúncio|propaganda|cartaz|infográfico)\b`,
+  String.raw`\b(d|n|pel)?[oa]s?\s+(poema|crônica|anúncio|propaganda|cartaz|infográfico|editorial|reportagem|notícia|entrevista|pesquisa|gráfico|fábula)\b`,
+  String.raw`\b(dados|informações|resultados)\s+(apresentad|divulgad|mostrad)`,
 ].join('|'), 'i');
 // Trecho citado, texto colado depois do comando, ou "leia/a seguir/abaixo" (o texto vem no enunciado); redação oficial.
 const INLINE = /[“"«]|\n.{100,}|a seguir|abaixo|seguinte|leia|oficia/i;
@@ -74,7 +75,12 @@ const textOf = (html: string) => html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/
 // Questão já no formato público que cita um texto que não veio (sem texto associado nem anexo, que pode ser a tirinha).
 // Vale para todas as fontes: a Quest às vezes manda `textos_associados` vazio.
 export const lacksText = (p: { enunciado: string; textos?: string[]; anexos?: string[]; materia?: string }) =>
-  !p.textos?.length && !p.anexos?.length && citesMissingText(textOf(p.enunciado ?? ''), p.materia ?? '');
+  !(p.textos ?? []).some((t) => !onlyCredit(t)) && !p.anexos?.length && citesMissingText(textOf(p.enunciado ?? ''), p.materia ?? '');
+
+// Texto associado que é só a fonte ("(Quino. Disponível em: www…)"): a tirinha ou o gráfico era imagem e se perdeu na
+// transcrição. Sem os parênteses e os endereços, sobra pouco ou nada.
+export const onlyCredit = (html: string) =>
+  textOf(html).replace(/\([^)]*\)/g, ' ').replace(/(https?:\/\/|www\.)\S+/gi, ' ').replace(/\bDispon[íi]vel em:?/gi, ' ').replace(/[\s.,;:–-]+/g, ' ').trim().length < 25;
 
 // Comando fala em termo destacado/sublinhado e nada vem marcado (nem no enunciado, nem nas alternativas, nem no texto, sem
 // anexo): a transcrição do PCI perde o negrito e a Quest às vezes também; sem saber qual é o termo, não dá para responder.
@@ -101,7 +107,7 @@ export function ownRows(exam: OwnExam, qidOf: (numero: number) => string): { row
     if (ce ? !['C', 'E'].includes(gabarito) : !letras.includes(gabarito)) { skip('gabarito'); continue; }
     const qid = qidOf(q.numero);
     const textos = (q.texto_associado ?? '').split(/[,;\s]+/).filter(Boolean).map((k) => exam.textos?.[k]).filter((t): t is string => !!t).map(ownHtml);
-    if (!textos.length && citesMissingText(q.enunciado, c.materia)) { skip('sem texto'); dropped.push(qid); continue; }
+    if (!textos.some((t) => !onlyCredit(t)) && citesMissingText(q.enunciado, c.materia)) { skip('sem texto'); dropped.push(qid); continue; }
     const row: OwnRow = {
       qid, materia: c.materia, assunto: c.assunto ?? '', gabarito,
       payload: {

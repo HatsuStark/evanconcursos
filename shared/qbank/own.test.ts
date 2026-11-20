@@ -8,7 +8,7 @@ const q = (over: Partial<OwnExam['questoes'][number]> = {}): OwnExam['questoes']
 });
 const exam = (questoes: OwnExam['questoes']): OwnExam => ({
   prova: { banca: 'Fgv', orgao: 'TJ', cargo: 'Técnico', ano: 2024, formato: 'multipla escolha' },
-  classificacao: { banca: 'FGV', carreiras: ['Jurídica'] }, textos: { T1: 'Texto <um>\n\nsegundo' }, questoes,
+  classificacao: { banca: 'FGV', carreiras: ['Jurídica'] }, textos: { T1: 'Texto <um> sobre a cidade\n\nsegundo parágrafo' }, questoes,
 });
 
 describe('banco próprio', () => {
@@ -22,7 +22,7 @@ describe('banco próprio', () => {
     expect(rows[0]).toMatchObject({ qid: 'own-1', materia: 'Geografia', assunto: 'Capitais', gabarito: 'B' });
     expect(rows[0]!.payload).toMatchObject({
       tipo: 'multipla escolha', dificuldade: 4, prova: { banca: 'FGV', ano: 2024 }, carreiras: ['Jurídica'], fonte: 'propria',
-      textos: ['<p>Texto &lt;um&gt;</p><p>segundo</p>'], enunciado: '<p>Qual é a <strong>capital</strong>?</p>',
+      textos: ['<p>Texto &lt;um&gt; sobre a cidade</p><p>segundo parágrafo</p>'], enunciado: '<p>Qual é a <strong>capital</strong>?</p>',
     });
   });
 
@@ -85,7 +85,7 @@ describe('banco próprio', () => {
   it('lacksText lê o HTML do payload e aceita anexo no lugar do texto', () => {
     const p = { enunciado: 'De acordo com as informações do texto, uma pessoa<br>imediatista', textos: [], anexos: [], materia: 'Língua Portuguesa' };
     expect(lacksText(p)).toBe(true);
-    expect(lacksText({ ...p, textos: ['<p>Texto</p>'] })).toBe(false);
+    expect(lacksText({ ...p, textos: ['<p>Texto completo, com o trecho que a questão cita.</p>'] })).toBe(false);
     expect(lacksText({ ...p, anexos: ['https://x/tira.png'] })).toBe(false);
   });
 
@@ -108,5 +108,20 @@ describe('banco próprio', () => {
     expect(r.rows.map((x) => x.qid)).toEqual(['own-2']);
     expect(r.skipped['sem destaque']).toBe(1);
     expect(r.dropped).toEqual(['own-1']);
+  });
+});
+
+describe('texto associado que é só a fonte', () => {
+  const base = { materia: 'Língua Portuguesa', anexos: [] as string[] };
+  it('crédito sozinho não conta como texto', () => {
+    expect(lacksText({ ...base, enunciado: 'A partir da leitura da tira, é correto afirmar que Calvin', textos: ['<p>(Disponível em: https://blogdoxandro.blogspot.com/2023/03/tiras-n17285-calvin-haroldo-bill.html.)</p>'] })).toBe(true);
+    expect(lacksText({ ...base, enunciado: 'Assinale a alternativa que explica o efeito de humor da tira.', textos: ['<p>(Fernando Gonsales. https://www.instagram.com/p/DMcftWRuYzt/?img_index=5)</p>'] })).toBe(true);
+  });
+  it('transcrição com a fonte no fim continua valendo', () => {
+    expect(lacksText({ ...base, enunciado: 'O humor dessa tira decorre', textos: ['<p>Tirinha da Mafalda: Susanita pergunta por que os adultos dizem coisas que a gente não entende.</p><p>(Quino. Mafalda. Disponível em: www.pinterest.com)</p>'] })).toBe(false);
+  });
+  it('editorial, pesquisa e dados apresentados sem texto', () => {
+    expect(lacksText({ ...base, enunciado: 'As informações do editorial permitem inferir corretamente que', textos: [] })).toBe(true);
+    expect(lacksText({ ...base, enunciado: 'Com base nos dados apresentados da pesquisa, conclui-se corretamente que', textos: [] })).toBe(true);
   });
 });
