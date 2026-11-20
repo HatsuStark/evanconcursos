@@ -71,6 +71,13 @@ describe('banco próprio', () => {
     expect(citesMissingText('Assinale a afirmação correta a respeito do conteúdo do\ntexto.', 'Língua Portuguesa')).toBe(true);
     expect(citesMissingText('No terceiro parágrafo do texto, o pronome “Isso” refere-se', 'Língua Portuguesa')).toBe(true);
     expect(citesMissingText('Sem prejuízo para os sentidos do texto CB1A1AAA, a expressão “e não” (l. 28 e 29) poderia ser substituída por', 'Língua Portuguesa')).toBe(true);
+    expect(citesMissingText('A partir da leitura da tira, é correto afirmar que', 'Língua Portuguesa')).toBe(true);
+    expect(citesMissingText('O humor dessa tirinha decorre', 'Interpretação de Texto')).toBe(true);
+    expect(citesMissingText('No último quadrinho, a fala da personagem sugere', 'Língua Portuguesa')).toBe(true);
+    expect(citesMissingText('A charge critica', 'Língua Portuguesa')).toBe(true);
+    expect(citesMissingText('No poema, o eu lírico', 'Língua Portuguesa')).toBe(true);
+    expect(citesMissingText('Considere a tira: “Por que os adultos ficam dizendo coisas?”. O humor decorre', 'Língua Portuguesa')).toBe(false);
+    expect(citesMissingText('Assinale a alternativa em que a palavra “tira” está empregada no sentido de policial', 'Língua Portuguesa')).toBe(false);
     expect(citesMissingText('No que se refere à redação oficial, julgue o item. A linguagem deve ser clara para a compreensão do texto.', 'Língua Portuguesa')).toBe(false);
     expect(citesMissingText('Um dos microrganismos tinha cerca de 48.500 anos, o que o torna o vírus mais antigo já revivido até hoje. (L.15-17) No período acima, há', 'Língua Portuguesa')).toBe(false);
   });

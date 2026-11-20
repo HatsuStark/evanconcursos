@@ -40,7 +40,7 @@ export function ownHtml(text: string) {
 // de um SHA-1; vem de fora para o arquivo rodar no Node e no Deno.
 export const ownQid = (hash: (s: string) => string, examKey: string, numero: number) => `${OWN_PREFIX}${hash(`${examKey}#${numero}`).slice(0, 16)}`;
 
-// Questão de Português que fala de "o texto", da personagem, do narrador, do autor ou de um parágrafo, sem texto-base
+// Questão de Português que fala de "o texto", da personagem, do narrador, do autor, de um parágrafo ou da tirinha, sem texto-base
 // associado e sem trazer o trecho no próprio enunciado: sem o texto não dá para responder (comum nas provas soltas,
 // montadas à mão). Fica só em Português e afins, onde "o texto" quase sempre é o texto-base; em Direito e Informática
 // ("texto constitucional", "editor de texto") a regra pegaria questões boas.
@@ -52,6 +52,10 @@ const CITES_TEXT = new RegExp([
   String.raw`\bparágrafos?\s+(final|inicial|anterior|seguinte|introdutório|conclusivo)`,
   String.raw`\b(primeiro|segundo|terceiro|quarto|quinto|sexto|último|penúltimo|\d+\s*[ºo°])\s+parágrafo`,
   String.raw`\blinhas?\s+\d`, String.raw`\bautora?\b`, String.raw`\bcronista\b`, String.raw`\bpoeta\b`,
+  // Tirinha, charge e afins: sem a imagem nem a transcrição, não há o que ler.
+  String.raw`\b(d|n|pel)?[ae]ss?[ae]s?\s+tiras?\b`, String.raw`\b(d|n|pel)?as?\s+tiras?\b`, String.raw`\btirinhas?\b`, String.raw`\bcharges?\b`, String.raw`\bcartuns?\b`, String.raw`\bquadrinhos?\b`,
+  String.raw`\b(primeiro|segundo|terceiro|quarto|último|penúltimo|\d+\s*[ºo°])\s+quadr(o|inho)`,
+  String.raw`\b(d|n|pel)?[oa]s?\s+(poema|crônica|anúncio|propaganda|cartaz|infográfico)\b`,
 ].join('|'), 'i');
 // Trecho citado, texto colado depois do comando, ou "leia/a seguir/abaixo" (o texto vem no enunciado); redação oficial.
 const INLINE = /[“"«]|\n.{100,}|a seguir|abaixo|seguinte|leia|oficia/i;
