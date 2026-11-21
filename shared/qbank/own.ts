@@ -74,8 +74,13 @@ const textOf = (html: string) => html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/
   .replace(/[ \t]+/g, ' ').trim();
 // Questão já no formato público que cita um texto que não veio (sem texto associado nem anexo, que pode ser a tirinha).
 // Vale para todas as fontes: a Quest às vezes manda `textos_associados` vazio.
-export const lacksText = (p: { enunciado: string; textos?: string[]; anexos?: string[]; materia?: string }) =>
-  !(p.textos ?? []).some((t) => !onlyCredit(t)) && !p.anexos?.length && citesMissingText(textOf(p.enunciado ?? ''), p.materia ?? '');
+export const lacksText = (p: { enunciado: string; textos?: string[]; anexos?: string[]; materia?: string; alternativas?: { texto: string }[] }) =>
+  !(p.textos ?? []).some((t) => !onlyCredit(t)) && !p.anexos?.length
+  && (citesMissingText(textOf(p.enunciado ?? ''), p.materia ?? '') || altsCiteText(p.alternativas ?? [], p.materia ?? ''));
+
+// Alternativas que localizam trechos no texto ("... (6º parágrafo)", "(l. 12)"): o enunciado pode nem falar do texto.
+const LOCATES = /\(\s*(\d+\s*[ºo°]|primeiro|segundo|terceiro|quarto|quinto|último|penúltimo)\s+parágrafo\s*\)|\(\s*(l|ls|linhas?)\.?\s*\d/i;
+export const altsCiteText = (alts: { texto: string }[], materia: string) => READING.test(materia) && alts.some((a) => LOCATES.test(textOf(a.texto ?? '')));
 
 // Texto associado que é só a fonte ("(Quino. Disponível em: www…)"): a tirinha ou o gráfico era imagem e se perdeu na
 // transcrição. Sem os parênteses e os endereços, sobra pouco ou nada.
@@ -119,6 +124,7 @@ export function ownRows(exam: OwnExam, qidOf: (numero: number) => string): { row
         materia: c.materia, assunto: c.assunto ?? '', carreiras: exam.classificacao?.carreiras ?? [], fonte: 'propria',
       },
     };
+    if (lacksText(row.payload)) { skip('sem texto'); dropped.push(qid); continue; }
     if (lacksMark(row.payload)) { skip('sem destaque'); dropped.push(qid); continue; }
     rows.push(row);
   }

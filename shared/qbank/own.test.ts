@@ -125,3 +125,18 @@ describe('texto associado que é só a fonte', () => {
     expect(lacksText({ ...base, enunciado: 'Com base nos dados apresentados da pesquisa, conclui-se corretamente que', textos: [] })).toBe(true);
   });
 });
+
+describe('alternativas que localizam trechos do texto', () => {
+  const base = { materia: 'Língua Portuguesa', textos: [] as string[], anexos: [] as string[] };
+  const alts = (...t: string[]) => t.map((texto) => ({ texto }));
+  it('bloqueia quando as alternativas citam parágrafo ou linha e o texto não veio', () => {
+    expect(lacksText({ ...base, enunciado: 'Identifica-se emprego de termo(s) em sentido figurado na passagem:', alternativas: alts('... os interstícios dos relevos... (6º parágrafo)', 'Era aquele homem... (2º parágrafo)') })).toBe(true);
+    expect(lacksText({ ...base, enunciado: 'No texto, identifica-se uma relação de coesão entre as seguintes expressões:', alternativas: alts('povo exímio – os portugueses (5º parágrafo)') })).toBe(true);
+    expect(lacksText({ ...base, enunciado: 'O termo destacado retoma', alternativas: alts('a cidade (l. 12)') })).toBe(true);
+  });
+  it('não bloqueia com o texto presente, fora de Português ou sem citação de trecho', () => {
+    expect(lacksText({ ...base, textos: ['<p>Era aquele homem de barbas longas e brancas que tocava o sino da torre.</p>'], enunciado: 'Há sentido figurado em:', alternativas: alts('... homem de barbas... (2º parágrafo)') })).toBe(false);
+    expect(lacksText({ ...base, materia: 'Direito Constitucional', enunciado: 'Segundo a CF:', alternativas: alts('art. 5º (1º parágrafo)') })).toBe(false);
+    expect(lacksText({ ...base, enunciado: 'Assinale a frase com crase correta:', alternativas: alts('Vou à escola.', 'Refiro-me a ela.') })).toBe(false);
+  });
+});
