@@ -20,7 +20,7 @@ export function RebalanceCard({ active }: { active: ActivePlan }) {
   useEffect(() => {
     if (!due || !attempts.data || running.current) return;
     const blocks = notice.structure?.blocks ?? [];
-    const r = rebalance(tasks, subjects.map((s) => ({ id: s.id, questions: s.questions, weight: s.weight, minPct: subjectMinPct(s.block ?? '', blocks) || undefined })),
+    const r = rebalance(tasks, subjects.map((s) => ({ id: s.id, name: s.name, questions: s.questions, weight: s.weight, minPct: subjectMinPct(s.block ?? '', blocks) || undefined })),
       attempts.data, scoreGoal(notice.cutoff_pct), today());
     if (!r) return;
     running.current = true;

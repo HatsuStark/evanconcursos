@@ -133,7 +133,14 @@ const REBALANCE_MIN_ATTEMPTS = 20;
 const BELOW_MIN_BOOST = 1.5;
 const REBALANCE_KINDS = ['consolidation', 'final_review'];
 
-export interface RebalanceSubject { id: string; questions: number; weight: number; minPct?: number }
+export interface RebalanceSubject { id: string; name?: string; questions: number; weight: number; minPct?: number }
+
+// Título do bloco com a matéria nova ("Matéria: questões dos pontos fracos"): o rebalanceamento troca a matéria e o
+// título não pode continuar com a antiga.
+export const retitle = (title: string, name?: string) => {
+  const i = title.indexOf(': ');
+  return name && i > 0 ? `${name}: ${title.slice(i + 2)}` : title;
+};
 export interface RebalanceSummary { kind: 'rebalance'; at: string; changed: number; focus: { subjectId: string; rate: number }[] }
 
 export function rebalance(tasks: ReplanTask[], subjects: RebalanceSubject[], attempts: ReplanAttempt[], goal: { target: number }, today: string, now = Date.now()) {
@@ -157,7 +164,7 @@ export function rebalance(tasks: ReplanTask[], subjects: RebalanceSubject[], att
     used.add(subjectId); usedIn.set(t.date, used);
     if (subjectId === t.subject_id) continue;
     supersede.push(t.id);
-    out.push({ date: t.date, position: t.position ?? 0, minutes: t.minutes, kind: t.kind, subjectId, sessionId: null, title: t.title, keyword: t.keyword, goal: t.goal_questions, fromTaskId: t.id });
+    out.push({ date: t.date, position: t.position ?? 0, minutes: t.minutes, kind: t.kind, subjectId, sessionId: null, title: retitle(t.title, subjects.find((s) => s.id === subjectId)?.name), keyword: t.keyword, goal: t.goal_questions, fromTaskId: t.id });
   }
   if (!out.length) return null;
   const focus = subjects.map((s, i) => ({ subjectId: s.id, rate: Math.round(rate(s.id) * 100), d: demand[i]! })).sort((a, b) => b.d - a.d).slice(0, 2).map(({ subjectId, rate: r }) => ({ subjectId, rate: r }));

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { movedGoal, overdueTasks, replan, subjectWeakness, type ReplanAttempt, type ReplanTask } from './replan.ts';
+import { movedGoal, overdueTasks, rebalance, replan, retitle, subjectWeakness, type ReplanAttempt, type ReplanTask } from './replan.ts';
 
 const TODAY = '2030-03-10', NOW = new Date('2030-03-10T12:00:00Z').getTime();
 let seq = 0;
@@ -118,5 +118,18 @@ describe('fraqueza da matéria e motivo do erro', () => {
   it('atrasadas: só o que passou, sem feitas nem a prova', () => {
     const list = [task('2030-03-09', 'theory'), task('2030-03-09', 'theory', 'a', { done_at: 'x' }), task('2030-03-10', 'theory'), task('2030-03-09', 'exam', null)];
     expect(overdueTasks(list, TODAY).map((t) => t.id)).toEqual([list[0]!.id]);
+  });
+});
+
+describe('rebalanceamento troca o título junto com a matéria', () => {
+  it('reforço que muda de matéria leva o nome da nova no título', () => {
+    const t = task('2030-03-12', 'consolidation', 'b', { title: 'Matemática: questões dos pontos fracos' });
+    const subs = [{ id: 'a', name: 'Língua Portuguesa', questions: 20, weight: 1 }, { id: 'b', name: 'Matemática', questions: 5, weight: 1 }];
+    const r = rebalance([t], subs, [...wrong('a', 20), ...right('b', 20)], { target: 0.8 }, TODAY, NOW);
+    expect(r?.tasks[0]).toMatchObject({ subjectId: 'a', title: 'Língua Portuguesa: questões dos pontos fracos' });
+  });
+  it('sem nome ou sem prefixo, o título fica', () => {
+    expect(retitle('Matemática: questões dos pontos fracos')).toBe('Matemática: questões dos pontos fracos');
+    expect(retitle('Revisão geral', 'Português')).toBe('Revisão geral');
   });
 });
