@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildWeeklyQueue, themeScore } from './weekly-review.ts';
+import { buildWeeklyQueue, pickExtra, schemeDeck, themeScore } from './weekly-review.ts';
 
 const T = '2026-11-22';
 const theme = (id: string, due_on = T, last_result: string | null = null) => ({ id, session_id: `s-${id}`, due_on, last_result });
@@ -42,5 +42,31 @@ describe('buildWeeklyQueue', () => {
     const q = buildWeeklyQueue(themes, [err('x', 't7')], 30, T);
     expect(q.steps.some((s) => s.theme.id === 't7')).toBe(false);
     expect(q.loose).toEqual(['x']);
+  });
+});
+
+describe('schemeDeck', () => {
+  const br = (topico: string, ...itens: string[]) => ({ topico, itens });
+  it('precisa de 3 ramos e 4 itens', () => {
+    expect(schemeDeck([br('A', 'a1', 'a2'), br('B', 'b1')])).toEqual([]);
+    expect(schemeDeck([br('A', 'a1'), br('B', 'b1'), br('C', 'c1')])).toEqual([]);
+    expect(schemeDeck(undefined)).toEqual([]);
+  });
+  it('até 8 itens, de todos os ramos, com o ramo certo', () => {
+    const d = schemeDeck([br('A', 'a1', 'a2', 'a3', 'a4'), br('B', 'b1', 'b2', 'b3'), br('C', 'c1', 'c2', 'c3'), br(' ', 'x')]);
+    expect(d).toHaveLength(8);
+    expect(new Set(d.map((c) => c.branch))).toEqual(new Set([0, 1, 2]));
+    expect(d.find((c) => c.item === 'b2')?.branch).toBe(1);
+    expect(schemeDeck([br('A', 'a1', 'a2', 'a3', 'a4'), br('B', 'b1', 'b2', 'b3'), br('C', 'c1', 'c2', 'c3')])).toEqual(d);
+  });
+});
+
+describe('pickExtra', () => {
+  it('3ª revisão: esquema; outras: certo ou errado; sem a escolhida, a outra', () => {
+    expect(pickExtra(3, { tf: true, scheme: true })).toBe('scheme');
+    expect(pickExtra(2, { tf: true, scheme: true })).toBe('tf');
+    expect(pickExtra(1, { tf: false, scheme: true })).toBe('scheme');
+    expect(pickExtra(3, { tf: true, scheme: false })).toBe('tf');
+    expect(pickExtra(2, { tf: false, scheme: false })).toBeNull();
   });
 });

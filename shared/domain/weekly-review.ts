@@ -49,3 +49,29 @@ export function buildWeeklyQueue<T extends WeeklyTheme>(themes: T[], errors: Wee
     deferredErrors: errors.length - used.size,
   };
 }
+
+// "Monte o esquema": cada item do mapa mental da revisão curta vai para o ramo certo. Precisa de pelo menos 3 ramos e 4
+// itens. Até 8 itens, um de cada ramo por vez, em ordem embaralhada pelo conteúdo (a mesma em qualquer aparelho).
+export const SCHEME_ITEMS = 8;
+export interface SchemeBranch { topico: string; itens: string[] }
+export interface SchemeCard { item: string; branch: number }
+// Ramos com título e itens: os índices de `SchemeCard.branch` apontam para esta lista.
+export const schemeBranches = (branches: SchemeBranch[] | undefined) =>
+  (branches ?? []).map((b) => ({ topico: b.topico.trim(), itens: b.itens.map((i) => i.trim()).filter(Boolean) })).filter((b) => b.topico && b.itens.length);
+export function schemeDeck(branches: SchemeBranch[] | undefined): SchemeCard[] {
+  const ok = schemeBranches(branches);
+  if (ok.length < 3 || ok.reduce((a, b) => a + b.itens.length, 0) < 4) return [];
+  const picked: SchemeCard[] = [];
+  for (let i = 0; picked.length < SCHEME_ITEMS && ok.some((b) => i < b.itens.length); i++)
+    ok.forEach((b, j) => { if (i < b.itens.length && picked.length < SCHEME_ITEMS) picked.push({ item: b.itens[i]!, branch: j }); });
+  const h = (s: string) => { let x = 2166136261; for (let i = 0; i < s.length; i++) x = Math.imul(x ^ s.charCodeAt(i), 16777619); return x >>> 0; };
+  return picked.sort((a, b) => h(a.item) - h(b.item));
+}
+
+// Atividade depois dos cartões, por regra: na 3ª revisão (30 dias), o esquema, para ver o tema inteiro de novo; nas outras,
+// certo ou errado com as pegadinhas. Sem a escolhida, a outra; sem nenhuma, só os cartões.
+export type ThemeExtra = 'tf' | 'scheme' | null;
+export function pickExtra(stage: number, has: { tf: boolean; scheme: boolean }): ThemeExtra {
+  const first: ThemeExtra = stage >= 3 ? 'scheme' : 'tf', second: ThemeExtra = first === 'tf' ? 'scheme' : 'tf';
+  return has[first!] ? first : has[second!] ? second : null;
+}

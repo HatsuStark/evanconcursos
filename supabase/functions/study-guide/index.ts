@@ -4,12 +4,14 @@
 //   {taskId, depth, poll:true} → como acima, mas não começa nada: 502 se a geração falhou.
 //   {action:'prepare', planId} → 202; prepara as apostilas completas das próximas sessões (ver PREPARE_*).
 //   {action:'pente', taskId} → 200 {items}; o que memorizar e as pegadinhas das sessões já estudadas da matéria (só leitura).
+//   {action:'tf', guideId} → 200 {items}; certo ou errado da revisão da semana, gerado uma vez por revisão curta.
 // Reaproveita apostilas idênticas (mesmo tema, fontes e profundidade) entre sessões e estudantes.
 // Não há "gerar de novo" pelo estudante (economia de créditos): uma apostila existente é sempre reaproveitada.
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import type { z } from 'zod';
 import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide, guideCacheKey, GuideExtras, guideExtrasJsonSchema, GuideOutline, guideOutlineJsonSchema, GuideSections, guideSectionsJsonSchema, guideStage, mergeReviewHalves, reviewHalfJsonSchema, ReviewHalves, reviewStage, sectionGroups, textFromOutline, guidePracticeJsonSchema, GuidePractice, GuideText, guideTextJsonSchema, guideVersion, guidePrompt, MAX_GUIDE_FONTES, MAX_GUIDE_JURIS, mergeGuide, partialGuide, lawKeys, pickSimilarGuide, topicKeys, trimReview, unlistedLaws, verifyGuide, guideCitationText, type BoardQuestion, type GuideDepth, type GuideJuris, type GuideSource } from '../../../shared/ai/guide.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
+import { cleanTrueFalse, TF_PROMPT_VERSION, TrueFalse, trueFalseJsonSchema, trueFalsePrompt, type TfSheet, type TrueFalseItem } from '../../../shared/ai/true-false.ts';
 import { mergeRelated, outsideRefs, RELATED_PROMPT_VERSION, RelatedVerdicts, relatedJsonSchema, relatedPrompt, type RelatedArticle } from '../../../shared/ai/related.ts';
 import { QuestClient } from '../../../shared/qbank/client.ts';
 import { materiaOf, measureIncidence, QMAP_PROMPT_VERSION } from '../../../shared/qbank/map.ts';
@@ -340,6 +342,32 @@ async function prepare(auth: Auth, admin: Admin, planId: string) {
   }
 }
 
+// Certo ou errado da revisão da semana, a partir da revisão curta pronta. Uma vez por revisão (cache compartilhado);
+// lista vazia quando a revisão não existe, ainda está sendo escrita ou a IA não montou um exercício bom.
+async function trueFalse(admin: Admin, ownerId: string, guideId: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(guideId)) return [];
+  const { data: hit } = await admin.from('review_true_false').select('items').eq('guide_id', guideId).eq('prompt_version', TF_PROMPT_VERSION).maybeSingle();
+  if (hit) return hit.items as TrueFalseItem[];
+  const { data: guide } = await admin.from('study_guides').select('id, depth, subject_name, title, banca, content').eq('id', guideId).maybeSingle();
+  if (!guide || guide.depth !== 'revisao' || guide.content?.parcial) return [];
+  const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash', apiKey = Deno.env.get('GEMINI_API_KEY') ?? '', started = Date.now();
+  let usage: GeminiUsage | null = null;
+  try {
+    const r = await generateJson({ apiKey, model, schema: TrueFalse, jsonSchema: trueFalseJsonSchema(), temperature: 0.4, thinkingLevel: 'low', timeoutMs: 40_000,
+      parts: [{ text: trueFalsePrompt({ subject: guide.subject_name, title: guide.title, banca: String(guide.banca ?? '') }, trimReview(guide.content) as TfSheet) }] });
+    usage = r.usage;
+    const items = cleanTrueFalse(r.data.itens);
+    await admin.from('review_true_false').upsert({ guide_id: guideId, prompt_version: TF_PROMPT_VERSION, items, model }, { onConflict: 'guide_id,prompt_version', ignoreDuplicates: true });
+    await logUsage(admin, { ownerId, operation: 'review_tf', model, promptVersion: TF_PROMPT_VERSION, usage, latencyMs: Date.now() - started, status: 'ok' });
+    return items;
+  } catch (err) {
+    if (err instanceof GeminiError && err.usage) usage = err.usage;
+    const message = err instanceof Error ? err.message : String(err);
+    await logUsage(admin, { ownerId, operation: 'review_tf', model, promptVersion: TF_PROMPT_VERSION, usage, latencyMs: Date.now() - started, status: 'error', error: message }).catch(() => {});
+    return [];
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json(405, { error: 'Método não permitido.' });
@@ -353,6 +381,7 @@ Deno.serve(async (req) => {
       return json(202, { ok: true });
     }
     if (body.action === 'pente') return json(200, { items: await penteFino(auth, admin, String(body.taskId ?? '')) });
+    if (body.action === 'tf') return json(200, { items: await trueFalse(admin, auth.user.id, String(body.guideId ?? '')) });
     const depth: GuideDepth = body.depth === 'revisao' ? 'revisao' : body.depth === 'aprofundamento' ? 'aprofundamento' : 'completa';
     const { data: task } = await auth.client.from('tasks').select('subject_id, session_id').eq('id', String(body.taskId ?? '')).maybeSingle();
     const ctx = task && await resolve(auth, admin, task, depth);

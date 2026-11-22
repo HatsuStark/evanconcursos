@@ -1,6 +1,7 @@
 // Revisão em cartões: memória do estudante por tarefa (o que já sabe, o que não lembrou, o que já leu) e registro de cada
 // revisão feita, no banco. O localStorage fica como reserva (sem rede) e para a memória gravada antes do banco.
 import { emptyMemory, type ReviewMemory } from '../../../shared/domain/review-cards.ts';
+import type { TrueFalseItem } from '../../../shared/ai/true-false.ts';
 import { supabase } from './supabase.ts';
 
 const LOCAL_KEY = (taskId: string) => `review-cards:${taskId}`;
@@ -56,4 +57,11 @@ export function reviewSessionTracker(taskId: string) {
       if (sid) await supabase.from('review_card_sessions').update(fields(p)).eq('id', sid);
     }).catch(() => {});
   };
+}
+
+// Certo ou errado da revisão da semana (gerado uma vez por revisão curta, no servidor). Falha = sem o exercício.
+export async function fetchTrueFalse(guideId: string): Promise<TrueFalseItem[]> {
+  const { data, error } = await supabase.functions.invoke('study-guide', { body: { action: 'tf', guideId } });
+  if (error) return [];
+  return ((data as { items?: TrueFalseItem[] } | null)?.items ?? []);
 }

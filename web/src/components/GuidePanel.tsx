@@ -28,7 +28,7 @@ interface GuideContent {
   pendentes?: number[]; // seções do roteiro ainda sendo escritas
 }
 // related: lista quando pronto; outro valor (null, em andamento, falhou) = ainda sem os artigos relacionados.
-export interface GuideRow { content: GuideContent; sources: string[]; unlisted_sources: string[]; unverified: string[]; model: string; created_at: string; depth: string; related?: RelatedArticle[] | unknown }
+export interface GuideRow { id?: string; content: GuideContent; sources: string[]; unlisted_sources: string[]; unverified: string[]; model: string; created_at: string; depth: string; related?: RelatedArticle[] | unknown }
 type Fetched = { guide: GuideRow; relatedPending: boolean };
 const relatedOf = (g: GuideRow | null) => (Array.isArray(g?.related) ? (g!.related as RelatedArticle[]) : []);
 

@@ -3,7 +3,10 @@ import { CheckCircle2, ChevronRight, Layers, Play, RotateCcw, SkipForward } from
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { allReviewCards, type ReviewSheet } from '../../../shared/domain/review-cards.ts';
-import { buildWeeklyQueue } from '../../../shared/domain/weekly-review.ts';
+import { buildWeeklyQueue, pickExtra, schemeBranches, schemeDeck } from '../../../shared/domain/weekly-review.ts';
+import type { TrueFalseItem } from '../../../shared/ai/true-false.ts';
+import { fetchTrueFalse } from '../lib/reviewCards.ts';
+import { SchemeSort, TrueFalseDrill } from './ReviewDrills.tsx';
 import { wholeThemeTitle } from '../../../shared/domain/parts.ts';
 import { ymd } from '../../../shared/domain/dates.ts';
 import { useDueCounts } from '../lib/practice.ts';
@@ -168,28 +171,46 @@ export function WeeklySession({ task, subjects }: { task: WeeklyTask; subjects: 
   );
 }
 
-// Cartões da revisão curta do tema (a mesma do modo estudo). Sem cartões ou com falha, o registro simples e a apostila.
+// Cartões da revisão curta do tema (a mesma do modo estudo) e, em seguida, um exercício por regra (pickExtra): certo ou
+// errado com as pegadinhas ou montar o esquema do tema. Sem cartões ou com falha, o registro simples e a apostila.
 function ThemeCards({ review, next }: { review: TheoryReview; next: { label: string; onClick: () => void } }) {
   const [guide, setGuide] = useState<GuideRow | null>(null);
   const [error, setError] = useState('');
+  const [tf, setTf] = useState<TrueFalseItem[] | undefined>(undefined);
+  const [extraOn, setExtraOn] = useState(false);
   useEffect(() => {
     let off = false;
-    fetchGuide(review.task_id, 'revisao', () => off, () => {}).then((r) => { if (!off && r) setGuide(r.guide); }).catch((e) => { if (!off) setError((e as Error).message); });
+    fetchGuide(review.task_id, 'revisao', () => off, () => {}).then((r) => {
+      if (off || !r) return;
+      setGuide(r.guide);
+      // O certo ou errado é preparado enquanto o estudante passa pelos cartões.
+      if (r.guide.id) void fetchTrueFalse(r.guide.id).then((items) => { if (!off) setTf(items); });
+      else setTf([]);
+    }).catch((e) => { if (!off) { setError((e as Error).message); setTf([]); } });
     return () => { off = true; };
   }, [review.task_id]);
   const sheet = guide?.content as unknown as ReviewSheet | undefined;
   const hasCards = useMemo(() => !!sheet && allReviewCards(sheet).length > 0, [sheet]);
+  const branches = useMemo(() => schemeBranches(guide?.content.esquema), [guide]);
+  const deck = useMemo(() => schemeDeck(branches), [branches]);
   const openSheet = () => window.open(`/estudo/${review.task_id}?revisao=1`, '_blank', 'noopener');
+  // Enquanto o certo ou errado carrega, conta como disponível (a tela espera); vazio, vale o esquema.
+  const extra = pickExtra(review.stage, { tf: tf === undefined || tf.length > 0, scheme: deck.length > 0 });
+  const toExtra = { label: 'Exercício do tema', onClick: () => (extra ? setExtraOn(true) : next.onClick()) };
+  const title = wholeThemeTitle(review.task.title);
 
   if (!guide && !error) return <div className="glass card"><div className="spinner" /> <span className="muted small">Preparando a revisão curta…</span></div>;
-  if (hasCards) return <ReviewCards taskId={review.task_id} title={wholeThemeTitle(review.task.title)} sheet={sheet!} onShowSheet={openSheet} next={next} />;
+  if (extraOn && extra === 'tf') return tf ? <TrueFalseDrill items={tf} next={next} /> : <div className="glass card"><div className="spinner" /> <span className="muted small">Preparando o certo ou errado…</span></div>;
+  if (extraOn && extra === 'scheme') return <SchemeSort title={title} branches={branches} deck={deck} next={next} />;
+  const after = extra ? toExtra : next;
+  if (hasCards) return <ReviewCards taskId={review.task_id} title={title} sheet={sheet!} onShowSheet={openSheet} next={after} />;
   return (
     <div className="grid" style={{ gap: 12 }}>
       {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
       <TheoryReviewCard taskId={review.task_id} sessionId={review.session_id} />
       <div className="daily-review-head">
         <button className="btn ghost sm" onClick={openSheet}>Abrir a revisão curta</button>
-        <button className="btn" onClick={next.onClick}>{next.label} <ChevronRight size={16} /></button>
+        <button className="btn" onClick={after.onClick}>{after.label} <ChevronRight size={16} /></button>
       </div>
     </div>
   );
