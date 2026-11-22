@@ -6,7 +6,7 @@ import { supabase } from './supabase.ts';
 
 export type ReviewResult = 'lembrei' | 'parcial' | 'esqueci';
 export interface TheoryReview {
-  id: string; task_id: string; stage: number; due_on: string; status: string; reviews: number; last_result: ReviewResult | null; last_reviewed_at: string | null;
+  id: string; task_id: string; session_id: string | null; stage: number; due_on: string; status: string; reviews: number; last_result: ReviewResult | null; last_reviewed_at: string | null;
   task: { title: string; subject_id: string | null };
 }
 
@@ -15,7 +15,7 @@ export const useTheoryReviews = (planId: string | undefined) => useQuery({
   queryKey: ['theory-reviews', planId],
   enabled: !!planId,
   queryFn: async () => {
-    const { data, error } = await supabase.from('theory_reviews').select('id, task_id, stage, due_on, status, reviews, last_result, last_reviewed_at, task:tasks(title, subject_id)')
+    const { data, error } = await supabase.from('theory_reviews').select('id, task_id, session_id, stage, due_on, status, reviews, last_result, last_reviewed_at, task:tasks(title, subject_id)')
       .eq('plan_id', planId!).order('due_on').limit(1000);
     if (error) throw new Error(error.message);
     return data as unknown as TheoryReview[];

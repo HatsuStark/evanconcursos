@@ -31,7 +31,8 @@ export function DailyReview({ mode, themes, deferred, weekly, nextWeekly, errors
   const shownConcepts = Math.min(nConcepts, CONCEPTS_PER_SESSION);
   const minutes = Math.max(1, Math.round(themes.length * MIN_THEME + nErrors * MIN_ERROR + nCards * MIN_CARD + shownConcepts * MIN_CONCEPT));
   const errorsTo = weekly ? `/estudo/${weekly.id}` : '/questoes?aba=revisar';
-  const first = themes[0] ? `/estudo/${themes[0].task_id}?revisao=1` : nErrors ? errorsTo : nCards ? '/questoes?aba=flashcards' : '/aprender/revisao';
+  // Na semana, "Começar" abre a revisão guiada (um tema por vez, com os erros dele).
+  const first = weekly ? `/estudo/${weekly.id}` : themes[0] ? `/estudo/${themes[0].task_id}?revisao=1` : nErrors ? errorsTo : nCards ? '/questoes?aba=flashcards' : '/aprender/revisao';
   const title = mode === 'weekly' ? 'Revisão da semana' : mode === 'daily' ? 'Revisão rápida' : 'Revisão do dia';
   const late = weekly && weekly.date < today ? ` · pendente desde ${fmtDate(weekly.date)}` : '';
   const summary = total

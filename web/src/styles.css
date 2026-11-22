@@ -1105,3 +1105,8 @@ details.card summary { cursor: pointer; font-weight: 600; }
   .tutor-pocket-list { grid-template-columns: 1fr 1fr; }
   .tutor-pocket-list article { break-inside: avoid; background: #fff; border-color: #bbb; }
 }
+
+/* Revisão da semana guiada (WeeklySession) */
+.weekly-list { margin: 0; padding-left: 22px; display: grid; gap: 8px; }
+.weekly-list li { display: grid; gap: 2px; }
+.weekly-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

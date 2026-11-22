@@ -28,7 +28,7 @@ interface GuideContent {
   pendentes?: number[]; // seções do roteiro ainda sendo escritas
 }
 // related: lista quando pronto; outro valor (null, em andamento, falhou) = ainda sem os artigos relacionados.
-interface GuideRow { content: GuideContent; sources: string[]; unlisted_sources: string[]; unverified: string[]; model: string; created_at: string; depth: string; related?: RelatedArticle[] | unknown }
+export interface GuideRow { content: GuideContent; sources: string[]; unlisted_sources: string[]; unverified: string[]; model: string; created_at: string; depth: string; related?: RelatedArticle[] | unknown }
 type Fetched = { guide: GuideRow; relatedPending: boolean };
 const relatedOf = (g: GuideRow | null) => (Array.isArray(g?.related) ? (g!.related as RelatedArticle[]) : []);
 
@@ -39,7 +39,7 @@ const RELATED_POLL_MS = 4000, RELATED_GIVE_UP_MS = 60 * 1000;
 // Sem "gerar de novo" (economia de créditos): a apostila existente é sempre reaproveitada.
 // A geração roda em segundo plano no servidor; aqui só espera. null se a espera foi cancelada.
 // A apostila chega em partes (o roteiro em segundos, depois as seções): `onPartial` mostra o que já existe enquanto a espera continua.
-async function fetchGuide(taskId: string, depth: string, cancelled: () => boolean, onPartial: (g: GuideRow) => void, poll = false): Promise<Fetched | null> {
+export async function fetchGuide(taskId: string, depth: string, cancelled: () => boolean, onPartial: (g: GuideRow) => void, poll = false): Promise<Fetched | null> {
   const giveUp = Date.now() + GIVE_UP_MS;
   for (; !cancelled(); poll = true) {
     const { data, error } = await supabase.functions.invoke('study-guide', { body: { taskId, depth, poll } });

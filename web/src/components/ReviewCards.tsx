@@ -18,8 +18,9 @@ const Blanked = ({ text }: { text: string }) => <>{text.split(CLOZE_BLANK).map((
 
 // Revisão curta em cartões: um por vez, com a resposta escondida nos de recordação. No fim, placar e o resultado da
 // revisão de teoria já sugerido.
-export function ReviewCards({ taskId, title, sheet, onShowSheet, onGoQuestions }: {
-  taskId: string; title: string; sheet: ReviewSheet; onShowSheet: () => void; onGoQuestions?: () => void;
+// `next`: na revisão da semana, o passo seguinte (erros do tema ou próximo tema), no lugar das questões do tema.
+export function ReviewCards({ taskId, title, sheet, onShowSheet, onGoQuestions, next }: {
+  taskId: string; title: string; sheet: ReviewSheet; onShowSheet: () => void; onGoQuestions?: () => void; next?: { label: string; onClick: () => void };
 }) {
   const qc = useQueryClient();
   const due = useTaskTheoryReview(taskId);
@@ -173,7 +174,8 @@ export function ReviewCards({ taskId, title, sheet, onShowSheet, onGoQuestions }
             )}
             {saved && <p className="rc-saved"><RotateCcw size={15} /> {saved.next ? `Revisão registrada. Este tema volta em ${fmtDate(saved.next)}.` : 'Revisões deste tema concluídas.'}</p>}
             <div className="rc-links">
-              {onGoQuestions && <button className="btn" onClick={onGoQuestions}><ListChecks size={16} /> Fazer questões do tema</button>}
+              {next ? <button className="btn" disabled={!!due.data && !saved} title={due.data && !saved ? 'Registre a revisão primeiro' : undefined} onClick={next.onClick}>{next.label}</button>
+                : onGoQuestions && <button className="btn" onClick={onGoQuestions}><ListChecks size={16} /> Fazer questões do tema</button>}
               <button className="link-btn" onClick={restart}>Revisar de novo</button>
             </div>
           </div>

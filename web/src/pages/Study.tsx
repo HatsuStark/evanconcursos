@@ -20,6 +20,7 @@ import { Shell } from '../components/Shell.tsx';
 import { TheoryReviewCard } from '../components/TheoryReviewCard.tsx';
 import { TutorPanel } from '../components/TutorPanel.tsx';
 import { VideosPanel } from '../components/VideosPanel.tsx';
+import { WeeklySession } from '../components/WeeklySession.tsx';
 import { fmtDate, subjectColor, SubjectIcon } from '../components/ui.tsx';
 import { missingNorms, sessionLawRefs, useOwnLaws } from '../lib/legal.ts';
 import { KIND_LABEL, today, toggleTaskDone, useActivePlan } from '../lib/plans.ts';
@@ -296,7 +297,8 @@ function StudyView({ d }: { d: StudyData }) {
         </div>
       )}
 
-      {d.task.kind === 'simulado' ? <SimuladoStarter planId={d.task.plan_id} taskId={d.task.id} /> : (
+      {d.task.kind === 'simulado' ? <SimuladoStarter planId={d.task.plan_id} taskId={d.task.id} />
+        : d.task.kind === 'weekly_review' ? <WeeklySession task={d.task} subjects={plan?.subjects ?? []} /> : (
         <>
           <TheoryReviewCard taskId={d.task.id} sessionId={d.task.session_id} />
           {!focus && <div ref={floating.ref} className={'tabs-float no-print' + (floating.hidden ? ' hide' : '')} onPointerDown={floating.reveal}>{tabBar}</div>}
