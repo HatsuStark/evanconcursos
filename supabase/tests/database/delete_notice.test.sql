@@ -122,7 +122,7 @@ select is(pg_temp.n('study_plans', $$id = '62000000-0000-4000-8000-000000000001'
 select is(pg_temp.n('tasks', $$owner_id = '00000000-0000-4000-8000-0000000000a5'$$), 0::bigint, 'tarefas apagadas');
 select is(pg_temp.n('study_sessions', $$owner_id = '00000000-0000-4000-8000-0000000000a5'$$), 0::bigint, 'sessões apagadas');
 select is(pg_temp.n('qbank_cursors', $$owner_id = '00000000-0000-4000-8000-0000000000a5' and scope <> 'simulado'$$), 0::bigint, 'cursores da sessão e da matéria apagados');
-select is(pg_temp.n('qbank_cursors', $$scope = 'simulado'$$), 1::bigint, 'cursor geral do simulado fica');
+select is(pg_temp.n('qbank_cursors', $$owner_id = '00000000-0000-4000-8000-0000000000a5' and scope = 'simulado'$$), 1::bigint, 'cursor geral do simulado fica');
 select is(pg_temp.n('ai_jobs', $$input->>'noticeId' = '60000000-0000-4000-8000-000000000001'$$), 0::bigint, 'job da leitura apagado');
 select is(pg_temp.n('ai_jobs', $$input->>'noticeId' = '60000000-0000-4000-8000-000000000002'$$), 1::bigint, 'job do outro concurso fica');
 select is(pg_temp.n('simulados', $$id = '66000000-0000-4000-8000-000000000001'$$), 0::bigint, 'simulado do concurso apagado');

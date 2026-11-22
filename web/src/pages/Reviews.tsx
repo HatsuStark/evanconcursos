@@ -84,7 +84,7 @@ export function ReviewsPage() {
           </div>
         </>
       )}
-      <Group title="Atrasadas" rows={g.overdue} nameOf={nameOf} action="Revisar" line={(r) => `${stage(r)} · desde ${fmtDate(r.due_on)}`} />
+      <Group title="Na fila" rows={g.overdue} nameOf={nameOf} action="Revisar" line={(r) => `${stage(r)} · desde ${fmtDate(r.due_on)}`} />
       <Group title="Hoje" rows={g.today} nameOf={nameOf} action="Revisar" line={stage} />
       <Group title="Programadas" rows={g.scheduled} nameOf={nameOf} line={(r) => [`${stage(r)} em ${fmtDate(r.due_on)}`, last(r)].filter(Boolean).join(' · ')} />
       <Group title="Concluídas" rows={g.finished} nameOf={nameOf} action="Abrir" line={(r) => [`${r.reviews} ${r.reviews === 1 ? 'revisão feita' : 'revisões feitas'}`, last(r)].filter(Boolean).join(' · ')} />

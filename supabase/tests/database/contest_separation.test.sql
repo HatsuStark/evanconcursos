@@ -40,7 +40,7 @@ select is((select plan_id from public.question_attempts where qid = 'sep-q1' and
 update public.profiles set active_notice_id = 'd0000000-0000-4000-8000-000000000002' where id = '00000000-0000-4000-8000-0000000000ae';
 select public.answer_question('sep-q1', 'A', null, 'free');
 select is((select count(*) from public.error_book where qid = 'sep-q1'), 2::bigint, 'cada concurso tem o próprio caderno de erros');
-select is((select count(*) from public.flashcards where ref = 'sep-q1'), 2::bigint, 'cada concurso tem os próprios flashcards');
+select is((select count(*) from public.flashcards where ref = 'sep-q1'), 0::bigint, 'questão errada não vira flashcard (fica no caderno de erros)');
 select lives_ok($$select public.set_error_reason('sep-q1', 'atencao')$$, 'motivo do erro no concurso ativo');
 select is((select count(*) from public.question_attempts where qid = 'sep-q1' and error_reason = 'atencao'), 1::bigint, 'motivo marcado só no erro do concurso ativo');
 

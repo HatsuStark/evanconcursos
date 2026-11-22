@@ -41,7 +41,7 @@ select pg_temp.as_user('00000000-0000-4000-8000-0000000000a4');
 select is((select public.answer_question('qa', 'A') ->> 'correct'), 'false', 'errou: correção no banco');
 select is((select stage from public.error_book where qid = 'qa'), 0, 'errada entra no caderno (etapa 0)');
 select is((select due_on from public.error_book where qid = 'qa'), current_date + 1, 'volta amanhã');
-select ok((select back like 'Resposta: B — 4%' from public.flashcards where ref = 'qa'), 'flashcard da errada com a resposta');
+select is((select count(*) from public.flashcards where ref = 'qa'), 0::bigint, 'errada não vira flashcard: o caderno de erros já a traz');
 select is((select public.answer_question('qa', 'b', null, 'review') ->> 'correct'), 'true', 'acerto na revisão (minúscula aceita)');
 select is((select stage from public.error_book where qid = 'qa'), 1, 'revisão boa avança para 7 dias');
 select is((select due_on from public.error_book where qid = 'qa'), current_date + 7, 'próxima revisão em 7 dias');

@@ -2,7 +2,7 @@ import { Check, ChevronDown, ChevronUp, Circle, FileUp, PenLine, Sparkles } from
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cycleProgress, cycleQueue } from '../../../shared/domain/cycle.ts';
-import { groupReviews } from '../../../shared/domain/theory-reviews.ts';
+import { dailyReviews, weeklyState } from '../../../shared/domain/theory-reviews.ts';
 import { RebalanceCard } from '../components/RebalanceCard.tsx';
 import { OpenPlanCard } from '../components/OpenPlanCard.tsx';
 import { CoverageBanner } from '../components/CoverageBanner.tsx';
@@ -81,7 +81,13 @@ export function HomePage() {
   const theory = tasks.filter((t) => t.kind === 'theory');
   const nextTasks = tasks.filter((t) => t.date > t0 && !t.done_at && t.kind !== 'exam');
   const queue = cycleQueue(tasks), pace = cycleProgress(tasks, t0), cycleShown = CYCLE_SHOWN + nextShown;
-  const reviewGroups = groupReviews(theoryReviews.data ?? [], t0), dueReviews = [...reviewGroups.overdue, ...reviewGroups.today];
+  const weekly = weeklyState(tasks, t0), daily = dailyReviews(theoryReviews.data ?? [], t0, weekly);
+  // A revisão semanal aberta aparece no cartão de revisão, no topo do dia; não se repete na lista.
+  const dayTasks = todays.filter((t) => t.id !== weekly.open?.id);
+  const review = (
+    <DailyReview mode={daily.mode} themes={daily.themes} deferred={daily.deferred} weekly={weekly.open} nextWeekly={weekly.next?.date ?? null}
+      errors={due.data?.errors ?? 0} cards={due.data?.cards ?? 0} concepts={(tutorConcepts.data ?? []).filter((c) => c.due_on && c.due_on <= t0).length} subjects={subjects} today={t0} />
+  );
 
   const rail = (
     <>
@@ -132,14 +138,13 @@ export function HomePage() {
         <h2 style={{ fontSize: 28, margin: '14px 0 4px' }}>{notice.role_name}</h2>
         <p className="muted" style={{ margin: '0 0 18px' }}>{[notice.organization, notice.board, openEnded ? 'Sem prazo' : `Prova ${fmtDate(notice.exam_date)}`].filter(Boolean).join(' · ')}</p>
         <DayPanel activity={activity.data ?? []} hours={version?.inputs.hours ?? []} today={t0} todays={isCycle ? [] : todays} examDays={openEnded ? null : days}
-          next={isCycle ? queue[0] : todays.find((t) => !t.done_at && t.kind !== 'exam')} reviewsDue={dueReviews.length} />
+          next={isCycle ? queue[0] : todays.find((t) => !t.done_at && t.kind !== 'exam')} reviewsDue={daily.themes.length} />
       </div>
       <OpenPlanCard active={active.data} />
       <RebalanceCard active={active.data} />
       <PlanNoticeBanner planId={active.data.plan.id} noticeId={active.data.plan.notice_id} />
       <ReplanBanner active={active.data} />
       <CoverageBanner active={active.data} />
-      <DailyReview themes={dueReviews} errors={due.data?.errors ?? 0} cards={due.data?.cards ?? 0} concepts={(tutorConcepts.data ?? []).filter((c) => c.due_on && c.due_on <= t0).length} subjects={subjects} today={t0} hasReviews={!!theoryReviews.data?.length || !!tutorConcepts.data?.length} />
       {discursive.data?.rules && (lastDiscursive.data === null || (lastDiscursive.data ?? 0) >= DISCURSIVE_NUDGE_DAYS) && !lastDiscursive.isLoading && (
         <div className="glass card review-today">
           <PenLine size={20} style={{ color: 'var(--violet)' }} />
@@ -150,6 +155,7 @@ export function HomePage() {
       {isCycle ? (
         <>
           <div className="section-title"><h2>{openEnded ? 'Próximas tarefas' : 'Próximas do ciclo'}</h2><span className="badge cyan">{pace.done} de {pace.total} tarefas</span></div>
+          {review}
           {!openEnded && (
             <p className="muted small" style={{ margin: '0 0 12px' }}>
               {pace.behind ? `${pace.behind} ${pace.behind === 1 ? 'tarefa' : 'tarefas'} atrás do ritmo para terminar antes da prova.` : pace.ahead ? `${pace.ahead} ${pace.ahead === 1 ? 'tarefa' : 'tarefas'} à frente do ritmo.` : 'No ritmo para terminar antes da prova.'}
@@ -162,7 +168,8 @@ export function HomePage() {
       ) : (
         <>
           <div className="section-title"><h2>Estudo do dia</h2><span className="badge cyan">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'short' })}</span></div>
-          {todays.length ? <div className="grid" style={{ gap: 12 }}>{todays.map((t) => <TaskCard key={t.id} task={t} subjects={subjects} />)}</div> : (
+          {review}
+          {dayTasks.length ? <div className="grid" style={{ gap: 12 }}>{dayTasks.map((t) => <TaskCard key={t.id} task={t} subjects={subjects} />)}</div> : (
             <div className="glass card">
               <p style={{ margin: 0 }}>Hoje é dia livre no seu cronograma.</p>
               {upcoming && <p className="muted" style={{ margin: '8px 0 0' }}>Próxima tarefa: {fmtDate(upcoming.date)} · {upcoming.title}</p>}
