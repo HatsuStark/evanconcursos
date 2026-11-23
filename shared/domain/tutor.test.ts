@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addDays, bestStreak, conceptStatuses, markRecapped, pendingRecap, stageLogs, answerOptions, applyAnswer, needsExample, offersRoadmap, checkClosed, conceptLevel, interleave, isNovice, markTaught, needsTeaching, dueConcepts, initialState, matchesText, progress, reportQuestion, scheduleAfterLesson, scheduleAfterReview, shuffledOrder, summarize, syncQueue, type AnswerLog, type Etapa, type TutorLesson, type TutorQuestion } from './tutor.ts';
+import { addDays, bestStreak, conceptStatuses, markRecapped, pendingRecap, stageLogs, answerOptions, applyAnswer, earnsChallenge, isAdvanced, visibleStages, needsExample, offersRoadmap, checkClosed, conceptLevel, interleave, isNovice, markTaught, needsTeaching, dueConcepts, initialState, matchesText, progress, reportQuestion, scheduleAfterLesson, scheduleAfterReview, shuffledOrder, summarize, syncQueue, type AnswerLog, type Etapa, type TutorLesson, type TutorQuestion } from './tutor.ts';
 
 const q = (id: string, etapa: Etapa, conceito: string, extra: Partial<TutorQuestion> = {}): TutorQuestion => ({
   id, etapa, conceito, estilo: 'conceito', formato: 'certo_errado', enunciado: id, alternativas: [], gabarito: 'C', aceitas: [], dica: '', explicacao: '', erros: [], ...extra,
@@ -207,9 +207,78 @@ describe('recapitulação, mapa de conceitos e sequência', () => {
   it('mapa: pendente, já sabia, em construção e dominado', () => {
     expect(conceptStatuses(lesson, { logs: [], known: ['c2'] }).map((c) => c.status)).toEqual(['pendente', 'conhecido']);
     expect(conceptStatuses(lesson, { logs: [log('k1', 'construcao', 'c1', true)], known: [] })[0]!.status).toBe('em_progresso');
-    expect(conceptStatuses(lesson, { logs: [log('k1', 'construcao', 'c1', true), log('f1', 'fixacao', 'c1', true)], known: [] })[0]!.status).toBe('dominado');
+    expect(conceptStatuses(lesson, { logs: [log('k1', 'construcao', 'c1', true), log('f1', 'fixacao', 'c1', true)], known: [] })[0]!.status).toBe('em_progresso');
+    expect(conceptStatuses(lesson, { logs: [log('k1', 'construcao', 'c1', true), log('z1', 'final', 'c1', true)], known: [] })[0]!.status).toBe('dominado');
   });
   it('maior sequência de acertos sem ajuda', () => {
     expect(bestStreak([log('a', 'construcao', 'c1', true), log('b', 'construcao', 'c1', true), log('c', 'construcao', 'c1', true, { hint: true }), log('d', 'fixacao', 'c1', true)])).toBe(2);
+  });
+});
+
+// Dificuldade que acompanha o aluno (2026-11-22): modo avançado, sequência de acertos, fixação de conceito provado e desafio.
+describe('dificuldade adaptativa', () => {
+  const L: TutorLesson = {
+    titulo: 'Tema',
+    conceitos: ['c1', 'c2', 'c3'].map((id) => ({ id, nome: id, essencial: '', explicacao: '', outro_jeito: '', base: '' })),
+    questoes: [
+      q('d1', 'diagnostico', 'c1'), q('d2', 'diagnostico', 'c2'),
+      q('k1', 'construcao', 'c1'), q('k2', 'construcao', 'c2'), q('k3', 'construcao', 'c3'), q('r3', 'reforco', 'c3'),
+      q('a1', 'aplicacao', 'c1'), q('a2', 'aplicacao', 'c2'), q('x1', 'desafio', 'c2'), q('x2', 'desafio', 'c3'),
+      q('f1', 'fixacao', 'c1'), q('f2', 'fixacao', 'c2'), q('f3', 'fixacao', 'c3'), q('z1', 'final', 'c1'),
+    ],
+  };
+  const ok = (id: string, etapa: Etapa, c: string) => log(id, etapa, c, true);
+  const run = (logs: AnswerLog[]) => logs.reduce((s, l) => applyAnswer(s, L, l), initialState(L));
+
+  it('desafio não entra na fila inicial e só aparece no topo quando entra', () => {
+    const s = initialState(L);
+    expect(s.queue).not.toContain('x1');
+    expect(visibleStages(L, s)).not.toContain('desafio');
+  });
+  it('diagnóstico inteiro de primeira: modo avançado, sem construção', () => {
+    const s = run([ok('d1', 'diagnostico', 'c1'), ok('d2', 'diagnostico', 'c2')]);
+    expect(s.advanced).toBe(true);
+    expect(s.queue.filter((id) => id.startsWith('k'))).toEqual([]);
+    expect(isAdvanced([ok('d1', 'diagnostico', 'c1'), log('d2', 'diagnostico', 'c2', true, { hint: true })])).toBe(false);
+  });
+  it('avançado: no fim da aplicação entra o desafio, no lugar da fixação dos conceitos que ele cobre', () => {
+    const s = run([ok('d1', 'diagnostico', 'c1'), ok('d2', 'diagnostico', 'c2'), ok('a1', 'aplicacao', 'c1'), ok('a2', 'aplicacao', 'c2')]);
+    expect(s.queue.slice(0, 2)).toEqual(['x1', 'x2']);
+    expect(s.queue).not.toContain('f2');
+    expect(s.queue).not.toContain('f3');
+    expect(visibleStages(L, s)).toContain('desafio');
+  });
+  it('sem avançado: desafio com 80% de acertos fortes depois do diagnóstico; abaixo disso, não', () => {
+    const base = [log('d1', 'diagnostico', 'c1', false), log('d2', 'diagnostico', 'c2', false), ok('k1', 'construcao', 'c1'), ok('k2', 'construcao', 'c2'), ok('k3', 'construcao', 'c3'), ok('a1', 'aplicacao', 'c1')];
+    expect(run([...base, ok('a2', 'aplicacao', 'c2')]).queue).toContain('x1');
+    const weak = run([...base.slice(0, 4), log('k3', 'construcao', 'c3', false), log('a1', 'aplicacao', 'c1', true, { hint: true }), ok('a2', 'aplicacao', 'c2')]);
+    expect(weak.queue).not.toContain('x1');
+    expect(earnsChallenge({ logs: [ok('k1', 'construcao', 'c1')] })).toBe(false);
+  });
+  it('erro no conceito mantém a fixação dele mesmo com desafio', () => {
+    const s = run([ok('d1', 'diagnostico', 'c1'), ok('d2', 'diagnostico', 'c2'), ok('a1', 'aplicacao', 'c1'), log('a2', 'aplicacao', 'c2', false), ok('r3', 'reforco', 'c3')]);
+    expect(s.queue).toContain('f2');
+  });
+  it('conceito provado na construção e na aplicação perde a fixação', () => {
+    const s = run([log('d1', 'diagnostico', 'c1', false), log('d2', 'diagnostico', 'c2', false), ok('k1', 'construcao', 'c1'), ok('a1', 'aplicacao', 'c1')]);
+    expect(s.queue).not.toContain('f1');
+    expect(s.skipped).toContain('f1');
+  });
+  it('4 acertos fortes seguidos pulam a próxima construção', () => {
+    const s = run([log('d1', 'diagnostico', 'c1', false), ok('d2', 'diagnostico', 'c2'), ok('k1', 'construcao', 'c1')]);
+    expect(s.queue[0]).toBe('k3');
+    const t = applyAnswer(applyAnswer(s, L, ok('k3', 'construcao', 'c3')), L, ok('a1', 'aplicacao', 'c1'));
+    expect(t.skipped).not.toContain('a2');
+    const M: TutorLesson = { titulo: 'T', conceitos: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'].map((id) => ({ id, nome: id, essencial: '', explicacao: '', outro_jeito: '', base: '' })),
+      questoes: [q('d1', 'diagnostico', 'c1'), ...['1', '2', '3', '4', '5', '6'].map((n) => q('k' + n, 'construcao', 'c' + n))] };
+    const hinted = log('d1', 'diagnostico', 'c1', true, { hint: true });
+    const st = [hinted, ok('k1', 'construcao', 'c1'), ok('k2', 'construcao', 'c2'), ok('k3', 'construcao', 'c3'), ok('k4', 'construcao', 'c4')].reduce((x, l) => applyAnswer(x, M, l), initialState(M));
+    expect(st.queue).toEqual(['k6']);
+    expect(st.skipped).toEqual(['k5']);
+  });
+  it('dominado precisa de acerto forte no desafio ou na verificação final', () => {
+    expect(conceptLevel([ok('k', 'construcao', 'c'), ok('f', 'fixacao', 'c')])).toBe('em_progresso');
+    expect(conceptLevel([ok('k', 'construcao', 'c'), ok('x', 'desafio', 'c')])).toBe('dominado');
+    expect(conceptLevel([ok('x', 'desafio', 'c'), log('f', 'fixacao', 'c', false)])).toBe('em_progresso');
   });
 });

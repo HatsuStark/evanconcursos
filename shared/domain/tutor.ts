@@ -5,7 +5,7 @@
 // Separação das metas: as respostas daqui nunca entram em question_attempts. Não contam na meta diária de questões
 // reais, no percentual de acerto por banca nem nos simulados; o progresso fica em tutor_sessions e tutor_concepts.
 
-export type Etapa = 'diagnostico' | 'construcao' | 'reforco' | 'aplicacao' | 'fixacao' | 'final' | 'revisao';
+export type Etapa = 'diagnostico' | 'construcao' | 'reforco' | 'aplicacao' | 'desafio' | 'fixacao' | 'final' | 'revisao';
 export type Formato = 'multipla' | 'certo_errado' | 'lacuna' | 'curta' | 'ordenacao';
 export type Estilo = 'conceito' | 'situacao' | 'erro' | 'comparacao' | 'aplicacao';
 
@@ -65,13 +65,22 @@ export interface TutorState {
   taught?: string[];   // conceitos cujo cartão de ensino já foi mostrado
   exampleSeen?: boolean; // o exemplo resolvido da aplicação já foi mostrado
   recapped?: Etapa[];  // etapas cuja recapitulação já foi mostrada
+  advanced?: boolean;  // modo avançado: acertou todo o diagnóstico de primeira; a construção sai e o desafio entra
 }
 
-// Ordem das etapas na aula. Reforço não entra na fila inicial: só aparece depois de um erro.
-export const STAGE_ORDER: Etapa[] = ['diagnostico', 'construcao', 'aplicacao', 'fixacao', 'final'];
+// Ordem das etapas na aula. Reforço e desafio não entram na fila inicial: o reforço aparece depois de um erro; o desafio,
+// para quem está indo bem (ver `earnsChallenge`).
+export const STAGE_ORDER: Etapa[] = ['diagnostico', 'construcao', 'aplicacao', 'desafio', 'fixacao', 'final'];
 export const STAGE_LABEL: Record<Etapa, string> = {
-  diagnostico: 'Diagnóstico', construcao: 'Construção', reforco: 'Construção', aplicacao: 'Aplicação', fixacao: 'Fixação', final: 'Verificação final', revisao: 'Revisão',
+  diagnostico: 'Diagnóstico', construcao: 'Construção', reforco: 'Construção', aplicacao: 'Aplicação', desafio: 'Desafio', fixacao: 'Fixação', final: 'Verificação final', revisao: 'Revisão',
 };
+const ON_DEMAND: Etapa[] = ['reforco', 'desafio', 'revisao'];
+// Etapas que aparecem no topo da aula: o desafio só quando entrou (na fila ou já respondido).
+export function visibleStages(lesson: Pick<TutorLesson, 'questoes'>, state: Pick<TutorState, 'queue' | 'logs'>): Etapa[] {
+  const ids = new Set([...state.queue, ...state.logs.map((l) => l.qid)]);
+  const challenge = lesson.questoes.some((q) => q.etapa === 'desafio' && ids.has(q.id));
+  return STAGE_ORDER.filter((e) => e !== 'desafio' || challenge);
+}
 // Etapas em que o estudante pode pedir dica ou a explicação antes de responder. Diagnóstico, fixação, verificação final
 // e revisão medem o que ele já sabe: só "Não sei".
 export const canAskHelp = (e: Etapa) => e === 'construcao' || e === 'reforco' || e === 'aplicacao';
@@ -104,8 +113,9 @@ export const isStrong = (l: AnswerLog) => l.correct && !l.hint && !l.explained &
 function inQueue(lesson: TutorLesson, state: Omit<TutorState, 'queue'> & { queue?: string[] }) {
   const used = new Set([...(state.queue ?? []), ...state.logs.map((l) => l.qid), ...state.skipped, ...state.reported]);
   const known = new Set(state.known);
-  const fresh = lesson.questoes.filter((q) => q.etapa !== 'reforco' && q.etapa !== 'revisao' && !used.has(q.id));
-  const skip = fresh.filter((q) => q.etapa === 'construcao' && known.has(q.conceito)).map((q) => q.id);
+  const fresh = lesson.questoes.filter((q) => !ON_DEMAND.includes(q.etapa) && !used.has(q.id));
+  // Construção de conceito já conhecido sai; no modo avançado, toda a construção sai (o reforço cobre quem errar depois).
+  const skip = fresh.filter((q) => q.etapa === 'construcao' && (known.has(q.conceito) || !!state.advanced)).map((q) => q.id);
   return { add: orderQueue(lesson, fresh.filter((q) => !skip.includes(q.id))).map((q) => q.id), skip };
 }
 
@@ -138,15 +148,52 @@ export function applyAnswer(state: TutorState, lesson: TutorLesson, log: AnswerL
     skipped.push(...drop);
     if (!known.includes(log.conceito)) known.push(log.conceito);
   }
-  if (!log.correct && (log.etapa === 'construcao' || log.etapa === 'aplicacao' || log.etapa === 'fixacao')) {
+  if (!log.correct && (log.etapa === 'construcao' || log.etapa === 'aplicacao' || log.etapa === 'desafio' || log.etapa === 'fixacao')) {
     const used = new Set([...queue, ...state.logs.map((l) => l.qid), log.qid, ...state.reported]);
     const reforco = lesson.questoes.find((q) => q.etapa === 'reforco' && q.conceito === log.conceito && !used.has(q.id));
     if (reforco) queue.splice(Math.min(REFORCO_GAP, queue.length), 0, reforco.id);
   }
   const logs = [...state.logs, log];
-  // Fim do diagnóstico: tema novo para o estudante liga o modo iniciante.
-  const novice = state.novice ?? (log.etapa === 'diagnostico' && !queue.some((id) => lesson.questoes.find((q) => q.id === id)?.etapa === 'diagnostico') ? isNovice(logs) : undefined);
-  return { ...state, queue, skipped, known, logs, ...(novice !== undefined ? { novice } : {}) };
+  const etapaOf = (id: string) => lesson.questoes.find((q) => q.id === id)?.etapa;
+  const drop = (ids: string[]) => { queue = queue.filter((id) => !ids.includes(id)); skipped.push(...ids); };
+  // Fim do diagnóstico: tema novo liga o modo iniciante; diagnóstico inteiro de primeira liga o avançado.
+  const diagOver = log.etapa === 'diagnostico' && !queue.some((id) => etapaOf(id) === 'diagnostico');
+  const novice = state.novice ?? (diagOver ? isNovice(logs) : undefined);
+  const advanced = state.advanced ?? (diagOver ? isAdvanced(logs) : undefined);
+  if (diagOver && advanced) drop(queue.filter((id) => etapaOf(id) === 'construcao'));
+  // Embalado: depois de STREAK_SKIP acertos fortes seguidos, a próxima construção é pulada.
+  if (isStrong(log) && logs.length >= STREAK_SKIP && logs.slice(-STREAK_SKIP).every(isStrong) && queue[0] && etapaOf(queue[0]) === 'construcao') drop([queue[0]]);
+  // Conceito provado na construção (ou já conhecido) e de novo na aplicação: a fixação dele sai.
+  if (log.etapa === 'aplicacao' && isStrong(log) && (known.includes(log.conceito) || state.logs.some((l) => l.conceito === log.conceito && l.etapa === 'construcao' && isStrong(l))))
+    drop(queue.filter((id) => etapaOf(id) === 'fixacao' && lesson.questoes.find((q) => q.id === id)?.conceito === log.conceito));
+  // Fim da aplicação: quem está indo bem ganha o desafio, que ocupa o lugar da fixação dos conceitos que ele cobre.
+  const next = { ...state, queue, skipped, known, logs, ...(novice !== undefined ? { novice } : {}), ...(advanced !== undefined ? { advanced } : {}) };
+  if (log.etapa === 'aplicacao' && !queue.some((id) => etapaOf(id) === 'aplicacao') && earnsChallenge(next)) {
+    const used = new Set([...queue, ...logs.map((l) => l.qid), ...state.reported]);
+    const challenge = lesson.questoes.filter((q) => q.etapa === 'desafio' && !used.has(q.id));
+    if (challenge.length) {
+      const wrongIn = new Set(logs.filter((l) => !l.correct).map((l) => l.conceito));
+      const covered = new Set(challenge.map((q) => q.conceito).filter((c) => !wrongIn.has(c)));
+      drop(queue.filter((id) => { const q = lesson.questoes.find((x) => x.id === id); return q?.etapa === 'fixacao' && covered.has(q.conceito); }));
+      const at = queue.findIndex((id) => etapaOf(id) !== 'reforco');
+      queue.splice(at < 0 ? queue.length : at, 0, ...challenge.map((q) => q.id));
+      return { ...next, queue, skipped };
+    }
+  }
+  return { ...next, queue, skipped };
+}
+
+const STREAK_SKIP = 4, CHALLENGE_RATE = 0.8, CHALLENGE_MIN_ANSWERS = 3;
+// Avançado: todo o diagnóstico de primeira e sem ajuda (pelo menos 2 perguntas).
+export function isAdvanced(logs: AnswerLog[]) {
+  const diag = logs.filter((l) => l.etapa === 'diagnostico');
+  return diag.length >= 2 && diag.every(isStrong);
+}
+// Desafio: modo avançado, ou pelo menos 80% de acertos fortes depois do diagnóstico (mínimo de 3 respostas).
+export function earnsChallenge(state: Pick<TutorState, 'logs' | 'advanced'>) {
+  if (state.advanced) return true;
+  const after = state.logs.filter((l) => l.etapa !== 'diagnostico');
+  return after.length >= CHALLENGE_MIN_ANSWERS && after.filter(isStrong).length >= CHALLENGE_RATE * after.length;
 }
 
 // Tema novo: no diagnóstico, menos da metade de acertos fortes (dica e "Não sei" não contam).
@@ -202,23 +249,28 @@ export function progress(state: TutorState) {
 export type Level = 'dominado' | 'em_progresso' | 'atencao';
 export const LEVEL_LABEL: Record<Level, string> = { dominado: 'Dominado', em_progresso: 'Em construção', atencao: 'Precisa de atenção' };
 
-const late = (e: Etapa) => e === 'fixacao' || e === 'final' || e === 'revisao';
+// Provas de domínio: o desafio e a verificação final, no nível da prova (a fixação saía com 9 em 10 acertos e não
+// separava quem domina; medido em 2026-11-22). Erro em qualquer etapa de lembrar sem pista conta contra.
+const proves = (e: Etapa) => e === 'desafio' || e === 'final' || e === 'revisao';
+const late = (e: Etapa) => e === 'fixacao' || proves(e);
 
 // Domínio a partir das respostas da aula. Acertar depois de ver a explicação ou com dica não prova domínio:
 // - atenção: errou na verificação final, ou errou duas vezes sem dois acertos fortes;
-// - dominado: acerto forte na fixação ou na verificação final, sem erro nelas, e mais acertos fortes que erros;
+// - dominado: acerto forte no desafio ou na verificação final, sem erro na fixação, desafio ou verificação, e mais
+//   acertos fortes que erros;
 // - em construção: o resto. null se o conceito não apareceu na aula.
 export function conceptLevel(logs: AnswerLog[]): Level | null {
   if (!logs.length) return null;
   const strong = logs.filter(isStrong).length, wrong = logs.filter((l) => !l.correct).length;
-  const strongLate = logs.some((l) => late(l.etapa) && isStrong(l)), wrongLate = logs.some((l) => late(l.etapa) && !l.correct);
+  const strongLate = logs.some((l) => proves(l.etapa) && isStrong(l)), wrongLate = logs.some((l) => late(l.etapa) && !l.correct);
   if (logs.some((l) => l.etapa === 'final' && !l.correct) || (wrong >= 2 && strong < 2)) return 'atencao';
   if (strongLate && !wrongLate && strong > wrong) return 'dominado';
   return 'em_progresso';
 }
 
 // Situação de cada conceito durante a aula (mapa de conceitos): ainda não visto, já sabia (diagnóstico ou aula anterior)
-// ou o domínio medido até aqui. Dominado só aparece depois da fixação: acertar na construção ainda é construção.
+// ou o domínio medido até aqui. Dominado só aparece depois do desafio ou da verificação final: acertar na construção
+// ainda é construção.
 export type ConceptStatus = Level | 'conhecido' | 'pendente';
 export function conceptStatuses(lesson: Pick<TutorLesson, 'conceitos'>, state: Pick<TutorState, 'logs' | 'known'>): { id: string; nome: string; status: ConceptStatus }[] {
   return lesson.conceitos.map((c) => {

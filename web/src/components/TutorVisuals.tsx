@@ -56,6 +56,7 @@ export function ConceptMap({ lesson, state, current, legend }: { lesson: Pick<Tu
 const NEXT_HINT: Partial<Record<Etapa, string>> = {
   construcao: 'Um conceito de cada vez, com dica e explicação à mão quando precisar.',
   aplicacao: 'Situações-problema no estilo da prova: aplicar e comparar as regras.',
+  desafio: 'Você está indo bem: 3 perguntas no nível das mais difíceis da banca, sem pistas. Errar aqui faz parte.',
   fixacao: 'Perguntas misturadas e sem pistas: lembrar sem ajuda é o que fixa na memória.',
   final: 'Verificação final, no nível da prova e sem pistas. Vá com calma.',
 };

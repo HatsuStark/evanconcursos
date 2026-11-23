@@ -5,7 +5,7 @@ import { BookOpen, ChevronDown, GraduationCap, ListChecks, Play, RotateCcw, Targ
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ymd } from '../../../shared/domain/dates.ts';
-import { applyAnswer, bestStreak, conceptStatuses, initialState, isStrong, LEVEL_LABEL, markRecapped, markTaught, needsExample, needsTeaching, offersRoadmap, pendingRecap, progress, reportQuestion, scheduleAfterLesson, STAGE_LABEL, STAGE_ORDER, summarize, syncQueue, type AnswerLog, type ConceptOutcome, type TutorLesson } from '../../../shared/domain/tutor.ts';
+import { applyAnswer, bestStreak, conceptStatuses, initialState, isStrong, LEVEL_LABEL, markRecapped, markTaught, needsExample, needsTeaching, offersRoadmap, pendingRecap, progress, reportQuestion, scheduleAfterLesson, STAGE_LABEL, STAGE_ORDER, summarize, syncQueue, visibleStages, type AnswerLog, type ConceptOutcome, type TutorLesson } from '../../../shared/domain/tutor.ts';
 import { missingMark } from '../../../shared/ai/marks.ts';
 import { createSession, fetchPractice, knownConcepts, lastTaskSession, saveLessonConcepts, saveSession, waitLesson, type SavedState, type TutorSessionRow } from '../lib/tutor.ts';
 import { fmtDate } from './ui.tsx';
@@ -130,7 +130,7 @@ export function TutorPanel({ taskId, planId, subjectId, subject, banca, title, e
         <h2><GraduationCap size={22} style={{ color: 'var(--violet)' }} /> Aula guiada</h2>
         <p>Um tutor de IA ensina o tema por meio de perguntas: começa pelo que você já sabe, constrói os conceitos passo a passo, aplica em situações de prova e termina com uma verificação sem pistas. Funciona mesmo sem ter lido a apostila ou visto a videoaula.</p>
         <ol className="tutor-steps">
-          {STAGE_ORDER.map((e) => <li key={e}>{STAGE_LABEL[e]}</li>)}
+          {STAGE_ORDER.filter((e) => e !== 'desafio').map((e) => <li key={e}>{STAGE_LABEL[e]}</li>)}
         </ol>
         <p className="faint small">Atividade didática: não conta na meta de questões reais nem no seu acerto por banca. O domínio de cada conceito fica registrado e alimenta as revisões espaçadas.</p>
         {error && <p className="error">{error}</p>}
@@ -158,7 +158,9 @@ export function TutorPanel({ taskId, planId, subjectId, subject, banca, title, e
   const group = (id: string) => { const e = saved.lesson.questoes.find((x) => x.id === id)?.etapa; return e === 'reforco' ? 'construcao' : e; };
   const cur = q ? group(q.id) : undefined;
   const inStage = { done: saved.logs.filter((l) => group(l.qid) === cur).length, total: saved.logs.filter((l) => group(l.qid) === cur).length + saved.queue.filter((id) => group(id) === cur).length };
-  const stage = q ? STAGE_ORDER.indexOf(q.etapa === 'reforco' ? 'construcao' : q.etapa) : STAGE_ORDER.length;
+  // O desafio só aparece no topo quando entrou na aula (quem está indo bem).
+  const stages = visibleStages(saved.lesson, saved);
+  const stage = q ? stages.indexOf(q.etapa === 'reforco' ? 'construcao' : q.etapa) : stages.length;
   // Ao avançar de etapa, antes da primeira pergunta da nova: o cartão de recapitulação da que terminou.
   const recap = q && !shown ? pendingRecap(saved, q) : null;
   // O conceito em ensino só acende no mapa na construção: nas etapas de lembrar, ele entregaria a resposta.
@@ -167,7 +169,7 @@ export function TutorPanel({ taskId, planId, subjectId, subject, banca, title, e
     <div className="grid" style={{ gap: 14 }}>
       <div className="glass card tutor-head">
         <div className="tutor-stages" aria-label="Etapas">
-          {STAGE_ORDER.map((e, i) => <span key={e} className={'tutor-stage' + (i < stage ? ' done' : i === stage ? ' on' : '')}>{STAGE_LABEL[e]}</span>)}
+          {stages.map((e, i) => <span key={e} className={'tutor-stage' + (i < stage ? ' done' : i === stage ? ' on' : '')}>{STAGE_LABEL[e]}</span>)}
         </div>
         <div className="bar"><span style={{ width: `${p.pct}%`, background: 'var(--violet)' }} /></div>
         <ConceptMap lesson={saved.lesson} state={saved} current={teaching} />
@@ -178,7 +180,7 @@ export function TutorPanel({ taskId, planId, subjectId, subject, banca, title, e
       </div>
       {error && <p className="error">{error}</p>}
       {q && recap ? (
-        <StageRecap stage={recap} next={STAGE_ORDER[stage] ?? 'final'} lesson={saved.lesson} state={saved}
+        <StageRecap stage={recap} next={stages[stage] ?? 'final'} lesson={saved.lesson} state={saved}
           onContinue={() => { const cur = stateRef.current; if (cur) update({ ...cur, recapped: markRecapped(cur, recap).recapped }); }} />
       ) : q && !shown && needsExample(saved, saved.lesson, q) ? (
         <WorkedExampleCard example={saved.lesson.exemplo!} concept={saved.lesson.conceitos.find((c) => c.id === saved.lesson.exemplo!.conceito)}

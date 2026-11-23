@@ -10,7 +10,9 @@ import { LETTERS, matchesText, type ConceptScheme, type TutorConcept, type Tutor
 // certo/errado, alternativas embaralhadas no servidor.
 // v3: distratores para responder lacuna e resposta curta sem digitar. v4: exemplo resolvido antes da aplicação.
 // v5: mnemônico e esquema visual (comparação ou passos) por conceito.
-export const TUTOR_PROMPT_VERSION = 'tutor-v5';
+// v6: etapa de desafio (3 perguntas difíceis no nível da banca, para quem está indo bem) e verificação final mais exigente
+// (casos e comparações, nada de definição): nas aulas v5, 9 em 10 acertos de primeira até na verificação final.
+export const TUTOR_PROMPT_VERSION = 'tutor-v6';
 export const TUTOR_REVIEW_VERSION = 'tutor-review-v3';
 export const TUTOR_GRADE_VERSION = 'tutor-grade-v1';
 export const TUTOR_PICK_VERSION = 'tutor-pick-v1';
@@ -44,7 +46,7 @@ export type TutorOutline = z.infer<typeof TutorOutline>;
 
 const Questao = z.object({
   id: z.string(),
-  etapa: z.enum(['diagnostico', 'construcao', 'reforco', 'aplicacao', 'fixacao', 'final', 'revisao']),
+  etapa: z.enum(['diagnostico', 'construcao', 'reforco', 'aplicacao', 'desafio', 'fixacao', 'final', 'revisao']),
   conceito: z.string().describe('id do conceito cobrado.'),
   estilo: z.enum(['conceito', 'situacao', 'erro', 'comparacao', 'aplicacao']),
   formato: z.enum(['multipla', 'certo_errado', 'lacuna', 'curta', 'ordenacao']),
@@ -159,10 +161,11 @@ export function tutorQuestionsPrompt(p: TutorInput, outline: OutlineLike, part: 
 - diagnostico: 3 perguntas (ids d1, d2, d3) sobre os fundamentos dos conceitos mais básicos, para descobrir o que o candidato já sabe. Fechadas (certo_errado ou multipla).
 - construcao: 1 pergunta por conceito (${n} no total, ids k1…), na ordem do roteiro, introdutória e progressiva. Com andaime: o enunciado traz um contexto curto (um caso ou uma premissa) que permite raciocinar até a resposta a partir da explicação do conceito e dos anteriores; cobre a ideia central, não detalhes. Prefira certo_errado ou multipla.
 - reforco: 1 pergunta por conceito (${n} no total, ids r1…), para quem errou a de construção: outro ângulo (outro caso ou o inverso da regra), um pouco mais simples, nunca a mesma pergunta reescrita.`
-    : `Monte agora SÓ estas perguntas (ids a1…, f1…, z1…):
+    : `Monte agora SÓ estas perguntas (ids a1…, x1…, f1…, z1…):
 - aplicacao: 3 ou 4 perguntas (ids a1…) que exijam interpretar, comparar conceitos, aplicar regras e analisar situações práticas, no estilo da ${p.banca || 'banca'}.
 - fixacao: 1 pergunta por conceito (${n} no total, ids f1…), com formulação diferente das anteriores, para recuperar da memória sem pista: pelo menos metade em curta ou lacuna; o resto em certo_errado.
-- final: 4 a 6 perguntas (ids z1…) cobrindo os conceitos mais importantes, sem pistas, no nível e no estilo da prova da ${p.banca || 'banca'}, com pelo menos uma situação-problema e uma que compare conceitos.
+- desafio: 3 perguntas DIFÍCEIS (ids x1, x2, x3), para o candidato que acertou quase tudo até aqui; só ele as vê. Nível das questões mais difíceis da ${p.banca || 'banca'}: (1) a exceção ou o detalhe que a banca usa como pegadinha, numa situação em que a regra geral parece se aplicar; (2) um caso que exija combinar dois conceitos para chegar à resposta (conceito = o principal); (3) multipla com distratores muito plausíveis, cada um sendo a resposta certa de um caso vizinho. Nada de definição, nada que se resolva só reconhecendo um termo. Sem dica útil (dica vazia ou só o caminho geral).
+- final: 4 a 6 perguntas (ids z1…) cobrindo os conceitos mais importantes, sem pistas, no nível e no estilo da prova da ${p.banca || 'banca'}: pelo menos metade em situação-problema ou comparação de conceitos, nenhuma de definição pura, distratores que confundam quem estudou pela metade. Não repita o ângulo das perguntas de desafio.
 - exemplo: um exemplo resolvido, mostrado antes da aplicação. Escolha o conceito mais cobrado em casos práticos, monte um caso concreto e resolva em 3 a 5 passos. As perguntas dos passos são genéricas e formam um roteiro que o candidato reaproveita nas perguntas de aplicação; o caso não pode ser igual a nenhuma delas.`;
   return `Você é professor especialista em concursos públicos brasileiros e está ensinando o tema por meio de perguntas.
 ${context(p)}

@@ -212,7 +212,7 @@ export function TutorQuestionCard({ q, concept, subject, lessonKey, taskId, pool
           {help && !hint && q.dica && <button className="btn ghost sm" onClick={() => setHint(true)}><Lightbulb size={15} /> Preciso de uma dica</button>}
           {help && !explained && concept?.explicacao && <button className="btn ghost sm" onClick={() => setExplained(true)}><HelpCircle size={15} /> Explicação breve</button>}
           <button className="btn ghost sm" disabled={busy} onClick={() => finish({ correct: false, response: '' }, true)}><MessageCircleQuestion size={15} /> Não sei</button>
-          {!help && <span className="faint small">{q.etapa === 'diagnostico' ? 'Sem problema errar aqui: é para ajustar a aula ao que você já sabe.' : 'Sem pistas nesta etapa: tente lembrar.'}</span>}
+          {!help && <span className="faint small">{q.etapa === 'diagnostico' ? 'Sem problema errar aqui: é para ajustar a aula ao que você já sabe.' : q.etapa === 'desafio' ? 'Nível das questões mais difíceis da banca, sem pistas.' : 'Sem pistas nesta etapa: tente lembrar.'}</span>}
         </div>
       )}
       {error && <p className="error">{error}</p>}
