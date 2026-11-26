@@ -5,7 +5,7 @@ import type { Timeline } from '../../../shared/audio/script.ts';
 import { supabase } from './supabase.ts';
 
 export const MUSIC_URL = '/audio/lofi-01.mp3';
-const RATE = 24000, CACHE = 'audio-reviews-v1';
+const RATE = 24000, CACHE = 'audio-reviews-v2';
 
 export type AudioStatus = 'queued' | 'planning' | 'scripting' | 'validating' | 'narrating' | 'ready' | 'failed';
 export interface AudioReview {
