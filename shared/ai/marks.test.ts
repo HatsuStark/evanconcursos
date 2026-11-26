@@ -22,5 +22,6 @@ describe('destaque no enunciado', () => {
     expect(missingMark('Um antônimo para a palavra destacada é:')).toBe(true);
     expect(missingMark('O termo <b>beligerante</b>, em destaque, significa:')).toBe(false);
     expect(missingMark('Assinale a alternativa correta.')).toBe(false);
+    expect(missingMark('Referencial para o processo, destacadamente nas provas.')).toBe(false);
   });
 });

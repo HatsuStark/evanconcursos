@@ -99,6 +99,14 @@ describe('banco próprio', () => {
     expect(lacksMark({ ...p, enunciado: '<p>Qual é a capital?</p>' })).toBe(false);
   });
 
+  it('lacksMark: marca em só parte das alternativas (negrito perdido nas outras)', () => {
+    const p = { enunciado: '<p>Assinale a alternativa cuja palavra em destaque está em sentido figurado.</p>', textos: ['<p>Brincar é…</p>'], anexos: [],
+      alternativas: [{ texto: '<p>“... uma dança espontânea...”</p>' }, { texto: '<p>“... suas <strong>habilidades</strong>...”</p>' }] };
+    expect(lacksMark(p)).toBe(true);
+    expect(lacksMark({ ...p, alternativas: [{ texto: '<p>uma <b>dança</b></p>' }, { texto: '<p>suas <strong>habilidades</strong></p>' }] })).toBe(false);
+    expect(lacksMark({ ...p, textos: ['<p>uma <b>dança</b> espontânea</p>'] })).toBe(false);
+  });
+
   it('ownRows descarta a que cita termo destacado sem marcar', () => {
     const exam: OwnExam = { prova: { banca: 'VUNESP', orgao: 'X', cargo: 'Y', ano: 2026, formato: 'me' }, questoes: [
       q({ numero: 1, enunciado: 'Os termos destacados em “a voracidade impeliu” significam:' }),

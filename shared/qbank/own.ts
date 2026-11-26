@@ -87,11 +87,14 @@ export const altsCiteText = (alts: { texto: string }[], materia: string) => READ
 export const onlyCredit = (html: string) =>
   textOf(html).replace(/\([^)]*\)/g, ' ').replace(/(https?:\/\/|www\.)\S+/gi, ' ').replace(/\bDispon[íi]vel em:?/gi, ' ').replace(/[\s.,;:–-]+/g, ' ').trim().length < 25;
 
-// Comando fala em termo destacado/sublinhado e nada vem marcado (nem no enunciado, nem nas alternativas, nem no texto, sem
-// anexo): a transcrição do PCI perde o negrito e a Quest às vezes também; sem saber qual é o termo, não dá para responder.
-export const lacksMark = (p: { enunciado: string; alternativas?: { texto: string }[]; textos?: string[]; anexos?: string[] }) =>
-  missingMark(p.enunciado ?? '') && !p.anexos?.length
-  && !(p.alternativas ?? []).some((a) => hasMark(a.texto)) && !(p.textos ?? []).some(hasMark);
+// Comando fala em termo destacado/sublinhado e nada vem marcado (nem no enunciado, nem no texto, sem anexo), ou a marca está
+// só em parte das alternativas ("cuja palavra em destaque…" com negrito numa só): a transcrição do PCI perde o negrito e a
+// Quest às vezes também; sem saber qual é o termo, não dá para responder.
+export const lacksMark = (p: { enunciado: string; alternativas?: { texto: string }[]; textos?: string[]; anexos?: string[] }) => {
+  if (!missingMark(p.enunciado ?? '') || p.anexos?.length || (p.textos ?? []).some(hasMark)) return false;
+  const alts = p.alternativas ?? [];
+  return !alts.length || !alts.every((a) => hasMark(a.texto ?? ''));
+};
 
 // `dropped`: ids das descartadas por falta de texto ou de destaque, para o importador tirar do banco as que entraram antes da regra.
 export function ownRows(exam: OwnExam, qidOf: (numero: number) => string): { rows: OwnRow[]; skipped: Record<string, number>; dropped: string[] } {

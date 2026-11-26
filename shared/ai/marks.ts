@@ -4,7 +4,8 @@
 export const MARK_RULE = 'Quando o comando se referir a palavra, expressão ou trecho "destacado", "em destaque", "sublinhado" ou "em negrito", marque esse trecho no próprio enunciado com **duplo asterisco** (ex.: "mantinha uma postura **beligerante** diante da ordem"). Não use asteriscos para mais nada.';
 
 const MARK = /\*\*([^*\n]+?)\*\*/g;
-const REFERS = /destacad|em destaque|sublinhad|em negrito|grifad/i;
+// Só o adjetivo: "destacadamente" não fala de termo marcado.
+const REFERS = /destacad[oa]s?\b|em destaque|sublinhad[oa]s?\b|em negrito|grifad[oa]s?\b/i;
 
 // O comando fala em termo destacado, mas nada foi marcado (nem com a marca, nem em HTML): a questão não tem como ser
 // respondida. Vale para o texto da IA e para o HTML já gravado.
