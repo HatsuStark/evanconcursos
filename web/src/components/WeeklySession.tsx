@@ -19,6 +19,7 @@ import { fetchGuide, type GuideRow } from './GuidePanel.tsx';
 import { QuestionsPanel } from './QuestionsPanel.tsx';
 import { ReviewCards } from './ReviewCards.tsx';
 import { TheoryReviewCard } from './TheoryReviewCard.tsx';
+import { AudioReview } from './AudioReview.tsx';
 
 const ERROR_BATCH = 10, MAX_BATCHES = 8; // até 80 erros vencidos por sessão
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -82,6 +83,7 @@ export function WeeklySession({ task, subjects }: { task: WeeklyTask; subjects: 
   if (phase.at === 'intro') {
     const empty = !n && !loose.length && !concepts && !cards;
     return (
+      <div className="grid" style={{ gap: 12 }}>
       <div ref={top} className="glass card grid" style={{ gap: 14 }}>
         <div className="daily-review-head">
           <RotateCcw size={22} style={{ color: 'var(--lime)' }} />
@@ -106,6 +108,8 @@ export function WeeklySession({ task, subjects }: { task: WeeklyTask; subjects: 
           Para cada tema: cartões da revisão curta e, em seguida, as questões que você errou nele. No fim, os outros erros{concepts ? ', os conceitos da Aula guiada' : ''}{cards ? ' e os mnemônicos' : ''}.
           {queue.deferredThemes + queue.deferredErrors > 0 && ` Para caber no tempo do bloco, ${[queue.deferredThemes && plural(queue.deferredThemes, 'tema', 'temas'), queue.deferredErrors && plural(queue.deferredErrors, 'erro', 'erros')].filter(Boolean).join(' e ')} ficam para a próxima semana.`}
         </p>
+      </div>
+      {!empty && <AudioReview taskId={task.id} />}
       </div>
     );
   }

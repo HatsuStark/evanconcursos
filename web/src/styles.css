@@ -1110,3 +1110,24 @@ details.card summary { cursor: pointer; font-weight: 600; }
 .weekly-list { margin: 0; padding-left: 22px; display: grid; gap: 8px; }
 .weekly-list li { display: grid; gap: 2px; }
 .weekly-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* Revisão em áudio */
+.audio-options { display: flex; flex-wrap: wrap; gap: 12px; }
+.audio-player { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.audio-play { width: 52px; height: 52px; border-radius: 50%; padding: 0; justify-content: center; }
+.audio-seek { width: 100%; accent-color: var(--lime); }
+.audio-meta { display: flex; justify-content: space-between; gap: 8px; }
+.audio-chapter { flex: 1; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audio-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.audio-controls select { margin-left: 4px; }
+.audio-volume { display: inline-flex; align-items: center; gap: 6px; }
+.audio-volume input { width: 90px; accent-color: var(--lime); }
+.audio-controls .btn.on { color: var(--lime); }
+.audio-chapters .link-btn { margin-left: 0; text-align: left; color: var(--text); }
+.audio-themes summary { cursor: pointer; }
+.audio-themes .weekly-list { margin-top: 8px; }
+.audio-alt { text-align: left; border: 1px solid var(--line); background: var(--well); color: var(--text); border-radius: 10px; padding: 8px 10px; font-size: 14px; cursor: pointer; }
+.audio-alt.chosen { border-color: var(--cyan); }
+.audio-alt.right { border-color: var(--lime); }
+.audio-alt.wrong { border-color: var(--rose, #e57373); }
+.audio-alt:disabled { cursor: default; }

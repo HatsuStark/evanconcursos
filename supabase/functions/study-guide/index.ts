@@ -9,7 +9,7 @@
 // Não há "gerar de novo" pelo estudante (economia de créditos): uma apostila existente é sempre reaproveitada.
 import { GeminiError, generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import type { z } from 'zod';
-import { applyBoardEvidence, roleSpecific, BOARD_SAMPLE_MAX, boardSample, Guide, guideCacheKey, GuideExtras, guideExtrasJsonSchema, GuideOutline, guideOutlineJsonSchema, GuideSections, guideSectionsJsonSchema, guideStage, mergeReviewHalves, reviewHalfJsonSchema, ReviewHalves, reviewStage, sectionGroups, textFromOutline, guidePracticeJsonSchema, GuidePractice, GuideText, guideTextJsonSchema, guideVersion, guidePrompt, MAX_GUIDE_FONTES, MAX_GUIDE_JURIS, mergeGuide, partialGuide, lawKeys, pickSimilarGuide, topicKeys, trimReview, unlistedLaws, verifyGuide, guideCitationText, type BoardQuestion, type GuideDepth, type GuideJuris, type GuideSource } from '../../../shared/ai/guide.ts';
+import { applyBoardEvidence, BOARD_SAMPLE_MAX, boardSample, Guide, guideCacheKey, GuideExtras, guideExtrasJsonSchema, GuideOutline, guideOutlineJsonSchema, GuideSections, guideSectionsJsonSchema, guideStage, mergeReviewHalves, reviewHalfJsonSchema, ReviewHalves, reviewStage, sectionGroups, textFromOutline, guidePracticeJsonSchema, GuidePractice, GuideText, guideTextJsonSchema, guideVersion, guidePrompt, mergeGuide, partialGuide, lawKeys, topicKeys, trimReview, unlistedLaws, verifyGuide, guideCitationText, type BoardQuestion, type GuideDepth } from '../../../shared/ai/guide.ts';
 import { normalizeText } from '../../../shared/ai/notice.ts';
 import { cleanTrueFalse, TF_PROMPT_VERSION, TrueFalse, trueFalseJsonSchema, trueFalsePrompt, type TfSheet, type TrueFalseItem } from '../../../shared/ai/true-false.ts';
 import { mergeRelated, outsideRefs, RELATED_PROMPT_VERSION, RelatedVerdicts, relatedJsonSchema, relatedPrompt, type RelatedArticle } from '../../../shared/ai/related.ts';
@@ -17,12 +17,10 @@ import { QuestClient } from '../../../shared/qbank/client.ts';
 import { materiaOf, measureIncidence, QMAP_PROMPT_VERSION } from '../../../shared/qbank/map.ts';
 import { aiFor } from '../_shared/ai.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
-import { topicJuris } from '../_shared/juris.ts';
-import { topicSources } from '../_shared/sources.ts';
-import { loadLawSources } from '../_shared/law.ts';
-import { ensureHot, hotLaws } from '../_shared/hot.ts';
-import { hotArticleKeys, hotGuideNote, type HotInput } from '../../../shared/ai/hot.ts';
+import { ensureHot } from '../_shared/hot.ts';
+import { hotGuideNote } from '../../../shared/ai/hot.ts';
 import { lawByKey } from '../../../shared/legal/registry.ts';
+import { findGuide, resolve, type GuideContext } from '../_shared/guides.ts';
 import { cacheQuestions, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, type PublicQuestion } from '../_shared/qbank.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
@@ -38,60 +36,6 @@ const PREPARE_RETRY_MS = 24 * 3600 * 1000; // apostila que falhou não gasta de 
 type Auth = Exclude<Awaited<ReturnType<typeof requireUser>>, Response>;
 type Admin = ReturnType<typeof adminClient>;
 
-// Tudo o que define a apostila de uma tarefa; null se a tarefa não tem sessão de conteúdo.
-async function resolve(auth: Auth, admin: Admin, task: { subject_id: string | null; session_id: string | null }, depth: GuideDepth) {
-  if (!task.session_id || !task.subject_id) return null;
-  const [{ data: session }, { data: subject }] = await Promise.all([
-    auth.client.from('study_sessions').select('title, keyword, topic_ids, law_refs').eq('id', task.session_id).single(),
-    auth.client.from('notice_subjects').select('name, notice_id').eq('id', task.subject_id).single(),
-  ]);
-  const { data: notice } = await auth.client.from('notices').select('board, role_name, organization, role_duties, structure, education_level').eq('id', subject!.notice_id).single();
-  const { data: tt } = session?.topic_ids?.length ? await auth.client.from('notice_topics').select('id, text').in('id', session.topic_ids) : { data: [] };
-  const topics = (tt ?? []).sort((a, b) => session!.topic_ids.indexOf(a.id) - session!.topic_ids.indexOf(b.id)).map((t) => t.text);
-  // Mais cobrados (IA, em cache compartilhado): na sessão com mais artigos do que cabem, já escolhem os trechos; em toda
-  // apostila, viram destaques no prompt (fora da chave do cache).
-  const banca = String(notice?.board ?? ''), ownerId = auth.user.id;
-  const hotInput = (...a: Parameters<typeof hotLaws>): HotInput => ({ banca, subject: subject!.name, title: session!.title, topics, laws: hotLaws(...a) });
-  const { articles, law, extra, omitted, refs, all } = await loadLawSources(admin, { title: session!.title, topics, subject: subject!.name, ownerId, lawRefs: session!.law_refs,
-    hot: async (rs, arts, own) => {
-      const h = await ensureHot(admin, ownerId, hotInput(rs, arts, own));
-      return h ? hotArticleKeys(h, arts, (k) => lawByKey(k, own)?.short ?? k) : [];
-    } });
-  // Nível superior: as súmulas e teses que mais caem nos artigos da sessão entram como fonte (só as escolhidas pela IA,
-  // em cache compartilhado; sem a escolha, a apostila sai só com a lei).
-  const juris: GuideJuris[] = notice?.education_level === 'Superior' && law.length
-    ? (await topicJuris(admin, ownerId, { banca, subject: subject!.name, title: session!.title, refs }, async () => true).catch((e) => { console.error('jurisprudência:', e); return { items: [] }; }))
-      .items.filter((i) => i.hot).slice(0, MAX_GUIDE_JURIS).map((i) => ({ ref: i.label, text: i.text.slice(0, 900), court: i.court, kind: i.kind, number: i.number }))
-    : [];
-  // Matéria sem lei: trechos de obras abertas que explicam o tema, só os escolhidos pela IA (em cache compartilhado).
-  const fontes: GuideSource[] = !law.length
-    ? await topicSources(admin, ownerId, { subject: subject!.name, title: session!.title, keyword: String(session?.keyword ?? ''), topics }, async () => true)
-      .then((r) => (r.ai ? r.items.slice(0, MAX_GUIDE_FONTES).map((i) => ({ ref: i.ref, text: i.text.slice(0, 1400) })) : []))
-      .catch((e) => { console.error('fontes:', e); return []; })
-    : [];
-  const input = { depth, banca, subject: subject!.name, title: session!.title, topics, law, juris, fontes };
-  return {
-    extra, input, key: guideCacheKey({ ...input, cargo: String(notice?.role_name ?? '') }), articles, noticeId: subject!.notice_id as string, cargo: (notice?.role_name ?? '') as string,
-    duties: String(notice?.role_duties ?? ''), otherRoles: ((notice?.structure as { otherRoles?: string[] } | null)?.otherRoles ?? []) as string[],
-    sessionId: task.session_id, subjectId: task.subject_id, keyword: (session?.keyword ?? '') as string,
-    organization: String(notice?.organization ?? ''),
-    hot: hotInput(refs, all, extra), omitted,
-  };
-}
-type GuideContext = NonNullable<Awaited<ReturnType<typeof resolve>>>;
-
-// 1) Apostila igual (mesmo conteúdo); 2) semelhante (mesma matéria/banca/profundidade, mesmos artigos,
-// tópicos e título parecidos), de qualquer sessão ou estudante. Só gera com a IA quando não há nenhuma.
-async function findGuide(admin: Admin, { input, key }: GuideContext) {
-  const { data: cached } = await admin.from('study_guides').select('*').eq('cache_key', key).maybeSingle();
-  if (cached) return cached;
-  // Apostila de tema do cargo só serve para o mesmo cargo: aí não vale a de tema parecido.
-  if (roleSpecific(input)) return null;
-  const { data: similar } = await admin.from('study_guides').select('*').eq('subject_key', normalizeText(input.subject)).eq('depth', input.depth)
-    .eq('banca', normalizeText(input.banca)).eq('prompt_version', guideVersion(input.depth)).order('created_at', { ascending: false }).limit(60);
-  const hit = pickSimilarGuide({ title: input.title, topics: topicKeys(input.topics), law: lawKeys(input.law, [...input.juris, ...input.fontes]) }, similar ?? []);
-  return hit >= 0 ? similar![hit] : null;
-}
 
 const lastJob = async (admin: Admin, key: string) => (await admin.from('ai_jobs').select('status, started_at').eq('kind', 'study_guide').eq('input->>cacheKey', key)
   .order('created_at', { ascending: false }).limit(1).maybeSingle()).data;
@@ -303,7 +247,7 @@ async function penteFino(auth: Auth, admin: Admin, taskId: string) {
     .eq('kind', 'theory').not('session_id', 'is', null).not('done_at', 'is', null).order('done_at').limit(500);
   const sessions = [...new Map((done ?? []).map((t) => [t.session_id as string, t])).values()].slice(0, PENTE_MAX);
   const items = await Promise.all(sessions.map(async (t) => {
-    const ctx = await resolve(auth, admin, t, 'completa');
+    const ctx = await resolve(auth.client, admin, auth.user.id, t, 'completa');
     if (!ctx) return null;
     const revisao = { ...ctx, input: { ...ctx.input, depth: 'revisao' as const }, key: guideCacheKey({ ...ctx.input, depth: 'revisao', cargo: ctx.cargo }) };
     // Da completa, o que memorizar e as pegadinhas; da revisão (se já existe), os mnemônicos e os gatilhos.
@@ -329,7 +273,7 @@ async function prepare(auth: Auth, admin: Admin, planId: string) {
     if (made >= PREPARE_MAX) break;
     if (seen.has(task.session_id)) continue;
     seen.add(task.session_id);
-    const ctx = await resolve(auth, admin, task, 'completa');
+    const ctx = await resolve(auth.client, admin, auth.user.id, task, 'completa');
     if (!ctx || await findGuide(admin, ctx)) continue;
     const job = await lastJob(admin, ctx.key);
     const { data: failed } = await admin.from('ai_jobs').select('id').eq('kind', 'study_guide').eq('status', 'failed').eq('input->>cacheKey', ctx.key)
@@ -384,7 +328,7 @@ Deno.serve(async (req) => {
     if (body.action === 'tf') return json(200, { items: await trueFalse(admin, auth.user.id, String(body.guideId ?? '')) });
     const depth: GuideDepth = body.depth === 'revisao' ? 'revisao' : body.depth === 'aprofundamento' ? 'aprofundamento' : 'completa';
     const { data: task } = await auth.client.from('tasks').select('subject_id, session_id').eq('id', String(body.taskId ?? '')).maybeSingle();
-    const ctx = task && await resolve(auth, admin, task, depth);
+    const ctx = task && await resolve(auth.client, admin, auth.user.id, task, depth);
     if (!ctx) return json(400, { error: 'A apostila é gerada para tarefas de teoria (com sessão de conteúdo).' });
     const guide = await findGuide(admin, ctx);
     // Revisões gravadas antes dos tetos também saem curtas.
