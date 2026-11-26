@@ -105,9 +105,12 @@ export async function buildAudio(r: AudioReview, music: boolean, onProgress: (f:
     if (!raw.has(i)) raw.set(i, fetch(urlOf.get(i)!).then((x) => { if (!x.ok) throw new Error('Falha ao baixar a narração.'); return x.arrayBuffer(); }));
     return raw.get(i)!;
   };
-  // Encoder e montagem só carregam quando há áudio para montar (fora do pacote da tela de estudo).
-  const [{ createMp3Encoder }, { checkMix, renderMix }] = await Promise.all([import('wasm-media-encoders'), import('../../../shared/audio/mix.ts')]);
-  const enc = await createMp3Encoder();
+  // Encoder e montagem só carregam quando há áudio para montar (fora do pacote da tela de estudo). O .wasm vem como
+  // arquivo do próprio site: o padrão da biblioteca busca uma URL data:, que o CSP (connect-src) bloqueia.
+  const [{ createEncoder }, { default: mp3Wasm }, { checkMix, renderMix }] = await Promise.all([
+    import('wasm-media-encoders'), import('wasm-media-encoders/wasm/mp3?url'), import('../../../shared/audio/mix.ts'),
+  ]);
+  const enc = await createEncoder('audio/mpeg', mp3Wasm);
   enc.configure({ sampleRate: RATE, channels: withMusic ? 2 : 1, bitrate: withMusic ? 128 : 64 });
   const parts: Uint8Array[] = [];
   const report = await renderMix({
