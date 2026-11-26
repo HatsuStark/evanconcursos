@@ -109,7 +109,7 @@ export function WeeklySession({ task, subjects }: { task: WeeklyTask; subjects: 
           {queue.deferredThemes + queue.deferredErrors > 0 && ` Para caber no tempo do bloco, ${[queue.deferredThemes && plural(queue.deferredThemes, 'tema', 'temas'), queue.deferredErrors && plural(queue.deferredErrors, 'erro', 'erros')].filter(Boolean).join(' e ')} ficam para a próxima semana.`}
         </p>
       </div>
-      {!empty && <AudioReview taskId={task.id} />}
+      <AudioReview taskId={task.id} />
       </div>
     );
   }

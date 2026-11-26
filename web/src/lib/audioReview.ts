@@ -55,7 +55,7 @@ export function useMusicAvailable() {
 export function useAudioReview(taskId: string) {
   return useQuery({
     queryKey: ['audio-review', taskId],
-    queryFn: () => invoke<{ review: AudioReview | null; used: number; limit: number }>({ action: 'status', taskId }),
+    queryFn: () => invoke<{ review: AudioReview | null; used: number; limit: number; available: boolean; early: boolean; date: string | null }>({ action: 'status', taskId }),
     refetchInterval: (q) => (isWorking(q.state.data?.review?.status) ? 4000 : false),
     refetchOnWindowFocus: true,
   });

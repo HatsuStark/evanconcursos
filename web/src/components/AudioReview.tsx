@@ -48,6 +48,10 @@ export function AudioReview({ taskId }: { taskId: string }) {
 
   if (!review) {
     const used = q.data?.used ?? 0, limit = q.data?.limit ?? 1;
+    if (!q.data?.available) {
+      const d = q.data?.date ? new Date(`${q.data.date}T12:00:00`).toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }) : null;
+      return <div className="glass card grid" style={{ gap: 10 }}>{head}<p className="muted small" style={{ margin: 0 }}>Fica disponível no dia da revisão semanal{d ? ` (${d})` : ''}.</p></div>;
+    }
     return (
       <div className="glass card grid" style={{ gap: 12 }}>
         {head}
@@ -62,6 +66,7 @@ export function AudioReview({ taskId }: { taskId: string }) {
         {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
         <div className="daily-review-head">
           <button className="btn" disabled={busy || used >= limit} onClick={() => run(() => startAudioReview(taskId, duration, voice))}><Headphones size={16} /> Gerar revisão em áudio</button>
+          {q.data?.early && <span className="chip">Teste antecipado (admin)</span>}
           <span className="faint small">{used >= limit ? 'A revisão em áudio desta semana já foi gerada.' : `${limit === 1 ? 'Uma geração' : `${limit} gerações`} por revisão semanal · leva alguns minutos`}</span>
         </div>
       </div>

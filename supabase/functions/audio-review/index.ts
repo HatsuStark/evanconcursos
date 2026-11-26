@@ -25,7 +25,7 @@ import {
 } from '../../../shared/audio/script.ts';
 import { defaultModel, keyFor } from '../_shared/ai.ts';
 import { findGuide, resolve } from '../_shared/guides.ts';
-import { adminClient, CORS, json, logUsage, modelPrice, requireUser } from '../_shared/http.ts';
+import { adminClient, CORS, isAdmin, json, logUsage, modelPrice, requireUser } from '../_shared/http.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 type Admin = ReturnType<typeof adminClient>;
@@ -394,9 +394,11 @@ function publicReview(r: Review) {
   };
 }
 
-async function weeklyTask(client: ReturnType<typeof adminClient>, taskId: string) {
+// Só no dia da revisão semanal (ou depois, com a semana aberta). Admin pode gerar antes, para testar.
+async function weeklyTask(client: ReturnType<typeof adminClient>, taskId: string, early: boolean) {
   const { data } = await client.from('tasks').select('id, plan_id, kind, date, superseded_in_version').eq('id', taskId).maybeSingle();
-  return data && data.kind === 'weekly_review' && !data.superseded_in_version && String(data.date) <= todaySP() ? data : null;
+  if (!data || data.kind !== 'weekly_review' || data.superseded_in_version) return null;
+  return String(data.date) <= todaySP() || early ? data : null;
 }
 
 Deno.serve(async (req) => {
@@ -430,11 +432,14 @@ Deno.serve(async (req) => {
         const { data: bs } = await admin.from('audio_review_blocks').select('status').eq('review_id', r.id);
         blocks = { done: (bs ?? []).filter((b) => b.status === 'done').length, total: bs?.length ?? 0 };
       }
-      return json(200, { review: r ? { ...publicReview(r), blocks } : null, used: (rows ?? []).filter((x) => x.status !== 'failed').length, limit: limit() });
+      const { data: t } = await auth.client.from('tasks').select('kind, date').eq('id', String(body.taskId ?? '')).maybeSingle();
+      const due = !!t && t.kind === 'weekly_review' && String(t.date) <= todaySP();
+      const early = !due && !!t && t.kind === 'weekly_review' && isAdmin(auth.user.email ?? '');
+      return json(200, { review: r ? { ...publicReview(r), blocks } : null, used: (rows ?? []).filter((x) => x.status !== 'failed').length, limit: limit(), available: due || early, early, date: t?.date ?? null });
     }
 
     if (body.action === 'start') {
-      const task = await weeklyTask(auth.client, String(body.taskId ?? ''));
+      const task = await weeklyTask(auth.client, String(body.taskId ?? ''), isAdmin(auth.user.email ?? ''));
       if (!task) return json(400, { error: 'A revisão em áudio fica disponível no dia da revisão semanal.' });
       const duration = (DURATIONS as readonly number[]).includes(Number(body.duration)) ? Number(body.duration) as Duration : 20;
       const voice: VoiceKind = body.voice === 'masculina' ? 'masculina' : 'feminina';
