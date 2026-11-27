@@ -34,7 +34,7 @@ describe('trilha', () => {
       { index: 1, chapterId: 'C1', pauseAfterMs: 1500, music: 'suave', cue: false, transition: true },
     ], [2000, 2000], [{ id: 'C1', titulo: 'A' }]);
     const e = musicEnvelope(tl, 1000).map((p) => p.db);
-    expect(e).toEqual([-14, -30, -36, -24, -18, -14]);
+    expect(e).toEqual([-8, -23, -28, -18, -13, -8]);
   });
 });
 

@@ -185,7 +185,7 @@ export async function renderMix(p: MixInput): Promise<MixReport> {
     gains.push(dbToLin(Math.max(-20, Math.min(20, TARGET_LUFS - lufs))));
     await p.yieldEvery?.();
   }
-  const musicRef = p.music ? dbToLin(TARGET_LUFS - loudness([p.music[0], p.music[1]], sr) - 3) : 0;
+  const musicRef = p.music ? dbToLin(TARGET_LUFS - loudness([p.music[0], p.music[1]], sr)) : 0;
   const env = p.music ? musicEnvelope(tl, sr) : [];
   const cue = cueTone(sr), cueGain = dbToLin(-24) * dbToLin(TARGET_LUFS + 14);
   const cueStarts = tl.blocks.filter((b) => b.cue).map((b) => toS(b.endMs + 150));

@@ -5,7 +5,7 @@ import type { Timeline } from '../../../shared/audio/script.ts';
 import { supabase } from './supabase.ts';
 
 export const MUSIC_URL = '/audio/lofi-01.mp3';
-const RATE = 24000, CACHE = 'audio-reviews-v2';
+const RATE = 24000, CACHE = 'audio-reviews-v3';
 
 export type AudioStatus = 'queued' | 'planning' | 'scripting' | 'validating' | 'narrating' | 'ready' | 'failed';
 export interface AudioReview {
@@ -48,7 +48,8 @@ export function stageLabel(r: AudioReview): string {
 export function useMusicAvailable() {
   return useQuery({
     queryKey: ['audio-music'], staleTime: Infinity,
-    queryFn: () => fetch(MUSIC_URL, { method: 'HEAD' }).then((r) => r.ok && (r.headers.get('content-type') ?? '').startsWith('audio')).catch(() => false),
+    // Sem o arquivo, o site devolve o index.html (SPA): HTML = trilha ausente.
+    queryFn: () => fetch(MUSIC_URL, { method: 'HEAD' }).then((r) => r.ok && !(r.headers.get('content-type') ?? '').includes('text/html')).catch(() => false),
   });
 }
 

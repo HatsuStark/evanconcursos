@@ -72,5 +72,6 @@ export const BLOCK_MAX_CHARS = 1000, BLOCK_BREAK_PAUSE_MS = 2500;
 export const INTRO_MS = 4000, OUTRO_MS = 5000;
 // Loudness e pico do arquivo final; trilha abaixo da voz (dB) por situação.
 export const TARGET_LUFS = -16, TRUE_PEAK_DB = -1;
-// Trilha bem baixa (pedido do usuário em 2026-11-26): fundo, nunca disputa com a voz.
-export const MUSIC_DB = { suave: -24, reduzida: -30, pausa: -36, transicao: -18, intro: -14 } as const;
+// Trilha baixa mas audível (dB abaixo da voz, com a trilha medida no mesmo loudness): -24 ficava inaudível em alto-falante
+// de celular (2026-11-26). Explicação -18, pergunta -23, pausa de recuperação -28, transição -13, abertura -8.
+export const MUSIC_DB = { suave: -18, reduzida: -23, pausa: -28, transicao: -13, intro: -8 } as const;

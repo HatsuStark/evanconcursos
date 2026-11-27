@@ -99,7 +99,7 @@ export function AudioReview({ taskId }: { taskId: string }) {
   return (
     <div className="glass card grid" style={{ gap: 12 }}>
       {head}
-      <Player review={review} initialMusic={musicOk && (review.music ?? music)} musicAvailable={musicOk} />
+      <Player review={review} initialMusic={musicOk && music} musicAvailable={musicOk} />
       <Themes review={review} />
       <RetentionQuiz review={review} />
     </div>
