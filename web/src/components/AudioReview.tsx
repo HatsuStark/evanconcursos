@@ -140,7 +140,8 @@ function Player({ review, initialMusic, musicAvailable }: { review: Review; init
   const prefs = useMemo(readPrefs, []);
   const [music, setMusic] = useState(initialMusic);
   const [url, setUrl] = useState<string | null>(null);
-  const [hasMusic, setHasMusic] = useState(true);
+  const [playingMusic, setPlayingMusic] = useState<boolean | null>(null);
+  const [warning, setWarning] = useState('');
   const [building, setBuilding] = useState<number | null>(0);
   const [error, setError] = useState('');
   const [playing, setPlaying] = useState(false);
@@ -158,10 +159,11 @@ function Player({ review, initialMusic, musicAvailable }: { review: Review; init
   useEffect(() => {
     let off = false, made: string | null = null;
     setBuilding(0); setError('');
-    buildAudio(current.current, music, (f) => { if (!off) setBuilding(f); }).then(({ blob, music: m }) => {
+    buildAudio(current.current, music, (f) => { if (!off) setBuilding(f); }).then(({ blob, music: m, issues }) => {
       if (off) return;
       made = URL.createObjectURL(blob);
-      if (music && !m) setHasMusic(false);
+      setPlayingMusic(m);
+      setWarning(issues.filter((i) => i.startsWith('Trilha')).join(' '));
       setUrl(made); setBuilding(null);
     }).catch((e) => { if (!off) { setError((e as Error).message); setBuilding(null); } });
     return () => { off = true; if (made) URL.revokeObjectURL(made); };
@@ -207,7 +209,7 @@ function Player({ review, initialMusic, musicAvailable }: { review: Review; init
 
   const el = () => audio.current!;
   const seek = (ms: number) => { const a = audio.current; if (a) { a.currentTime = Math.max(0, Math.min(total, ms) / 1000); setTime(a.currentTime * 1000); } };
-  const toggleMusic = () => { resumeAt.current = (audio.current?.currentTime ?? 0) * 1000; setMusic(!music); writePrefs({ music: !music }); };
+  const chooseMusic = (on: boolean) => { if (on === music) return; resumeAt.current = (audio.current?.currentTime ?? 0) * 1000; setMusic(on); writePrefs({ music: on }); };
   const chapterAt = [...chapters].reverse().find((c) => c.startMs <= time);
 
   return (
@@ -228,6 +230,8 @@ function Player({ review, initialMusic, musicAvailable }: { review: Review; init
       />
       {building !== null && <div className="grid" style={{ gap: 6 }}><span className="muted small">Finalizando o áudio no seu aparelho…</span><div className="bar"><span style={{ width: `${Math.round(building * 100)}%`, background: 'var(--lime)' }} /></div></div>}
       {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
+      {warning && <p className="error" style={{ margin: 0 }}>{warning}</p>}
+      {url && playingMusic !== null && <span className="faint small">Tocando: {playingMusic ? 'com trilha lo-fi' : 'só voz'}</span>}
       {url && (
         <>
           <div className="audio-player">
@@ -242,7 +246,12 @@ function Player({ review, initialMusic, musicAvailable }: { review: Review; init
               <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>{SPEEDS.map((s) => <option key={s} value={s}>{String(s).replace('.', ',')}x</option>)}</select>
             </label>
             <label className="faint small audio-volume"><Volume2 size={15} /><input type="range" min={0} max={1} step={0.05} value={volume} aria-label="Volume" onChange={(e) => setVolume(Number(e.target.value))} /></label>
-            {hasMusic && musicAvailable && <button className={`btn ghost sm${music ? ' on' : ''}`} onClick={toggleMusic} disabled={building !== null}><Music size={15} /> {music ? 'Com trilha' : 'Sem música'}</button>}
+            {musicAvailable && (
+              <div className="segmented" role="group" aria-label="Trilha">
+                <button type="button" className={music ? 'on' : ''} aria-pressed={music} disabled={building !== null} onClick={() => chooseMusic(true)}><Music size={13} /> Com trilha</button>
+                <button type="button" className={!music ? 'on' : ''} aria-pressed={!music} disabled={building !== null} onClick={() => chooseMusic(false)}>Sem música</button>
+              </div>
+            )}
             {chapters.length > 1 && <button className="btn ghost sm" onClick={() => setShowChapters(!showChapters)}><ListOrdered size={15} /> Capítulos</button>}
             <a className="btn ghost sm" href={url} download={`revisao-em-audio${music ? '' : '-sem-musica'}.mp3`}><Download size={15} /> Baixar MP3</a>
           </div>

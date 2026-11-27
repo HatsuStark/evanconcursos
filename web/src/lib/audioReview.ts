@@ -74,13 +74,16 @@ async function decode(buf: ArrayBuffer, channels: number) {
   return ctx.decodeAudioData(buf);
 }
 
-let musicCache: Promise<[Float32Array, Float32Array] | null> | null = null;
+// Trilha decodificada a 24 kHz. Falha não fica guardada (tenta de novo na próxima montagem) e chega à tela com o motivo.
+let musicCache: Promise<[Float32Array, Float32Array]> | null = null;
 export function loadMusic() {
-  musicCache ??= fetch(MUSIC_URL).then(async (r) => {
-    if (!r.ok) return null;
-    const a = await decode(await r.arrayBuffer(), 2);
+  musicCache ??= (async () => {
+    const r = await fetch(MUSIC_URL);
+    if (!r.ok) throw new Error(`arquivo da trilha respondeu ${r.status}`);
+    const a = await decode(await r.arrayBuffer(), 2).catch((e) => { throw new Error(`o navegador não decodificou a trilha (${(e as Error).message})`); });
     return [a.getChannelData(0).slice(), a.getChannelData(a.numberOfChannels > 1 ? 1 : 0).slice()] as [Float32Array, Float32Array];
-  }).catch(() => null);
+  })();
+  musicCache.catch(() => { musicCache = null; });
   return musicCache;
 }
 
@@ -94,10 +97,11 @@ async function toCache(id: string, music: boolean, blob: Blob) {
 
 // Monta (ou pega do cache) a versão pedida. Sem a trilha disponível, sai a versão só com voz.
 export async function buildAudio(r: AudioReview, music: boolean, onProgress: (f: number) => void): Promise<{ blob: Blob; music: boolean; issues: string[] }> {
-  const track = music ? await loadMusic() : null;
+  let musicError = '';
+  const track = music ? await loadMusic().catch((e) => { musicError = (e as Error).message; return null; }) : null;
   const withMusic = !!track;
   const cached = await fromCache(r.id, withMusic);
-  if (cached) return { blob: cached, music: withMusic, issues: [] };
+  if (cached) return { blob: cached, music: withMusic, issues: musicError ? [`Trilha indisponível: ${musicError}.`] : [] };
   const { blocks } = await invoke<{ blocks: { index: number; url: string }[] }>({ action: 'links', id: r.id });
   const urlOf = new Map(blocks.map((b) => [b.index, b.url]));
   // Os blocos são baixados uma vez e decodificados quando a montagem precisa (memória baixa).
@@ -126,7 +130,7 @@ export async function buildAudio(r: AudioReview, music: boolean, onProgress: (f:
   });
   parts.push(enc.finalize().slice());
   const blob = new Blob(parts as BlobPart[], { type: 'audio/mpeg' });
-  const issues = checkMix(report);
+  const issues = [...(musicError ? [`Trilha indisponível: ${musicError}.`] : []), ...checkMix(report)];
   if (!issues.some((i) => i.startsWith('blocos sem voz') || i.startsWith('duração'))) await toCache(r.id, withMusic, blob);
   return { blob, music: withMusic, issues };
 }
