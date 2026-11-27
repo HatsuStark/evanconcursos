@@ -133,7 +133,7 @@ O botão **Ouvir** da apostila lê bloco a bloco com destaque na tela, escreve s
 
 ## Revisão em áudio
 
-No dia da revisão semanal, o início da **Revisão da semana** oferece **Sua revisão em áudio**: um professor revisando com o aluno os temas da semana, com perguntas antes das respostas, pausas reais para lembrar, correção com o porquê, comparações, pegadinhas e um resumo no fim. Duração de 10, 20 ou 30 min (padrão 20; com pouco conteúdo, sai mais curta em vez de encher), voz feminina ou masculina (`VOICES` em `shared/audio/config.ts`: Kore e Charon, escolhidas ouvindo; a doc do Gemini não diz gênero), com ou sem trilha. Gerada só quando o aluno pede: **uma por revisão semanal** (falha não conta; `AUDIO_GENERATIONS_PER_TASK` muda), acesso por `ALLOWED_EMAILS` e dentro do teto diário de IA.
+No dia da revisão semanal, o início da **Revisão da semana** oferece **Sua revisão em áudio**: um professor revisando com o aluno os temas da semana, com perguntas antes das respostas, pausas reais para lembrar, correção com o porquê, comparações, pegadinhas e um resumo no fim. Duração de 10, 20 ou 30 min (padrão 20; com pouco conteúdo, sai mais curta em vez de encher), voz feminina ou masculina (`VOICES` em `shared/audio/config.ts`: Kore e Charon, escolhidas ouvindo; a doc do Gemini não diz gênero), com ou sem trilha. Gerada só quando o aluno pede: **uma por revisão semanal** (falha não conta; `AUDIO_GENERATIONS_PER_TASK` muda), acesso por `ALLOWED_EMAILS` e dentro do teto diário de IA. Só no dia da revisão semanal; admin e os e-mails de `AUDIO_EARLY_EMAILS` podem gerar antes (testes).
 
 **Pipeline** (função `audio-review`, uma etapa por chamada, com lease no banco; se uma chamada cair, outra retoma, e o app retoma uma geração parada ao consultar o status):
 

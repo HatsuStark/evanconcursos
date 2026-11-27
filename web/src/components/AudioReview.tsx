@@ -66,7 +66,7 @@ export function AudioReview({ taskId }: { taskId: string }) {
         {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
         <div className="daily-review-head">
           <button className="btn" disabled={busy || used >= limit} onClick={() => run(() => startAudioReview(taskId, duration, voice))}><Headphones size={16} /> Gerar revisão em áudio</button>
-          {q.data?.early && <span className="chip">Teste antecipado (admin)</span>}
+          {q.data?.early && <span className="chip">Acesso antecipado</span>}
           <span className="faint small">{used >= limit ? 'A revisão em áudio desta semana já foi gerada.' : `${limit === 1 ? 'Uma geração' : `${limit} gerações`} por revisão semanal · leva alguns minutos`}</span>
         </div>
       </div>
