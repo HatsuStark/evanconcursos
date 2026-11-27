@@ -478,6 +478,7 @@ a.task-title:hover { color: var(--cyan); }
 .q-explain { padding: 16px; border-radius: 14px; background: color-mix(in srgb, var(--orange) 6%, transparent); border: 1px solid color-mix(in srgb, var(--orange) 25%, transparent); line-height: 1.55; }
 .q-explain p { margin: 0 0 10px; }
 .q-explain ul { margin: 0 0 10px; padding-left: 20px; display: grid; gap: 6px; }
+.q-hints { display: grid; gap: 8px; }
 .goal-done { display: flex; gap: 10px; align-items: center; color: var(--lime); border-color: color-mix(in srgb, var(--lime) 40%, transparent); }
 
 /* ---------- E4.4: apostila ---------- */

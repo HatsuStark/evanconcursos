@@ -129,12 +129,12 @@ export const useSimulados = (planId: string | undefined) => useQuery({
 
 // ---------- desempenho por contexto ----------
 export type Ctx = 'plan' | 'free' | 'simulado' | 'review';
-export interface AttemptStat { context: Ctx; materia: string; assunto: string; correct: boolean; created_at: string; time_ms: number | null; error_reason: ErrorReason | null }
+export interface AttemptStat { context: Ctx; materia: string; assunto: string; correct: boolean; created_at: string; time_ms: number | null; error_reason: ErrorReason | null; hint_level: number }
 export const useAttemptStats = (planId: string | undefined) => useQuery({
   queryKey: ['attempt-stats', planId],
   enabled: !!planId,
   queryFn: async () => {
-    const { data, error } = await supabase.from('question_attempts').select('context, materia, assunto, correct, created_at, time_ms, error_reason').eq('plan_id', planId!).order('created_at', { ascending: false }).limit(5000);
+    const { data, error } = await supabase.from('question_attempts').select('context, materia, assunto, correct, created_at, time_ms, error_reason, hint_level').eq('plan_id', planId!).order('created_at', { ascending: false }).limit(5000);
     if (error) throw new Error(error.message);
     return data as AttemptStat[];
   },

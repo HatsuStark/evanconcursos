@@ -1,11 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { BarChart3, BookOpenCheck, Brain, CheckCircle2, ChevronLeft, ChevronRight, Lightbulb, MessageCircle, NotebookPen, RotateCcw, Scissors, Sparkles, XCircle } from 'lucide-react';
+import { BarChart3, BookOpenCheck, Brain, CheckCircle2, ChevronLeft, ChevronRight, HelpCircle, Lightbulb, MessageCircle, NotebookPen, RotateCcw, Scissors, Search, Sparkles, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { questionById, reviewDue, searchFree, type FreeFilters } from '../lib/practice.ts';
 import {
-  answerQuestion, explainQuestion, loadNote, mnemonicFor, nextQuestions, optionsOf, saveNote, takePrefetched,
-  type Explanation, type Mnemonic, type Question,
+  answerQuestion, explainQuestion, loadNote, mnemonicFor, nextQuestions, optionsOf, requestHint, saveNote, takePrefetched,
+  type Explanation, type HintStep, type Mnemonic, type Question,
 } from '../lib/questions.ts';
 import { goalTone, questionScore, scoreGoal } from '../../../shared/domain/adaptive.ts';
 import { useActivePlan } from '../lib/plans.ts';
@@ -37,12 +37,14 @@ const REASON: Record<string, string> = {
 };
 
 type Tab = 'explicacao' | 'mnemonico' | 'anotacoes' | 'comentarios';
+// hints: graus de dica já abertos (antes de responder) e quantos existem. result.hint: grau gravado na tentativa.
 interface QState {
   chosen: string | null; struck: string[];
-  result: { correct: boolean; gabarito: string } | null;
+  result: { correct: boolean; gabarito: string; hint?: number } | null;
   explanation: Explanation | null; mnemonic: Mnemonic | null | undefined; tab: Tab | null;
+  hints: { steps: HintStep[]; total: number } | null;
 }
-const blank = (): QState => ({ chosen: null, struck: [], result: null, explanation: null, mnemonic: undefined, tab: null });
+const blank = (): QState => ({ chosen: null, struck: [], result: null, explanation: null, mnemonic: undefined, tab: null, hints: null });
 
 const PAGE_SIZES = [1, 5, 10];
 const PAGE_KEY = 'questions-per-page';
@@ -187,7 +189,7 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
 }) {
   const qc = useQueryClient();
   const taskId = taskOf(source)?.taskId ?? null;
-  const [busy, setBusy] = useState<'' | 'answer' | 'explain' | 'mnemonic'>('');
+  const [busy, setBusy] = useState<'' | 'answer' | 'explain' | 'mnemonic' | 'hint'>('');
   const [error, setError] = useState('');
   const patch = onPatch;
 
@@ -216,6 +218,17 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
   async function explain() {
     setBusy('explain'); setError('');
     try { patch({ explanation: (await explainQuestion(taskId, q.qid)).explanation }); } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
+  }
+  // Próximo grau de dica. O descarte já tacha as alternativas eliminadas.
+  async function hint() {
+    if (st.result) return;
+    setBusy('hint'); setError('');
+    try {
+      const r = await requestHint(taskId, q.qid, (st.hints?.steps.length ?? 0) + 1);
+      const out = r.steps.flatMap((x) => (x.kind === 'descarte' ? x.itens.map((i) => i.letra) : []));
+      const struck = [...new Set([...st.struck, ...out])];
+      patch({ hints: r, struck, chosen: st.chosen && out.includes(st.chosen) ? null : st.chosen });
+    } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
   }
   async function mnemonic() {
     setBusy('mnemonic'); setError('');
@@ -247,15 +260,17 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
         {q.warmupOf && <span className="badge cyan" style={{ justifySelf: 'start' }}><RotateCcw size={12} /> Aquecimento: da sessão anterior</span>}
         {q.prev && (
           <span className={'badge ' + (q.prev.ok ? 'ok' : 'bad')} style={{ justifySelf: 'start' }} title={`Última resposta em ${new Date(q.prev.at).toLocaleDateString('pt-BR')}${q.prev.n > 1 ? ` · resolvida ${q.prev.n} vezes` : ''}`}>
-            {q.prev.ok ? <CheckCircle2 size={12} /> : <XCircle size={12} />} {q.prev.ok ? 'Resolvi certo' : 'Resolvi errado'}
+            {q.prev.ok ? <CheckCircle2 size={12} /> : <XCircle size={12} />} {q.prev.ok ? (q.prev.hint ? 'Resolvi com dica' : 'Resolvi certo') : 'Resolvi errado'}
             <span style={{ fontWeight: 500, opacity: .8 }}>· {new Date(q.prev.at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}{q.prev.n > 1 ? ` · ${q.prev.n}x` : ''}</span>
           </span>
         )}
         <QuestionBody q={q} number={number} chosen={st.chosen} struck={st.struck} gabarito={st.result?.gabarito ?? null} locked={!!st.result} onSelect={select} onStrike={strike} />
+        {!st.result && st.hints && <HintSteps hints={st.hints} />}
 
         {st.result ? (
           <div className={'q-result ' + (st.result.correct ? 'ok' : 'bad')}>
-            {st.result.correct ? <><CheckCircle2 size={20} /> Você acertou!</> : <><XCircle size={20} /> Resposta certa: {st.result.gabarito}</>}
+            {st.result.correct ? <><CheckCircle2 size={20} /> {st.result.hint ? 'Você acertou com dica' : 'Você acertou!'}</> : <><XCircle size={20} /> Resposta certa: {st.result.gabarito}</>}
+            {st.result.correct && !!st.result.hint && <span className="small" style={{ opacity: .85 }}>· volta na revisão para fixar</span>}
             <div style={{ flex: 1 }} />
             {single && (!isLast ? <button className="btn sm" onClick={onNext}>Próxima <ChevronRight size={15} /></button>
               : <button className="btn sm" onClick={onSummary}><BarChart3 size={15} /> Ver resumo</button>)}
@@ -263,6 +278,11 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
         ) : (
           <div className="q-actions">
             <button className="btn" disabled={!st.chosen || busy === 'answer'} onClick={answer}>{busy === 'answer' ? <><span className="spinner" /> Corrigindo…</> : 'Responder'}</button>
+            {(!st.hints || st.hints.steps.length < st.hints.total) && (
+              <button className="btn ghost sm" disabled={!!busy} onClick={hint}>
+                {busy === 'hint' ? <><span className="spinner" /> Pensando…</> : <><Lightbulb size={15} /> {st.hints ? `Mais uma dica (${st.hints.steps.length + 1}/${st.hints.total})` : 'Dica'}</>}
+              </button>
+            )}
             {single && <span className="faint small">Atalhos: letras para escolher · Enter responde · ← → navega · <Scissors size={11} /> tacha</span>}
           </div>
         )}
@@ -283,6 +303,27 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
         {tab === 'comentarios' && st.result && <CommentsPanel qid={q.qid} />}
         {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
       </article>
+  );
+}
+
+// Graus de dica abertos, do mais leve ao mais forte.
+const HINT_LABEL: Record<HintStep['kind'], string> = { pista: 'Pista', foco: 'Onde olhar', descarte: 'Descartadas', conceito: 'A regra' };
+function HintSteps({ hints }: { hints: { steps: HintStep[]; total: number } }) {
+  if (!hints.total) return <p className="faint small" style={{ margin: 0 }}>Não há dica para esta questão.</p>;
+  return (
+    <section className="q-hints" aria-live="polite">
+      {hints.steps.map((x, i) => (
+        <div key={i} className="tutor-aside">
+          {x.kind === 'conceito' ? <HelpCircle size={16} /> : x.kind === 'foco' ? <Search size={16} /> : x.kind === 'descarte' ? <Scissors size={16} /> : <Lightbulb size={16} />}
+          <div><b>{HINT_LABEL[x.kind]}:</b>{' '}
+            {x.kind === 'descarte'
+              ? <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{x.itens.map((d) => <li key={d.letra}><b>{d.letra})</b> {d.motivo}</li>)}</ul>
+              : x.text}
+          </div>
+        </div>
+      ))}
+      <span className="faint small">Acerto com dica conta como parcial: a questão volta na revisão para você fixar.</span>
+    </section>
   );
 }
 
@@ -318,6 +359,7 @@ function BatchSummary({ queue, states, onBack }: { queue: Question[]; states: Re
   const goal = scoreGoal(useActivePlan().data?.notice.cutoff_pct);
   const done = queue.filter((x) => states[x.qid]?.result);
   const right = done.filter((x) => states[x.qid]!.result!.correct).length;
+  const hinted = done.filter((x) => states[x.qid]!.result!.correct && states[x.qid]!.result!.hint).length;
   // Por assunto, conta também as questões da bateria ainda sem resposta (t); a = respondidas, c = certas.
   const by = new Map<string, { t: number; a: number; c: number }>();
   for (const x of queue) {
@@ -336,8 +378,10 @@ function BatchSummary({ queue, states, onBack }: { queue: Question[]; states: Re
       <div className="stats">
         <div className="stat"><strong style={{ color: 'var(--violet)' }}>{done.length}</strong><span>de {score.total} respondidas</span></div>
         <div className="stat"><strong style={{ color: score.pending ? 'var(--cyan)' : `var(--${goalTone(score.pct / 100, goal)})` }}>{score.pct}%</strong><span>da bateria</span></div>
-        <div className="stat"><strong style={{ color: 'var(--cyan)' }}>{by.size}</strong><span>assuntos</span></div>
+        {hinted ? <div className="stat"><strong style={{ color: 'var(--orange)' }}>{hinted}</strong><span>{hinted === 1 ? 'acerto com dica' : 'acertos com dica'}</span></div>
+          : <div className="stat"><strong style={{ color: 'var(--cyan)' }}>{by.size}</strong><span>assuntos</span></div>}
       </div>
+      {!!hinted && <p className="muted" style={{ margin: 0 }}>{right - hinted} de {done.length} sem ajuda. {hinted === 1 ? 'A questão que você acertou com dica volta' : `As ${hinted} que você acertou com dica voltam`} na revisão para fixar.</p>}
       <table className="sum-table"><thead><tr><th>Assunto</th><th>Acertos</th><th /></tr></thead><tbody>
         {rows.map(([a, e]) => <tr key={a}><td>{a}</td><td>{e.c}/{e.t}{e.t > e.a ? ` · ${e.t - e.a} ${e.t - e.a === 1 ? 'pendente' : 'pendentes'}` : ''}</td><td style={{ width: '40%' }}><div className="bar"><span style={{ width: `${(e.c / e.t) * 100}%`, background: e.t > e.a ? 'var(--violet)' : `var(--${goalTone(e.c / e.t, goal)})` }} /></div></td></tr>)}
       </tbody></table>

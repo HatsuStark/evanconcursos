@@ -9,7 +9,7 @@ import { refreshOwnBank, useAdminOverview, useOwnBank, type AdminOverview } from
 const OPERATIONS: Record<string, string> = {
   qbank_fetch: 'Busca de questões (cronograma)', qbank_free: 'Busca de questões (treino livre)', qbank_explain: 'Explicação de questão',
   qbank_generate: 'Questões inéditas da IA (em segundo plano)', guide_related: 'Apostila: artigos relacionados',
-  qbank_mnemonic: 'Mnemônico de questão', plan_sessions: 'Montagem do cronograma', plan_strategy: 'Estratégia do cronograma',
+  qbank_mnemonic: 'Mnemônico de questão', qbank_hint: 'Dicas de questão', plan_sessions: 'Montagem do cronograma', plan_strategy: 'Estratégia do cronograma',
   study_guide: 'Apostilas', notice_extract: 'Leitura de edital', notice_roles: 'Cargos do edital', material_map: 'Mapa de PDF',
   hot_topics: 'O que mais cai', juris_picks: 'Jurisprudência', source_picks: 'Fontes', source_embed: 'Fontes (índice)',
   discursive_prompt: 'Discursiva: tema', discursive_grade: 'Discursiva: correção', guide_voice: 'Voz da apostila', glossary: 'Dicionário', book_refs: 'Referências de livros',

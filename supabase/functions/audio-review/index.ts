@@ -108,7 +108,7 @@ async function collect(admin: Admin, ownerId: string, task: { id: string; plan_i
     .eq('resolved', false).gte('updated_at', daysAgo(ERROR_DAYS)).order('wrong_count', { ascending: false }).limit(40);
   const errQids = (book ?? []).map((b) => b.qid);
   const { data: errAtt } = errQids.length
-    ? await admin.from('question_attempts').select('qid, session_id').eq('owner_id', ownerId).eq('plan_id', task.plan_id).eq('correct', false).in('qid', errQids).not('session_id', 'is', null).limit(500)
+    ? await admin.from('question_attempts').select('qid, session_id').eq('owner_id', ownerId).eq('plan_id', task.plan_id).or('correct.eq.false,hint_level.gt.0').in('qid', errQids).not('session_id', 'is', null).limit(500)
     : { data: [] };
   const themeOfQ = new Map<string, string>();
   for (const a of errAtt ?? []) if (!themeOfQ.has(a.qid) && bySession.has(a.session_id!)) themeOfQ.set(a.qid, a.session_id!);

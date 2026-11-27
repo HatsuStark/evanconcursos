@@ -1,4 +1,5 @@
 // Questões no app (Edge Function "questions"): busca da sessão, correção no servidor e explicação da IA.
+import type { HintStep } from '../../../shared/qbank/hints.ts';
 import { supabase } from './supabase.ts';
 
 export interface Question {
@@ -10,7 +11,7 @@ export interface Question {
   fonte?: 'propria';                // banco próprio (apiQuestoes); sem o campo, Quest API
   mnemo?: 'yes' | 'no' | 'maybe';   // mnemônico já existe, foi descartado ou ainda não avaliado
   warmupOf?: string;                // aquecimento: questão da sessão anterior (a resposta conta para ela)
-  prev?: { ok: boolean; at: string; n: number }; // já resolvida: última resposta, quando e quantas vezes
+  prev?: { ok: boolean; at: string; n: number; hint?: boolean }; // já resolvida: última resposta, quando, quantas vezes e se usou dica
 }
 export interface Explanation { resumo: string; alternativas: { letra: string; comentario: string }[]; artigos: string[]; dica: string; fontes: string[]; geradoEm: string }
 export interface NextResult { questions: Question[]; filter?: { materia: string | null; assuntos: string[]; how: string }; reason: 'sem-materia' | 'sem-assunto' | 'esgotado' | 'esgotado-dificeis' | 'demorou' | 'sem-erros' | 'fim-revisao' | null }
@@ -52,10 +53,16 @@ export function takePrefetched(taskId: string): Promise<NextResult> | null {
 export async function answerQuestion(taskId: string | null, qid: string, chosen: string, context: 'plan' | 'free' | 'review' = 'plan', sessionId?: string) {
   const { data, error } = await supabase.rpc('answer_question', { p_qid: qid, p_chosen: chosen, p_task: taskId, p_context: context, ...(sessionId ? { p_session: sessionId } : {}) });
   if (error) throw new Error(error.message);
-  return data as { correct: boolean; gabarito: string };
+  return data as { correct: boolean; gabarito: string; hint?: number };
 }
 // taskId é opcional fora do cronograma (questões livres, revisão, simulado).
 export const explainQuestion = (taskId: string | null, qid: string) => call<{ explanation: Explanation }>({ action: 'explain', ...(taskId ? { taskId } : {}), qid });
+
+// Dica em graus (antes de responder): devolve os graus até `level` e quantos existem. O servidor registra o grau, que vai
+// para a tentativa ao responder.
+export type { HintStep };
+export const requestHint = (taskId: string | null, qid: string, level: number) =>
+  call<{ steps: HintStep[]; total: number }>({ action: 'hint', ...(taskId ? { taskId } : {}), qid, level });
 
 // Questões de "certo ou errado" podem vir sem alternativas: o app oferece Certo/Errado.
 export const optionsOf = (q: Question) => q.alternativas.length ? q.alternativas : [{ letra: 'C', texto: 'Certo', imagens: [] }, { letra: 'E', texto: 'Errado', imagens: [] }];

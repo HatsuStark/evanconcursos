@@ -4,6 +4,7 @@
 //   {action:'answer', qid, chosen, taskId? | context:'free'|'review', timeMs?} → corrige no servidor e registra
 //   {action:'explain', qid, taskId?}      → explicação da IA ancorada nos artigos oficiais (cache por questão)
 //   {action:'mnemonic', qid, taskId?}     → mnemônico compartilhado (ou nenhum), vira flashcard do estudante
+//   {action:'hint', qid, level, taskId?}  → dicas em graus até `level` (cache por questão); registra o grau usado
 // A chave da Quest API e o gabarito ficam só no servidor. taskId é opcional fora do cronograma.
 import { generateJson, type GeminiUsage } from '../../../shared/ai/gemini.ts';
 import { arrangeBatch, generatedRoom, GENERATED_EXAMPLES, GENERATED_MAX, GENERATED_PROMPT_VERSION, GeneratedQuestions, generatedJsonSchema, generatedPrompt, generatedTheme, guideDigest, toPublic, citesUnknownPrecedent, answerText, coveredLine, dropRepeated, GENERATED_JURIS_MAX, type GenJuris } from '../../../shared/qbank/generated.ts';
@@ -23,6 +24,7 @@ import {
   equalIncidence, EXPLAIN_PROMPT_VERSION, Explanation, explainPrompt, explanationJsonSchema, inTurn, measureIncidence, planPicks,
   DEEP_DIFFICULTIES, materiaOf, orgaoKeyword, QMAP_PROMPT_VERSION, recentMinYear, roleKeyword, searchFilters, SESSION_ASSUNTOS, SESSION_DIFFICULTIES, type Incidence, type SessionFilter,
 } from '../../../shared/qbank/map.ts';
+import { HINT_PROMPT_VERSION, Hints, hintSteps, hintsJsonSchema, hintsPrompt } from '../../../shared/qbank/hints.ts';
 import { conceptKey, MNEMONIC_PROMPT_VERSION, MnemonicChoice, mnemonicJsonSchema, mnemonicPrompt, pickExisting } from '../../../shared/qbank/mnemonic.ts';
 import { adminClient, CORS, json, logUsage, requireUser } from '../_shared/http.ts';
 import { activePlan, cursorExhausted, ensureBoardFormat, loadCursors, ensureCarreiras, ensureNarrowing, fromCache, ensureSessionMap, ensureSubjectMap, mapDeps, plain, publicQuestion, questFailure, recordAnswer, takeNewest, upsertFlashcard, withStatus, type PublicQuestion } from '../_shared/qbank.ts';
@@ -62,7 +64,7 @@ Deno.serve(async (req) => {
   const mark = (step: string) => { marks.push([step, Date.now() - started]); };
   const deps = mapDeps(admin, quest, usage);
   const log = (operation: string, status: 'ok' | 'error', error?: string) => logUsage(admin, {
-    ownerId: auth.user.id, operation, model: usage.inputTokens ? model : 'quest-api', promptVersion: operation === 'qbank_explain' ? EXPLAIN_PROMPT_VERSION : operation === 'qbank_mnemonic' ? MNEMONIC_PROMPT_VERSION : QMAP_PROMPT_VERSION,
+    ownerId: auth.user.id, operation, model: usage.inputTokens ? model : 'quest-api', promptVersion: operation === 'qbank_explain' ? EXPLAIN_PROMPT_VERSION : operation === 'qbank_hint' ? HINT_PROMPT_VERSION : operation === 'qbank_mnemonic' ? MNEMONIC_PROMPT_VERSION : QMAP_PROMPT_VERSION,
     usage: usage.inputTokens ? usage : null, latencyMs: Date.now() - started, status, error, credits: quest.credits,
   });
 
@@ -169,6 +171,30 @@ Deno.serve(async (req) => {
       await admin.from('qbank_questions').update({ explanation, explanation_model: `${model}/${EXPLAIN_PROMPT_VERSION}` }).eq('qid', qid);
       await log('qbank_explain', 'ok');
       return json(200, { explanation });
+    }
+
+    if (body.action === 'hint') {
+      // Dica em graus: gera todas de uma vez (uma vez por questão), entrega só até o grau pedido e registra o grau usado,
+      // que a correção grava na tentativa. O gabarito nunca sai daqui.
+      const qid = String(body.qid ?? '');
+      const { data: q } = await admin.from('qbank_questions').select('payload, gabarito, hints').eq('qid', qid).maybeSingle();
+      if (!q) return json(404, { error: 'Questão não encontrada.' });
+      const p = q.payload as PublicQuestion;
+      let hints = q.hints ? Hints.safeParse(q.hints).data : undefined;
+      if (!hints) {
+        hints = await deps.ai(Hints, hintsJsonSchema(), hintsPrompt({
+          banca: p.prova?.banca ?? '', enunciado: plain(p.enunciado), alternativas: p.alternativas.map((a) => ({ letra: a.letra, texto: plain(a.texto) })),
+          gabarito: q.gabarito, textos: p.textos.map(plain), lei: (await lawExcerpts(p)).lei, assunto: p.assunto,
+        }), { quick: true });
+        await admin.from('qbank_questions').update({ hints, hints_model: `${model}/${HINT_PROMPT_VERSION}` }).eq('qid', qid);
+        await log('qbank_hint', 'ok');
+      }
+      const steps = hintSteps(hints, { gabarito: q.gabarito, alternativas: p.alternativas });
+      if (!steps.length) return json(200, { steps: [], total: 0 });
+      const level = Math.max(1, Math.min(steps.length, Number(body.level) || 1));
+      const { error } = await admin.rpc('note_hint_use', { p_owner: auth.user.id, p_qid: qid, p_level: level });
+      if (error) throw new Error(error.message);
+      return json(200, { steps: steps.slice(0, level), total: steps.length });
     }
 
     if (body.action !== 'next') return json(400, { error: 'Ação inválida.' });
@@ -564,7 +590,7 @@ Deno.serve(async (req) => {
     return json(200, { questions: batch, filter: { materia: filter.materia, assuntos: filter.assuntos, how: filter.how }, reason: batch.length ? null : timedOut ? 'demorou' : 'esgotado-dificeis', ...(body.debug ? { timing: marks } : {}) });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await log(body.action === 'explain' ? 'qbank_explain' : body.action === 'mnemonic' ? 'qbank_mnemonic' : 'qbank_fetch', 'error', message).catch(() => {});
+    await log(body.action === 'explain' ? 'qbank_explain' : body.action === 'hint' ? 'qbank_hint' : body.action === 'mnemonic' ? 'qbank_mnemonic' : 'qbank_fetch', 'error', message).catch(() => {});
     return json(502, { error: questFailure(message, 'Não foi possível buscar as questões agora.'), detail: message.slice(0, 300) });
   }
 });

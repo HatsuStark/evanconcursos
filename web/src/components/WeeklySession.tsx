@@ -42,7 +42,7 @@ async function loadSession(task: WeeklyTask) {
   }
   const sessionOf = new Map<string, string>();
   if (questions.length) {
-    const { data: att } = await supabase.from('question_attempts').select('qid, session_id').eq('plan_id', task.plan_id).eq('correct', false)
+    const { data: att } = await supabase.from('question_attempts').select('qid, session_id').eq('plan_id', task.plan_id).or('correct.eq.false,hint_level.gt.0')
       .not('session_id', 'is', null).in('qid', questions.map((q) => q.qid)).order('created_at', { ascending: false }).limit(2000);
     for (const a of (att ?? []) as { qid: string; session_id: string }[]) if (!sessionOf.has(a.qid)) sessionOf.set(a.qid, a.session_id);
   }

@@ -42,10 +42,10 @@ export function guideText(review: GuideLike | null, full: GuideLike | null): str
 
 export const plainHtml = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 
-export interface ErrorQuestion { qid: string; themeId: string | null; enunciado: string; alternativas: { letra: string; texto: string }[]; gabarito: string; resumo: string; times: number }
+export interface ErrorQuestion { qid: string; themeId: string | null; enunciado: string; alternativas: { letra: string; texto: string }[]; gabarito: string; resumo: string; times: number } // times 0: entrou no caderno por acerto com dica
 export function questionText(q: ErrorQuestion) {
   const alts = q.alternativas.map((a) => `${a.letra}) ${plainHtml(a.texto)}`).join(' ');
-  return `${plainHtml(q.enunciado).slice(0, 900)}${alts ? `\n${alts.slice(0, 900)}` : ''}\nGabarito: ${q.gabarito}${q.resumo ? `\nPor quê: ${q.resumo}` : ''}\nO aluno errou esta questão ${q.times} ${q.times === 1 ? 'vez' : 'vezes'}.`;
+  return `${plainHtml(q.enunciado).slice(0, 900)}${alts ? `\n${alts.slice(0, 900)}` : ''}\nGabarito: ${q.gabarito}${q.resumo ? `\nPor quê: ${q.resumo}` : ''}\n${q.times ? `O aluno errou esta questão ${q.times} ${q.times === 1 ? 'vez' : 'vezes'}.` : 'O aluno só acertou esta questão com dica.'}`;
 }
 
 const norm = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();

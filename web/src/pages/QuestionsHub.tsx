@@ -274,6 +274,7 @@ export function PerformanceTab({ planId }: { planId: string | undefined }) {
   for (const a of rows) { const k = a.materia || 'Sem matéria', e = by.get(k) ?? { t: 0, c: 0 }; e.t++; if (a.correct) e.c++; by.set(k, e); }
   const week = rows.filter((a) => Date.now() - new Date(a.created_at).getTime() < 7 * 864e5).length;
   const wrong = rows.filter((a) => !a.correct), marked = wrong.filter((a) => a.error_reason);
+  const hinted = rows.filter((a) => a.correct && a.hint_level > 0).length;
   return (
     <div className="grid" style={{ gap: 14 }}>
       <div className="segmented" style={{ justifySelf: 'start' }}>{CTX.map((c) => <button key={c.key} className={ctx === c.key ? 'on' : ''} onClick={() => setCtx(c.key)}>{c.label}</button>)}</div>
@@ -282,7 +283,7 @@ export function PerformanceTab({ planId }: { planId: string | undefined }) {
         <div className="stat"><strong style={{ color: rows.length ? `var(--${goalTone(pct / 100, goal)})` : 'var(--orange)' }}>{rows.length ? pct + '%' : '—'}</strong><span>de acerto</span></div>
         <div className="stat"><strong style={{ color: 'var(--cyan)' }}>{by.size}</strong><span>matérias</span></div>
       </div>
-      <p className="faint small" style={{ margin: 0 }}><ListChecks size={12} style={{ verticalAlign: -2 }} /> {week} questões nos últimos 7 dias · {goalLabel(goal)}.</p>
+      <p className="faint small" style={{ margin: 0 }}><ListChecks size={12} style={{ verticalAlign: -2 }} /> {week} questões nos últimos 7 dias{hinted ? ` · ${hinted} ${hinted === 1 ? 'acerto' : 'acertos'} com dica (${right - hinted} sem ajuda)` : ''} · {goalLabel(goal)}.</p>
       {!!rows.length && (
         <>
           <label className="field" style={{ maxWidth: 360 }}>Evolução de
