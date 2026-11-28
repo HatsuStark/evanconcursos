@@ -12,6 +12,11 @@ const REFERS = /destacad[oa]s?\b|em destaque|sublinhad[oa]s?\b|em negrito|grifad
 export const hasMark = (text: string) => new RegExp(MARK.source).test(text) || /<(b|strong|u|em|i)\b[^>]*>/i.test(text);
 export const missingMark = (text: string) => REFERS.test(text) && !hasMark(text);
 
+// Marca que cobre o próprio comando ("contribui **para … os vocábulos destacados … como:**") é transcrição com o destaque
+// deslocado: o termo marcado de verdade se perdeu. Tira essa marca e deixa o texto; sem outra marca, a questão cai como
+// "sem destaque" (lacksMark).
+export const dropBrokenMarks = (text: string) => text.replace(MARK, (all, inner: string) => (REFERS.test(inner) ? inner : all));
+
 // Trechos em sequência, com o que vai em negrito (para montar a tela sem HTML).
 export function splitMarks(text: string): { text: string; bold: boolean }[] {
   const out: { text: string; bold: boolean }[] = [];

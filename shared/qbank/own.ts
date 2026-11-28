@@ -25,7 +25,7 @@ export interface OwnRow {
   };
 }
 
-import { hasMark, missingMark } from '../ai/marks.ts';
+import { dropBrokenMarks, hasMark, missingMark } from '../ai/marks.ts';
 
 export const OWN_PREFIX = 'own-';
 
@@ -119,7 +119,7 @@ export function ownRows(exam: OwnExam, qidOf: (numero: number) => string): { row
     const row: OwnRow = {
       qid, materia: c.materia, assunto: c.assunto ?? '', gabarito,
       payload: {
-        qid, enunciado: ownHtml(q.enunciado), tipo: ce ? 'certo e errado' : 'multipla escolha',
+        qid, enunciado: ownHtml(dropBrokenMarks(q.enunciado)), tipo: ce ? 'certo e errado' : 'multipla escolha',
         dificuldade: Math.max(1, Math.min(5, Math.round(c.dificuldade || 3))),
         alternativas: q.alternativas.map((a) => ({ letra: a.letra.toUpperCase(), texto: ownHtml(a.texto), imagens: [] })),
         textos, anexos: [],

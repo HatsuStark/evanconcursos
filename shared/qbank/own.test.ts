@@ -117,6 +117,18 @@ describe('banco próprio', () => {
     expect(r.skipped['sem destaque']).toBe(1);
     expect(r.dropped).toEqual(['own-1']);
   });
+
+  it('marca que cobre o próprio comando é destaque deslocado: sai a marca e, sem outra, a questão', () => {
+    const exam: OwnExam = { prova: { banca: 'IBFC', orgao: 'X', cargo: 'Y', ano: 2023, formato: 'me' }, questoes: [
+      q({ numero: 1, enunciado: 'O emprego contribui **para efeitos. Em “O problema – um dos problemas”, os vocábulos destacados classificam-se como:**' }),
+      q({ numero: 2, enunciado: 'Em “**O** problema – **um** dos problemas”, os vocábulos destacados classificam-se como:' }),
+      q({ numero: 3, enunciado: '**Assinale a alternativa em que o termo destacado é adjetivo:**', alternativas: [{ letra: 'A', texto: 'casa **bela**' }, { letra: 'B', texto: 'dia **claro**' }], gabarito: 'A' }),
+    ] };
+    const r = ownRows(exam, (n) => `own-${n}`);
+    expect(r.dropped).toEqual(['own-1']);
+    expect(r.rows.map((x) => x.qid)).toEqual(['own-2', 'own-3']);
+    expect(r.rows[1]!.payload.enunciado).toBe('<p>Assinale a alternativa em que o termo destacado é adjetivo:</p>');
+  });
 });
 
 describe('texto associado que é só a fonte', () => {
