@@ -1,15 +1,16 @@
 // Importa o banco próprio (projeto apiQuestoes) para qbank_questions, pela conexão direta ao Postgres. As questões entram
 // com id "own-…" e passam a ser servidas pelo cache antes da Quest API (sem créditos). Reimportar atualiza o conteúdo;
 // a explicação da IA só é descartada se o gabarito mudou.
-// Questão repetida (cargos do mesmo concurso dividem blocos de questões; mesmo enunciado, alternativas e texto-base) entra
-// uma vez só: fica a primeira na ordem dos arquivos.
+// Questão repetida (cargos do mesmo concurso dividem blocos de questões; mesmo enunciado e alternativas no mesmo concurso,
+// ou também o mesmo texto-base entre concursos) entra uma vez só: fica a primeira na ordem dos arquivos.
 // Uso: node --experimental-strip-types scripts/own-questions.ts [--dir <pasta _aceitas>] [--dry] [--remover] [--limpar-repetidas]
 //   --dir      padrão: ../apiQuestoes/Provas/_aceitas e ../apiQuestoes/Provas/_soltas (ou OWN_QUESTIONS_DIR no .env)
 //              _soltas: provas montadas com questões soltas (npm run soltas no apiQuestoes); _aceitas vem antes, então
 //              questão que também está numa prova completa fica com o id da completa
 //   --dry      só conta o que entraria, sem gravar
 //   --remover  apaga todas as questões próprias (respostas, caderno de erros e anotações delas ficam órfãs)
-//   --limpar-repetidas  apaga do banco as repetidas importadas antes desta regra (mesma ressalva das órfãs)
+//   --limpar-repetidas  apaga do banco as repetidas importadas antes desta regra; tentativas e caderno de erros delas passam
+//              para a questão que fica (anotações e comentários ficariam órfãos: a contagem aparece antes)
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
@@ -75,20 +76,46 @@ try {
   if (!DRY) throw e;
   console.log(`(--dry sem banco: ${(e as Error).message}; repetidas ficam com a primeira)`);
 }
-const winner = new Map<string, OwnRow>(), keyOf = new Map<OwnRow, string>();
+// Duas chaves: (1) enunciado, alternativas e começo do texto-base, entre concursos; (2) no mesmo concurso (banca, órgão e
+// ano), só enunciado e alternativas: cada cargo transcreve o texto-base (descrição da tirinha, da imagem) de um jeito, e a
+// chave 1 deixava a mesma questão entrar uma vez por cargo. Questões com qualquer chave em comum são a mesma.
+const group = new Map<string, string>(), keyOf = new Map<OwnRow, string>();
+const find = (k: string): string => { const p = group.get(k) ?? k; if (p === k) return k; const root = find(p); group.set(k, root); return root; };
 for (const r of rows) {
-  const k = sha1(`${plain(r.payload.enunciado)}|${r.payload.alternativas.map((a) => plain(a.texto)).join('|')}|${plain(r.payload.textos[0] ?? '').slice(0, 300)}`);
+  const body = `${plain(r.payload.enunciado)}|${r.payload.alternativas.map((a) => plain(a.texto)).join('|')}`;
+  const k1 = sha1(`${body}|${plain(r.payload.textos[0] ?? '').slice(0, 300)}`);
+  const k2 = sha1(`${plain(`${r.payload.prova.banca}|${r.payload.prova.orgao}|${r.payload.prova.ano}`)}|${body}`);
+  const a = find(k1), b = find(k2);
+  if (a !== b) group.set(b, a);
+  keyOf.set(r, k1);
+}
+const winner = new Map<string, OwnRow>();
+for (const r of rows) {
+  const k = find(keyOf.get(r)!);
   keyOf.set(r, k);
   const w = winner.get(k);
   if (!w || (!noBanco.has(w.qid) && noBanco.has(r.qid))) winner.set(k, r);
 }
 const repeated = rows.filter((r) => winner.get(keyOf.get(r)!) !== r).map((r) => r.qid);
+const repeatedPairs = rows.filter((r) => winner.get(keyOf.get(r)!) !== r).map((r) => [r.qid, winner.get(keyOf.get(r)!)!.qid] as const);
 const unique = rows.filter((r) => winner.get(keyOf.get(r)!) === r);
 rows.length = 0; rows.push(...unique);
 if (repeated.length) skipped['repetida'] = repeated.length;
 for (const r of rows) materias[r.materia] = (materias[r.materia] ?? 0) + 1;
 console.log(`${exams} provas, ${total} questões: ${rows.length} aproveitadas; fora: ${JSON.stringify(skipped)}`);
 console.log('Por matéria:', Object.entries(materias).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([m, n]) => `${m} ${n}`).join(' · '));
+// Com --limpar-repetidas, mostra quanto do que o estudante fez está nas repetidas que sairiam.
+if (CLEAN && repeated.length) {
+  try {
+    const db = await connect();
+    const used = await Promise.all(['question_attempts', 'error_book', 'question_notes', 'question_comments', 'simulado_answers'].map(async (t) => {
+      const { rows: [c] } = await db.query(`select count(*)::int n from public.${t} where qid = any($1::text[])`, [repeated]);
+      return `${t} ${c.n}`;
+    }));
+    console.log(`Atividade nas ${repeated.length} repetidas: ${used.join(' · ')}`);
+    await db.end();
+  } catch (e) { console.log(`(sem contagem de atividade: ${(e as Error).message})`); }
+}
 if (DRY || !rows.length) process.exit(0);
 
 const db = await connect();
@@ -98,6 +125,16 @@ if (dropped.length) {
   if (r.rowCount) console.log(`${r.rowCount} questões sem texto-base removidas do banco.`);
 }
 if (CLEAN && repeated.length) {
+  // Tentativas e caderno de erros da repetida passam para a que fica (no caderno, se o estudante já tem a que fica, vale ela).
+  const pairs = repeatedPairs;
+  if (pairs.length) {
+    const map = JSON.stringify(pairs.map(([from, to]) => ({ from, to })));
+    const m = `jsonb_to_recordset($1::jsonb) as m("from" text, "to" text)`;
+    const a = await db.query(`update public.question_attempts t set qid = m."to" from ${m} where t.qid = m."from"`, [map]);
+    const e = await db.query(`update public.error_book t set qid = m."to" from ${m} where t.qid = m."from"
+      and not exists (select 1 from public.error_book o where o.owner_id = t.owner_id and o.plan_id is not distinct from t.plan_id and o.qid = m."to")`, [map]);
+    if (a.rowCount || e.rowCount) console.log(`Movidas para a questão que fica: ${a.rowCount} tentativas, ${e.rowCount} do caderno de erros.`);
+  }
   const r = await db.query(`delete from public.qbank_questions where qid = any($1::text[])`, [repeated]);
   console.log(`${r.rowCount} repetidas removidas do banco.`);
 }
