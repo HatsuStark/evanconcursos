@@ -1,4 +1,4 @@
-import { CalendarDays, ClipboardList, FileText, LayoutDashboard, Library, ListChecks, PenLine, UserRound } from 'lucide-react';
+import { CalendarDays, ClipboardList, FileText, Headphones, LayoutDashboard, Library, ListChecks, PenLine, UserRound } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { ContestSwitcher } from './ContestSwitcher.tsx';
@@ -10,6 +10,7 @@ const NAV = [
   { to: '/cronograma', label: 'Cronograma', icon: CalendarDays },
   { to: '/edital', label: 'Edital', icon: ClipboardList },
   { to: '/questoes', label: 'Questões', icon: ListChecks },
+  { to: '/audios', label: 'Áudios', icon: Headphones },
   { to: '/materiais', label: 'Meus materiais', icon: Library },
   { to: '/discursivas', label: 'Discursivas', icon: PenLine },
   { to: '/concursos', label: 'Concursos', icon: FileText },

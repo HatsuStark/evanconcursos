@@ -334,6 +334,8 @@ b, strong { font-weight: 700; }
     background: var(--chrome); 
   }
   .logo, .nav-spacer, .sidebar .secondary-nav { display: none; }
+  /* 8 itens cabem em telas de 360px: encolhem até 40px. */
+  .sidebar .nav-item { flex: 1 1 0; min-width: 0; max-width: 48px; }
   .nav-item.active::before { display: none; }
   .main { padding: 24px 16px 40px; }
   .rail { grid-column: 1; padding: 24px 16px; }
