@@ -21,6 +21,7 @@ const QuestionnairePage = page(() => import('./pages/Questionnaire.tsx'), 'Quest
 const ReadingPage = page(() => import('./pages/Reading.tsx'), 'ReadingPage');
 const ReviewPage = page(() => import('./pages/Review.tsx'), 'ReviewPage');
 const ReviewsPage = page(() => import('./pages/Reviews.tsx'), 'ReviewsPage');
+const AudioLibraryPage = page(() => import('./pages/AudioLibrary.tsx'), 'AudioLibraryPage');
 const SchedulePage = page(() => import('./pages/Schedule.tsx'), 'SchedulePage');
 const StudyPage = page(() => import('./pages/Study.tsx'), 'StudyPage');
 const TutorReviewPage = page(() => import('./pages/TutorReview.tsx'), 'TutorReviewPage');
@@ -49,6 +50,7 @@ export function App() {
         <Route path="/cronograma" element={<SchedulePage />} />
         <Route path="/edital" element={<VerticalizedPage />} />
         <Route path="/revisoes" element={<ReviewsPage />} />
+        <Route path="/audios" element={<AudioLibraryPage />} />
         <Route path="/aprender/revisao" element={<TutorReviewPage />} />
         <Route path="/estudo/:taskId" element={<StudyPage />} />
         <Route path="/materiais" element={<MaterialsPage />} />

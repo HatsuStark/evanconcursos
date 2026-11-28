@@ -1128,6 +1128,14 @@ details.card summary { cursor: pointer; font-weight: 600; }
 .audio-chapters .link-btn { margin-left: 0; text-align: left; color: var(--text); }
 .audio-themes summary { cursor: pointer; }
 .audio-themes .weekly-list { margin-top: 8px; }
+.weekly-list li.playlist-row { display: flex; align-items: center; gap: 10px; }
+.playlist-row .link-btn { margin-left: 0; color: var(--text); font-size: 14px; }
+.playlist-actions { display: flex; gap: 6px; flex: none; }
+.playlist-actions .icon-btn { width: 34px; height: 34px; }
+.playlist-actions .icon-btn.on { color: var(--lime); border-color: color-mix(in srgb, var(--lime) 50%, transparent); }
+.playlist-player { position: sticky; top: 8px; z-index: 5; }
+.playlist-now { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audio-chapters li.playlist-on .link-btn { color: var(--lime); font-weight: 600; }
 .audio-alt { text-align: left; border: 1px solid var(--line); background: var(--well); color: var(--text); border-radius: 10px; padding: 8px 10px; font-size: 14px; cursor: pointer; }
 .audio-alt.chosen { border-color: var(--cyan); }
 .audio-alt.right { border-color: var(--lime); }

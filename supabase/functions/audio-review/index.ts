@@ -4,6 +4,7 @@
 //   {action:'links', id} → {blocks:[{index,url}]}; links temporários da narração (revisão pronta).
 //   {action:'progress', id, positionMs, listenedMs, music, speed, completed} → {ok}; escuta (sem custo de IA).
 //   {action:'quiz', id, answers} → {score, correct}; corrige a miniavaliação no servidor.
+//   {action:'library', planId} → {reviews, clips, themes}; revisões prontas do concurso em trechos, para a playlist (sem IA).
 //   {action:'retry', id} → {review}; retoma uma geração que falhou de onde parou (o que já foi narrado fica).
 //   {action:'work', id} (só do próprio backend, com a chave de serviço) → avança uma etapa ou um bloco.
 // Etapas: coleta → plano → roteiro → conferência → narração (blocos em paralelo) → pronta. Cada etapa roda numa chamada,
@@ -17,6 +18,7 @@ import {
   NARRATOR_STYLE, RECENT_DAYS, TTS_MODEL_DEFAULT, VOICES, WORDS_PER_MINUTE, type Duration, type VoiceKind,
 } from '../../../shared/audio/config.ts';
 import { buildMaterials, guideText, type ErrorQuestion, type GuideLike } from '../../../shared/audio/materials.ts';
+import { clipsOf } from '../../../shared/audio/playlist.ts';
 import { selectReview, type ThemeInput } from '../../../shared/audio/priority.ts';
 import { planPrompt, quizPrompt, reviewPrompt, scriptPrompt, type PromptContext } from '../../../shared/audio/prompts.ts';
 import {
@@ -33,6 +35,8 @@ type Admin = ReturnType<typeof adminClient>;
 const BUCKET = 'review-audio', LINK_SECONDS = 4 * 3600;
 const LEASE_S = 140, BLOCK_LEASE_S = 90, QUIZ_LEASE_S = 90;
 const MAX_ATTEMPTS = 3, PARALLEL_BLOCKS = 3, STALE_MS = 45_000;
+// Playlist: revisões prontas mais recentes do concurso (cerca de um ano de revisões semanais).
+const LIBRARY_MAX = 60;
 const textModel = () => Deno.env.get('AUDIO_MODEL') || defaultModel();
 const ttsModel = () => Deno.env.get('GEMINI_TTS_MODEL') || TTS_MODEL_DEFAULT;
 const limit = () => { const v = Number(Deno.env.get('AUDIO_GENERATIONS_PER_TASK')); return Number.isFinite(v) && v > 0 ? v : GENERATIONS_PER_WEEKLY_TASK; };
@@ -466,6 +470,48 @@ Deno.serve(async (req) => {
       }
       kick(created.id);
       return json(200, { review: publicReview(created) });
+    }
+
+    if (body.action === 'library') {
+      // Playlist: as revisões prontas do concurso, os trechos (capítulos com os temas) e a situação de cada tema (revisão
+      // de teoria vencida e acerto nas questões), para a fila automática. Sem IA.
+      const planId = String(body.planId ?? '');
+      const { data: rows } = await admin.from('audio_reviews').select('id, created_at, timeline, plan, inputs, script, duration_ms, voice, task_id')
+        .eq('owner_id', ownerId).eq('plan_id', planId).eq('status', 'ready').order('created_at', { ascending: false }).limit(LIBRARY_MAX);
+      const reviews = (rows ?? []).filter((x) => x.timeline?.chapters?.length);
+      const clips = reviews.flatMap((x) => clipsOf({
+        id: x.id, createdAt: x.created_at, timeline: x.timeline,
+        chapters: (x.plan?.capitulos ?? []).map((c: { id: string; temas?: string[]; etapa?: string }) => ({ id: c.id, temas: c.temas ?? [], etapa: c.etapa })),
+        themeIds: x.inputs?.ctx?.themeIds ?? [],
+      }));
+      const info = new Map<string, { title: string; subject: string }>();
+      // No resumo, o tema vem com o id do roteiro (T1, T2…): traduzido para a sessão pelo mapa da mesma revisão.
+      for (const x of reviews) {
+        const sessionOf = new Map(((x.inputs?.ctx?.themeIds ?? []) as [string, string][]).map(([session, t]) => [t, session]));
+        for (const t of x.inputs?.summary?.themes ?? []) {
+          const id = sessionOf.get(t.id) ?? t.id;
+          if (!info.has(id)) info.set(id, { title: t.title, subject: t.subject });
+        }
+      }
+      const ids = [...info.keys()];
+      const [{ data: due }, { data: tries }, { data: tasks }] = await Promise.all([
+        ids.length ? admin.from('theory_reviews').select('session_id').eq('owner_id', ownerId).eq('plan_id', planId).eq('status', 'pending').lte('due_on', todaySP()).in('session_id', ids) : { data: [] },
+        ids.length ? admin.from('question_attempts').select('session_id, correct, hint_level').eq('owner_id', ownerId).eq('plan_id', planId).in('session_id', ids).limit(10000) : { data: [] },
+        admin.from('tasks').select('id, date').in('id', reviews.map((x) => x.task_id)),
+      ]);
+      const overdue = new Set((due ?? []).map((d) => d.session_id));
+      const stat = new Map<string, { n: number; c: number }>();
+      for (const a of tries ?? []) {
+        const s = stat.get(a.session_id) ?? { n: 0, c: 0 };
+        s.n++; if (a.correct) s.c += a.hint_level ? 0.5 : 1;
+        stat.set(a.session_id, s);
+      }
+      const dateOf = new Map((tasks ?? []).map((t) => [t.id, String(t.date)]));
+      return json(200, {
+        reviews: reviews.map((x) => ({ id: x.id, title: x.script?.titulo ?? x.plan?.titulo ?? 'Revisão em áudio', createdAt: x.created_at, weekOf: dateOf.get(x.task_id) ?? null, durationMs: x.duration_ms, voice: x.voice, timeline: x.timeline })),
+        clips,
+        themes: ids.map((id) => { const s = stat.get(id); return { id, ...info.get(id)!, overdue: overdue.has(id), attempts: s?.n ?? 0, acc: s?.n ? s.c / s.n : null }; }),
+      });
     }
 
     const r = await own(String(body.id ?? ''));

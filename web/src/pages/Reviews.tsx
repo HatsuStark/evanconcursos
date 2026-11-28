@@ -72,6 +72,13 @@ export function ReviewsPage() {
   return (
     <Shell title="Revisões" subtitle={subtitle} rail={rail}>
       {!rows.length && <div className="glass card muted">Nenhum tema ainda. Concluir uma sessão de teoria agenda a primeira revisão.</div>}
+      <div className="glass card material-row">
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div>Seus áudios</div>
+          <div className="muted small">As revisões em áudio que você já gerou, numa playlist organizada pelo que você mais precisa.</div>
+        </div>
+        <Link className="btn ghost sm" to="/audios">Ouvir</Link>
+      </div>
       {!!conceptRows.length && (
         <>
           <div className="section-title"><h2>Conceitos da Aula guiada</h2><span className="badge cyan">{dueNow.length}</span></div>

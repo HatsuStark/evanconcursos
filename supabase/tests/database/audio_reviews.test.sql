@@ -31,6 +31,17 @@ reset role;
 select pg_temp.as_user('00000000-0000-4000-8000-0000000000a2');
 select is((select count(*) from public.audio_reviews), 0::bigint, 'outro estudante não vê');
 
+-- Playlist: B não fixa trecho de revisão de A nem vê as marcas de A.
+select throws_ok($$insert into public.audio_playlist_marks (review_id, chapter_id, mark) values ('a1600000-0000-4000-8000-000000000001', 'c1', 'pin')$$, '42501', null, 'outro estudante não marca revisão alheia');
+reset role;
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000a1');
+select lives_ok($$insert into public.audio_playlist_marks (review_id, chapter_id, mark) values ('a1600000-0000-4000-8000-000000000001', 'c1', 'pin')$$, 'dono fixa um trecho');
+select lives_ok($$update public.audio_playlist_marks set mark = 'hide' where chapter_id = 'c1'$$, 'dono troca para tirar');
+select throws_ok($$insert into public.audio_playlist_marks (review_id, chapter_id, mark) values ('a1600000-0000-4000-8000-000000000001', 'c2', 'x')$$, '23514', null, 'marca inválida');
+reset role;
+select pg_temp.as_user('00000000-0000-4000-8000-0000000000a2');
+select is((select count(*) from public.audio_playlist_marks), 0::bigint, 'marcas de A invisíveis para B');
+
 reset role;
 select is((public.audio_claim_block('a1600000-0000-4000-8000-000000000001', 60)).idx, 0, '1º worker pega o bloco 0');
 select is((public.audio_claim_block('a1600000-0000-4000-8000-000000000001', 60)).idx, 1, '2º worker pega o bloco 1');

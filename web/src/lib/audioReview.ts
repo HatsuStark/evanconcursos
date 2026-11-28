@@ -18,7 +18,12 @@ export interface AudioReview {
 }
 export interface QuizResult { score: number; total: number; correct: number[]; comments: string[]; answers: number[] }
 
-async function invoke<T>(body: Record<string, unknown>): Promise<T> {
+// Preferências de escuta no aparelho (trilha, velocidade, volume), as mesmas na revisão da semana e na playlist.
+const PREF = 'audio-review:prefs';
+export const readPrefs = (): { music?: boolean; speed?: number; volume?: number } => { try { return JSON.parse(localStorage.getItem(PREF) ?? '{}'); } catch { return {}; } };
+export const writePrefs = (p: object) => { try { localStorage.setItem(PREF, JSON.stringify({ ...readPrefs(), ...p })); } catch { /* armazenamento bloqueado */ } };
+
+export async function invoke<T>(body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke('audio-review', { body });
   if (error) {
     let msg = error.message;
@@ -96,7 +101,7 @@ async function toCache(id: string, music: boolean, blob: Blob) {
 }
 
 // Monta (ou pega do cache) a versão pedida. Sem a trilha disponível, sai a versão só com voz.
-export async function buildAudio(r: AudioReview, music: boolean, onProgress: (f: number) => void): Promise<{ blob: Blob; music: boolean; issues: string[] }> {
+export async function buildAudio(r: Pick<AudioReview, 'id' | 'timeline'>, music: boolean, onProgress: (f: number) => void): Promise<{ blob: Blob; music: boolean; issues: string[] }> {
   let musicError = '';
   const track = music ? await loadMusic().catch((e) => { musicError = (e as Error).message; return null; }) : null;
   const withMusic = !!track;

@@ -1,17 +1,15 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Download, Headphones, ListOrdered, Music, Pause, Play, RotateCcw, RotateCw, Volume2 } from 'lucide-react';
+import { CheckCircle2, Download, Headphones, ListMusic, ListOrdered, Music, Pause, Play, RotateCcw, RotateCw, Volume2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { DEFAULT_DURATION, DEFAULT_VOICE, DURATIONS } from '../../../shared/audio/config.ts';
 import {
-  answerAudioQuiz, buildAudio, fmtTime, isWorking, retryAudioReview, saveAudioProgress, stageLabel, startAudioReview, useAudioReview, useMusicAvailable,
+  answerAudioQuiz, buildAudio, fmtTime, isWorking, readPrefs, retryAudioReview, saveAudioProgress, stageLabel, startAudioReview, useAudioReview, useMusicAvailable, writePrefs,
   type AudioReview as Review, type QuizResult,
 } from '../lib/audioReview.ts';
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
 const BUCKET = { recentes: 'recente', anteriores: 'reforço', erros: 'erros' } as Record<string, string>;
-const PREF = 'audio-review:prefs';
-const readPrefs = (): { music?: boolean; speed?: number; volume?: number } => { try { return JSON.parse(localStorage.getItem(PREF) ?? '{}'); } catch { return {}; } };
-const writePrefs = (p: object) => { try { localStorage.setItem(PREF, JSON.stringify({ ...readPrefs(), ...p })); } catch { /* armazenamento bloqueado */ } };
 
 // "Sua revisão em áudio": no dia da revisão semanal, uma revisão falada e personalizada (perguntas antes das respostas,
 // pausas para lembrar, correção), gerada sob pedido. Pode sair da página enquanto ela é preparada.
@@ -102,6 +100,7 @@ export function AudioReview({ taskId }: { taskId: string }) {
       <Player review={review} initialMusic={musicOk && music} musicAvailable={musicOk} />
       <Themes review={review} />
       <RetentionQuiz review={review} />
+      <Link className="link-btn" style={{ marginLeft: 0, justifySelf: 'start' }} to="/audios"><ListMusic size={14} /> Todas as suas revisões em áudio, numa playlist</Link>
     </div>
   );
 }
