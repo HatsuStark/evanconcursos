@@ -279,7 +279,7 @@ function QuestionCard({ q, number, st, source, single, isLast, onPatch, onPrev, 
           <div className="q-actions">
             <button className="btn" disabled={!st.chosen || busy === 'answer'} onClick={answer}>{busy === 'answer' ? <><span className="spinner" /> Corrigindo…</> : 'Responder'}</button>
             {(!st.hints || st.hints.steps.length < st.hints.total) && (
-              <button className="btn ghost sm" disabled={!!busy} onClick={hint}>
+              <button className="btn hint sm" disabled={!!busy} onClick={hint}>
                 {busy === 'hint' ? <><span className="spinner" /> Pensando…</> : <><Lightbulb size={15} /> {st.hints ? `Mais uma dica (${st.hints.steps.length + 1}/${st.hints.total})` : 'Dica'}</>}
               </button>
             )}

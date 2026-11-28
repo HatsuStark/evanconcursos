@@ -161,6 +161,7 @@ b, strong { font-weight: 700; }
 .btn.ghost:hover { filter: none; }
 .btn.ghost:hover { background: var(--surface-3); }
 .btn.light { background: var(--text); color: var(--bg); }
+.btn.hint { background: var(--orange); color: #1a1206; border: var(--bw) solid var(--orange); box-shadow: 0 0 0 3px color-mix(in srgb, var(--orange) 22%, transparent); }
 .btn.sm { padding: 8px 12px; border-radius: 11px; font-size: 13px; }
 .icon-btn {
   display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%;
